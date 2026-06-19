@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src=".github/logo.png" alt="Nexora" width="110">
+
 # Nexora
 
 **Multi-tenant AI-agent orchestration platform.**
