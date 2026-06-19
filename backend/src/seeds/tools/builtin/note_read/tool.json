@@ -1,0 +1,9 @@
+{
+  "key": "note_read",
+  "name": "Read chat notes",
+  "description": "Read the shared notes scratchpad for the current chat tree (auto-resolved to root chat).",
+  "category": "memory",
+  "is_builtin": true,
+  "always_allowed": true,
+  "platform_executor": true
+}

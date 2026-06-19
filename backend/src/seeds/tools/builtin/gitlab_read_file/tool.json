@@ -1,0 +1,10 @@
+{
+  "key": "gitlab_read_file",
+  "name": "GitLab Read File",
+  "description": "Read the content of a file from a GitLab repository at a specific ref.",
+  "category": "gitlab",
+  "group": "gitlab_read",
+  "env_vars": ["GITLAB_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

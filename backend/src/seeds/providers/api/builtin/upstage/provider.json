@@ -1,0 +1,18 @@
+{
+  "key": "upstage",
+  "name": "Upstage (Solar)",
+  "description": "Upstage Solar LLMs via the OpenAI-compatible API",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.upstage.ai/v1",
+  "requires_base_url": false,
+  "default_model": "solar-pro2",
+  "models": ["solar-pro2", "solar-pro", "solar-mini"],
+  "website": "https://console.upstage.ai",
+  "setup_steps": [
+    {"text": "Login at console.upstage.ai", "url": "https://console.upstage.ai"},
+    {"text": "Open the API Keys page"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

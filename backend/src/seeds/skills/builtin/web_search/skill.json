@@ -1,0 +1,7 @@
+{
+  "key": "web_search",
+  "name": "Web Search",
+  "description": "Search the web using a configured search engine",
+  "category": "web",
+  "is_builtin": true
+}

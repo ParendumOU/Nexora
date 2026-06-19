@@ -1,0 +1,9 @@
+{
+  "key": "board_read",
+  "name": "Board Read",
+  "description": "Read the kanban board for the current project — returns tasks grouped by status column (pending, queued, running, paused, completed, failed) with priority and blocked_by fields. Pass project_id to target a specific project.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

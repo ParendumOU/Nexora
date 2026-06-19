@@ -1,0 +1,10 @@
+{
+  "key": "platform_update_project",
+  "name": "Update Project",
+  "description": "Patch a project's metadata: pm_agent_id, tools, mcps, env_vars, repo_url, repo_credential_id, branch, description, status.",
+  "category": "platform",
+  "group": "platform_create",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": true
+}

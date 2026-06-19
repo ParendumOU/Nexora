@@ -1,0 +1,18 @@
+{
+  "key": "ai21",
+  "name": "AI21 Labs (Jamba)",
+  "description": "AI21 Jamba long-context models via the OpenAI SDK-compatible Studio API",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.ai21.com/studio/v1",
+  "requires_base_url": false,
+  "default_model": "jamba-large",
+  "models": ["jamba-large", "jamba-mini"],
+  "website": "https://studio.ai21.com",
+  "setup_steps": [
+    {"text": "Login at studio.ai21.com", "url": "https://studio.ai21.com"},
+    {"text": "Open the API Keys page"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

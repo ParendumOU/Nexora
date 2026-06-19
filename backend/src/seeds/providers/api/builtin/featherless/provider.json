@@ -1,0 +1,18 @@
+{
+  "key": "featherless",
+  "name": "Featherless AI",
+  "description": "Featherless — serverless OpenAI-compatible inference for 30,000+ open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.featherless.ai/v1",
+  "requires_base_url": false,
+  "default_model": "Qwen/Qwen2.5-72B-Instruct",
+  "models": ["Qwen/Qwen2.5-72B-Instruct", "deepseek-ai/DeepSeek-V3", "meta-llama/Meta-Llama-3.1-8B-Instruct"],
+  "website": "https://featherless.ai",
+  "setup_steps": [
+    {"text": "Login at featherless.ai", "url": "https://featherless.ai"},
+    {"text": "Open the API keys page"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

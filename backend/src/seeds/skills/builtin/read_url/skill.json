@@ -1,0 +1,8 @@
+{
+  "key": "read_url",
+  "name": "Read URL",
+  "description": "Fetch and parse the content of any public URL",
+  "category": "web",
+  "is_builtin": true,
+  "platform_executor": true
+}

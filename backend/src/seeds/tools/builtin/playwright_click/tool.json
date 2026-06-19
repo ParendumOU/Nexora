@@ -1,0 +1,8 @@
+{
+  "key": "playwright_click",
+  "name": "Browser Click",
+  "description": "Click an element on a page in a headless browser session.",
+  "category": "browser",
+  "env_vars": [],
+  "is_builtin": true
+}

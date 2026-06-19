@@ -1,0 +1,18 @@
+{
+  "key": "xai",
+  "name": "xAI (Grok)",
+  "description": "xAI Grok models — real-time information access and reasoning",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.x.ai/v1",
+  "requires_base_url": false,
+  "default_model": "grok-3-latest",
+  "models": ["grok-3-latest", "grok-3-mini", "grok-2-latest"],
+  "website": "https://x.ai",
+  "setup_steps": [
+    {"text": "Login at console.x.ai", "url": "https://console.x.ai"},
+    {"text": "Click API Keys in the left sidebar"},
+    {"text": "Click Create API Key"},
+    {"text": "Copy the key (starts with xai-) and paste it here"}
+  ]
+}

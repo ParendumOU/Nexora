@@ -1,0 +1,21 @@
+{
+  "key": "fireworks",
+  "name": "Fireworks AI",
+  "description": "Fireworks AI — high-throughput open-source model inference",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.fireworks.ai/inference/v1",
+  "requires_base_url": false,
+  "default_model": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+  "models": [
+    "accounts/fireworks/models/llama-v3p1-70b-instruct",
+    "accounts/fireworks/models/mixtral-8x7b-instruct"
+  ],
+  "website": "https://fireworks.ai",
+  "setup_steps": [
+    {"text": "Login at fireworks.ai", "url": "https://fireworks.ai"},
+    {"text": "Click your avatar → API Keys"},
+    {"text": "Click Create API key"},
+    {"text": "Copy the key (starts with fw_) and paste it here"}
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "key": "memory_manage",
+  "name": "Memory",
+  "description": "Save, read, or delete persistent memories across sessions. Use action='save' to store, action='read' to query, action='delete' to remove by id.",
+  "category": "platform",
+  "always_allowed": true,
+  "args": [
+    {"name": "action", "type": "string", "required": true, "description": "save | read | delete"},
+    {"name": "scope", "type": "string", "required": false, "description": "'agent' (default), 'project', or 'thread' — where to store/query the memory. 'thread' is shared across all agents in this conversation."},
+    {"name": "key", "type": "string", "required": false, "description": "[thread] Short label to namespace the entry, e.g. 'stack', 'auth_flow', 'todos'"},
+    {"name": "data", "type": "object", "required": false, "description": "[thread] Optional structured JSON payload alongside content"},
+    {"name": "content", "type": "string", "required": false, "description": "[save] The fact, decision, or context to remember"},
+    {"name": "type", "type": "string", "required": false, "description": "[save/read] fact | decision | context | instruction (default: fact)"},
+    {"name": "tags", "type": "array", "required": false, "description": "[save/read] Tag strings for categorisation or filtering"},
+    {"name": "priority", "type": "integer", "required": false, "description": "[save] Importance 1 (low) to 5 (high), default 3"},
+    {"name": "search", "type": "string", "required": false, "description": "[read] Substring to search for in memory content"},
+    {"name": "limit", "type": "integer", "required": false, "description": "[read] Max results to return (default 20, max 50)"},
+    {"name": "memory_id", "type": "string", "required": false, "description": "[delete] The id of the memory to remove"}
+  ]
+}

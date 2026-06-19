@@ -1,0 +1,9 @@
+{
+  "key": "kubernetes",
+  "name": "Kubernetes",
+  "description": "Inspect and manage Kubernetes cluster resources: pods, deployments, services, logs, scaling. Requires KUBECONFIG_PATH or in-cluster service account.",
+  "category": "infrastructure",
+  "env_vars": ["KUBECONFIG_PATH"],
+  "is_builtin": true,
+  "platform_executor": true
+}

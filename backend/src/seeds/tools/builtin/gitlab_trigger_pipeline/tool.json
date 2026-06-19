@@ -1,0 +1,10 @@
+{
+  "key": "gitlab_trigger_pipeline",
+  "name": "GitLab Trigger Pipeline",
+  "description": "Trigger a CI/CD pipeline in a GitLab project.",
+  "category": "gitlab",
+  "group": "gitlab_write",
+  "env_vars": ["GITLAB_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

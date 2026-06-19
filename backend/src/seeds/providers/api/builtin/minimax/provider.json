@@ -1,0 +1,18 @@
+{
+  "key": "minimax",
+  "name": "MiniMax",
+  "description": "MiniMax AI — multimodal models with strong Chinese language support",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.minimax.chat/v1",
+  "requires_base_url": false,
+  "default_model": "abab6.5s-chat",
+  "models": ["abab6.5s-chat", "abab5.5s-chat"],
+  "website": "https://www.minimaxi.com",
+  "setup_steps": [
+    {"text": "Login at platform.minimaxi.com", "url": "https://platform.minimaxi.com"},
+    {"text": "Go to Account → API Key"},
+    {"text": "Click Create API Key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

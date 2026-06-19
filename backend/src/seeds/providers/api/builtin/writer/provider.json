@@ -1,0 +1,18 @@
+{
+  "key": "writer",
+  "name": "Writer (Palmyra)",
+  "description": "Writer Palmyra enterprise LLMs via the OpenAI-compatible chat completions API",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.writer.com/v1",
+  "requires_base_url": false,
+  "default_model": "palmyra-x5",
+  "models": ["palmyra-x5", "palmyra-x4"],
+  "website": "https://dev.writer.com",
+  "setup_steps": [
+    {"text": "Login at dev.writer.com (AI Studio)", "url": "https://dev.writer.com"},
+    {"text": "Open API keys"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

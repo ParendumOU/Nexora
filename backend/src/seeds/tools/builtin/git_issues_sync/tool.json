@@ -1,0 +1,9 @@
+{
+  "key": "git_issues_sync",
+  "name": "Sync Git Issues",
+  "description": "Import open issues from GitHub or GitLab into the platform issue tracker.",
+  "category": "issues",
+  "group": "issues",
+  "is_builtin": true,
+  "platform_executor": true
+}

@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      target: dev
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - workspace_data:/workspaces
+    environment:
+      ENVIRONMENT: development
+      LOG_LEVEL: debug
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      target: deps
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+    ports:
+      - "127.0.0.1:3000:3000"
+    command: npm run dev
+
+  nginx:
+    ports:
+      - "127.0.0.1:8080:80"

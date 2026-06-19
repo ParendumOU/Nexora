@@ -1,0 +1,8 @@
+{
+  "key": "code_node",
+  "name": "Run Node.js",
+  "description": "Execute a Node.js code snippet in a sandboxed environment and return stdout, stderr, and exit code.",
+  "category": "code",
+  "env_vars": [],
+  "is_builtin": true
+}

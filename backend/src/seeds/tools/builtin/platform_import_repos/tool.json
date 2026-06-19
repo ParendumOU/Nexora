@@ -1,0 +1,10 @@
+{
+  "key": "platform_import_repos",
+  "name": "Import Repos as Projects",
+  "description": "Bulk-import GitHub or GitLab repositories as Nexora projects in one shot. Fetches live repo list from the credential, matches against requested repos (by full_name or name), and creates a project for each match. Skips duplicates by default.",
+  "category": "platform",
+  "group": "platform_create",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": true
+}

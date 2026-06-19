@@ -1,0 +1,15 @@
+{
+  "key": "remember_user",
+  "name": "Remember User",
+  "description": "Patch keyed facts about the current user (role, timezone, preferences, ongoing projects). Updates one fact at a time WITHOUT erasing the others. Use op='upsert' for a new/changed fact, 'append' to add to an existing one, 'remove' to forget a fact.",
+  "category": "platform",
+  "always_allowed": true,
+  "args": [
+    {"name": "op", "type": "string", "required": false, "description": "upsert (default) | append | remove"},
+    {"name": "key", "type": "string", "required": false, "description": "Fact name, e.g. 'role', 'timezone', 'current_project'. Reserved key 'freeform' holds general free-text notes."},
+    {"name": "value", "type": "string", "required": false, "description": "Fact value. Required for upsert/append; ignored for remove."},
+    {"name": "facts", "type": "array", "required": false, "description": "Batch: list of {key, value} objects to upsert/append/remove together."},
+    {"name": "notes", "type": "string", "required": false, "description": "Legacy free-form notes; stored under the 'freeform' key (does not wipe structured facts)."},
+    {"name": "name", "type": "string", "required": false, "description": "Update the user's display name"}
+  ]
+}

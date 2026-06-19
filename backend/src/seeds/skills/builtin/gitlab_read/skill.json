@@ -1,0 +1,7 @@
+{
+  "key": "gitlab_read",
+  "name": "GitLab Read",
+  "description": "Read issues, MRs, and code from GitLab repositories",
+  "category": "git",
+  "is_builtin": true
+}

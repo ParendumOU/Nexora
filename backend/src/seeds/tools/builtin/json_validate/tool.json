@@ -1,0 +1,8 @@
+{
+  "key": "json_validate",
+  "name": "JSON Validate",
+  "description": "Validate a JSON string and optionally check it against a JSON Schema.",
+  "category": "data",
+  "env_vars": [],
+  "is_builtin": true
+}

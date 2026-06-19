@@ -1,0 +1,10 @@
+{
+  "key": "platform_create_project",
+  "name": "Create Project",
+  "description": "Create a new project in the platform for the current org. Wire up repo + credential + PM agent + tools/MCP. Use for bulk repo imports.",
+  "category": "platform",
+  "group": "platform_create",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": true
+}

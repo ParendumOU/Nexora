@@ -1,0 +1,10 @@
+{
+  "key": "gitlab_api",
+  "name": "GitLab API",
+  "description": "Unified GitLab API tool. ALL read/write operations exposed through a single `action` argument. Credentials are resolved automatically — never use http_request against api.gitlab.com from agents.",
+  "category": "gitlab",
+  "group": "gitlab_read",
+  "env_vars": ["GITLAB_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

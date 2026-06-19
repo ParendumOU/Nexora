@@ -1,0 +1,7 @@
+{
+  "key": "github_write",
+  "name": "GitHub Write",
+  "description": "Create issues, PRs, and push code to GitHub",
+  "category": "git",
+  "is_builtin": true
+}

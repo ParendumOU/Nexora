@@ -1,0 +1,18 @@
+{
+  "key": "groq",
+  "name": "Groq",
+  "description": "Groq LPU inference — ultra-fast open-source model hosting",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.groq.com/openai/v1",
+  "requires_base_url": false,
+  "default_model": "llama-3.3-70b-versatile",
+  "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+  "website": "https://console.groq.com",
+  "setup_steps": [
+    {"text": "Login at console.groq.com", "url": "https://console.groq.com"},
+    {"text": "Click API Keys in the left sidebar"},
+    {"text": "Click Create API Key"},
+    {"text": "Copy the key (starts with gsk_) and paste it here"}
+  ]
+}

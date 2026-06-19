@@ -1,0 +1,23 @@
+{
+  "key": "chat_notes",
+  "name": "Chat Notes",
+  "description": "Read or write shared notes for this conversation. Notes are stored on the root chat and visible to all sub-agents in the same chat tree.",
+  "category": "memory",
+  "is_builtin": true,
+  "always_allowed": true,
+  "args": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["read", "write", "append"],
+        "description": "read: return current notes. write: replace notes entirely. append: add text to end of notes."
+      },
+      "content": {
+        "type": "string",
+        "description": "Text to write or append (required for write/append actions)."
+      }
+    },
+    "required": ["action"]
+  }
+}

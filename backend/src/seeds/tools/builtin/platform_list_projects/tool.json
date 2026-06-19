@@ -1,0 +1,10 @@
+{
+  "key": "platform_list_projects",
+  "name": "List Projects",
+  "description": "List projects in the current org. Use before bulk import to detect existing entries.",
+  "category": "platform",
+  "group": "platform_create",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": true
+}

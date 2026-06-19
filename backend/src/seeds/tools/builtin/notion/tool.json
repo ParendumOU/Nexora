@@ -1,0 +1,9 @@
+{
+  "key": "notion",
+  "name": "Notion",
+  "description": "Read and write Notion pages and databases — search, read page content, create/update pages, query databases, and append blocks. Requires a Notion integration token.",
+  "category": "integration",
+  "env_vars": ["NOTION_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

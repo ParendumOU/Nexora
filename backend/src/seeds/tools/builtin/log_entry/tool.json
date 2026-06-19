@@ -1,0 +1,9 @@
+{
+  "key": "log_entry",
+  "name": "Log Entry",
+  "description": "Emit a structured log entry visible in the agent activity panel.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

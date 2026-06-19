@@ -1,0 +1,17 @@
+{
+  "key": "github-models",
+  "name": "GitHub Models",
+  "description": "GitHub Models — OpenAI-compatible inference (auth with a GitHub PAT); free tier available",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://models.github.ai/inference",
+  "requires_base_url": false,
+  "default_model": "openai/gpt-4o",
+  "models": ["openai/gpt-4o", "openai/gpt-4o-mini", "deepseek/DeepSeek-R1"],
+  "website": "https://github.com/marketplace/models",
+  "setup_steps": [
+    {"text": "Open GitHub → Settings → Developer settings → Personal access tokens", "url": "https://github.com/settings/tokens"},
+    {"text": "Create a fine-grained token with the Models permission"},
+    {"text": "Copy the token (ghp_/github_pat_) and paste it here"}
+  ]
+}

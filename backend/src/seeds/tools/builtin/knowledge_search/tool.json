@@ -1,0 +1,10 @@
+﻿{
+  "key": "knowledge_search",
+  "name": "Knowledge Search",
+  "description": "Semantic search across org knowledge bases. Returns relevant document chunks matching the query.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true,
+  "platform_executor": true
+}

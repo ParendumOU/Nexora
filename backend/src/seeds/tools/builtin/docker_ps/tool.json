@@ -1,0 +1,8 @@
+{
+  "key": "docker_ps",
+  "name": "Docker PS",
+  "description": "List running Docker containers and their status.",
+  "category": "docker",
+  "env_vars": [],
+  "is_builtin": true
+}

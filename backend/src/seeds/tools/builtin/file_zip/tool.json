@@ -1,0 +1,8 @@
+{
+  "key": "file_zip",
+  "name": "File Zip",
+  "description": "Create a ZIP archive from a directory or list of files.",
+  "category": "file",
+  "env_vars": [],
+  "is_builtin": true
+}

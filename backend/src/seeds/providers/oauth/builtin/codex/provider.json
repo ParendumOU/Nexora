@@ -1,0 +1,18 @@
+{
+  "key": "codex",
+  "name": "Codex (OpenAI)",
+  "description": "OpenAI Codex CLI agent via device OAuth — uses your ChatGPT Plus subscription",
+  "auth_type": "oauth",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.openai.com/v1",
+  "requires_base_url": false,
+  "default_model": "gpt-5.5",
+  "models": ["codex-1", "codex-1-mini", "gpt-4.5", "gpt-4o"],
+  "cli_command": "codex",
+  "cli_login_args": ["login", "--device-auth"],
+  "credential_paths": [
+    ".codex/auth.json"
+  ],
+  "credential_format": "token_pair",
+  "website": "https://openai.com"
+}

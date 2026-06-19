@@ -1,0 +1,18 @@
+{
+  "key": "novita",
+  "name": "Novita AI",
+  "description": "Novita AI — OpenAI-compatible inference for 200+ open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.novita.ai/v3/openai",
+  "requires_base_url": false,
+  "default_model": "deepseek/deepseek-v3-0324",
+  "models": ["deepseek/deepseek-v3-0324", "qwen/qwen3-235b-a22b-instruct-2507", "meta-llama/llama-3.3-70b-instruct"],
+  "website": "https://novita.ai",
+  "setup_steps": [
+    {"text": "Login at novita.ai", "url": "https://novita.ai"},
+    {"text": "Open Key Management in the dashboard"},
+    {"text": "Create a new API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

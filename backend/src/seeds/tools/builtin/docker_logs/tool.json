@@ -1,0 +1,8 @@
+{
+  "key": "docker_logs",
+  "name": "Docker Logs",
+  "description": "Fetch recent logs from a Docker container.",
+  "category": "docker",
+  "env_vars": [],
+  "is_builtin": true
+}

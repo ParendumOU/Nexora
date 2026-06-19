@@ -1,0 +1,9 @@
+{
+  "key": "plan_create",
+  "name": "Plan Create",
+  "description": "Create a structured execution plan with ordered steps. Use at the start of any multi-step objective. The plan persists across orchestration cycles and tracks progress.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

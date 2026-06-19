@@ -1,0 +1,7 @@
+{
+  "key": "github_read",
+  "name": "GitHub Read",
+  "description": "Read issues, PRs, and code from GitHub repositories",
+  "category": "git",
+  "is_builtin": true
+}

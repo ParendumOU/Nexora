@@ -1,0 +1,7 @@
+{
+  "key": "bash",
+  "name": "Bash Shell",
+  "description": "Execute shell commands in a sandboxed environment",
+  "category": "code",
+  "is_builtin": true
+}

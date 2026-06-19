@@ -1,0 +1,25 @@
+{
+  "key": "vertex_ai",
+  "name": "Google Vertex AI",
+  "description": "Google Cloud Vertex AI — Gemini and other foundation models via your GCP project",
+  "auth_type": "apikey",
+  "stream_type": "vertex_ai",
+  "base_url": null,
+  "requires_base_url": false,
+  "default_model": "gemini-1.5-pro",
+  "models": [
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.0-flash-lite-001",
+    "gemini-1.0-pro"
+  ],
+  "website": "https://cloud.google.com/vertex-ai",
+  "setup_steps": [
+    {"text": "Enable Vertex AI API in your GCP project", "url": "https://console.cloud.google.com/apis/library/aiplatform.googleapis.com"},
+    {"text": "Create a service account with Vertex AI User role"},
+    {"text": "Download the service account JSON key"},
+    {"text": "Paste the JSON content into service_account_json field"},
+    {"text": "Add project_id and optionally location (default: us-central1)"}
+  ]
+}

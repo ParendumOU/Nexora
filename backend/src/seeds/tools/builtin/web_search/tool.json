@@ -1,0 +1,8 @@
+{
+  "key": "web_search",
+  "name": "Web Search",
+  "description": "Search the web and return a list of relevant results with titles, URLs, and snippets.",
+  "category": "web",
+  "env_vars": [],
+  "is_builtin": true
+}

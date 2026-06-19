@@ -1,0 +1,8 @@
+{
+  "key": "code_format",
+  "name": "Format Code",
+  "description": "Format a code snippet using the appropriate formatter for the given language.",
+  "category": "code",
+  "env_vars": [],
+  "is_builtin": true
+}

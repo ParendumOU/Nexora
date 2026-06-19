@@ -1,0 +1,10 @@
+{
+  "key": "platform_create_tool",
+  "name": "Create Tool",
+  "description": "Create a new tool definition in the platform for the current organisation.",
+  "category": "platform",
+  "group": "platform_create",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": true
+}

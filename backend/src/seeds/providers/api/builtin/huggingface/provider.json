@@ -1,0 +1,21 @@
+{
+  "key": "huggingface",
+  "name": "Hugging Face",
+  "description": "Hugging Face Inference API — serverless access to thousands of open models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api-inference.huggingface.co/v1",
+  "requires_base_url": false,
+  "default_model": "meta-llama/Llama-3.1-70B-Instruct",
+  "models": [
+    "meta-llama/Llama-3.1-70B-Instruct",
+    "mistralai/Mixtral-8x7B-Instruct-v0.1"
+  ],
+  "website": "https://huggingface.co",
+  "setup_steps": [
+    {"text": "Login at huggingface.co", "url": "https://huggingface.co"},
+    {"text": "Click your avatar → Settings"},
+    {"text": "Click Access Tokens in the left menu"},
+    {"text": "Click New token → copy it (starts with hf_)"}
+  ]
+}

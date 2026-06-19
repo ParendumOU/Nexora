@@ -1,0 +1,12 @@
+{
+  "user_id": "00000000-0000-0000-0000-000000000001",
+  "org_id": "00000000-0000-0000-0000-000000000010",
+  "agent_id": "00000000-0000-0000-0000-000000000100",
+  "skill_id": "00000000-0000-0000-0000-000000001000",
+  "user_email": "system@nexora.internal",
+  "user_full_name": "Nexora System",
+  "org_name": "Nexora Platform",
+  "org_slug": "nexora-platform",
+  "org_icon": "⚙️",
+  "org_color": "#6366f1"
+}

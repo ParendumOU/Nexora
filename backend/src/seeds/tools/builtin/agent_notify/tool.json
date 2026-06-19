@@ -1,0 +1,9 @@
+{
+  "key": "agent_notify",
+  "name": "Agent Notify",
+  "description": "Emit a typed event notification to another agent or to all agents subscribed to that event type. Lightweight wrapper over AgentBus for structured cross-agent events (task_completed, issue_created, pr_merged, pipeline_failed, agent_blocked, custom).",
+  "category": "agent_bus",
+  "is_builtin": true,
+  "always_allowed": true,
+  "platform_executor": false
+}

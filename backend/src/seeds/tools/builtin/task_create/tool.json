@@ -1,0 +1,9 @@
+{
+  "key": "task_create",
+  "name": "Task Create",
+  "description": "Create a sub-task and dispatch it to an agent or sub-agent. Fields: title*, description, assigned_agent_id, priority (low|medium|high|critical, default medium), blocked_by (list of task IDs), checklist, position, parent_id.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

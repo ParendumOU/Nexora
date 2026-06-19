@@ -1,0 +1,18 @@
+{
+  "key": "cerebras",
+  "name": "Cerebras",
+  "description": "Cerebras AI — wafer-scale chip inference for ultra-fast LLM responses",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.cerebras.ai/v1",
+  "requires_base_url": false,
+  "default_model": "llama3.1-70b",
+  "models": ["llama3.1-70b", "llama3.1-8b"],
+  "website": "https://cloud.cerebras.ai",
+  "setup_steps": [
+    {"text": "Login at cloud.cerebras.ai", "url": "https://cloud.cerebras.ai"},
+    {"text": "Click API Keys in the left sidebar"},
+    {"text": "Click Create new API key"},
+    {"text": "Copy the key (starts with csk-) and paste it here"}
+  ]
+}

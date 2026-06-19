@@ -1,0 +1,10 @@
+{
+  "key": "gitlab_create_mr",
+  "name": "GitLab Create Merge Request",
+  "description": "Create a new merge request in a GitLab project.",
+  "category": "gitlab",
+  "group": "gitlab_write",
+  "env_vars": ["GITLAB_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

@@ -1,0 +1,18 @@
+{
+  "key": "gemini-api",
+  "name": "Google Gemini",
+  "description": "Google AI Studio API key — Gemini 2.0 and 1.5 models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+  "requires_base_url": false,
+  "default_model": "gemini-2.0-flash",
+  "models": ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-pro"],
+  "website": "https://aistudio.google.com/apikey",
+  "setup_steps": [
+    {"text": "Go to aistudio.google.com/apikey", "url": "https://aistudio.google.com/apikey"},
+    {"text": "Sign in with your Google account"},
+    {"text": "Click Create API key"},
+    {"text": "Select or create a project, then copy the key"}
+  ]
+}

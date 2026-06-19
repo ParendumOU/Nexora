@@ -1,0 +1,7 @@
+{
+  "key": "git",
+  "name": "Git",
+  "description": "Run git commands: clone, commit, push, diff, log",
+  "category": "git",
+  "is_builtin": true
+}

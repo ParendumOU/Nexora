@@ -1,0 +1,7 @@
+{
+  "key": "task_decompose",
+  "name": "Task Decompose",
+  "description": "Break a complex goal into ordered sub-tasks",
+  "category": "ai",
+  "is_builtin": true
+}

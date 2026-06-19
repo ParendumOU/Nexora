@@ -1,0 +1,18 @@
+{
+  "key": "azure",
+  "name": "Azure OpenAI",
+  "description": "Microsoft Azure OpenAI Service — enterprise-grade OpenAI models with compliance guarantees",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": null,
+  "requires_base_url": true,
+  "default_model": "gpt-4o",
+  "models": ["gpt-4o", "gpt-4-turbo", "gpt-35-turbo"],
+  "website": "https://azure.microsoft.com/en-us/products/ai-services/openai-service",
+  "setup_steps": [
+    {"text": "Login at portal.azure.com", "url": "https://portal.azure.com"},
+    {"text": "Search Azure OpenAI and create a new resource"},
+    {"text": "Open the resource → Keys and Endpoint"},
+    {"text": "Copy Key 1 and the Endpoint URL, paste both here"}
+  ]
+}

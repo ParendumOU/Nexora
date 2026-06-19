@@ -1,0 +1,9 @@
+{
+  "key": "plan_step_complete",
+  "name": "Plan Step Complete",
+  "description": "Mark a plan step as done and add a completion note. Call after sub-agents finish work that fulfills a step. Check remaining steps and continue with task_create for the next one.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

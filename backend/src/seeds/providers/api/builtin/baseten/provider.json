@@ -1,0 +1,18 @@
+{
+  "key": "baseten",
+  "name": "Baseten",
+  "description": "Baseten Model APIs — OpenAI-compatible inference on managed infrastructure",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://inference.baseten.co/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-ai/DeepSeek-V3-0324",
+  "models": ["deepseek-ai/DeepSeek-V3-0324", "deepseek-ai/DeepSeek-R1", "meta-llama/Llama-3.3-70B-Instruct"],
+  "website": "https://www.baseten.co",
+  "setup_steps": [
+    {"text": "Login at app.baseten.co", "url": "https://app.baseten.co"},
+    {"text": "Open API keys"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "key": "read_file",
+  "name": "Read File",
+  "description": "Read the contents of any accessible file",
+  "category": "file",
+  "is_builtin": true
+}

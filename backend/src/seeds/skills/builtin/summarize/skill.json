@@ -1,0 +1,7 @@
+{
+  "key": "summarize",
+  "name": "Summarize",
+  "description": "Summarize long documents or conversations",
+  "category": "ai",
+  "is_builtin": true
+}

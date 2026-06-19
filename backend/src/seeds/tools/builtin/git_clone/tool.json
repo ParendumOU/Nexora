@@ -1,0 +1,8 @@
+{
+  "key": "git_clone",
+  "name": "Git Clone",
+  "description": "Clone a Git repository to a local directory.",
+  "category": "git",
+  "env_vars": [],
+  "is_builtin": true
+}

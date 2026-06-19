@@ -1,0 +1,8 @@
+{
+  "key": "git_commit",
+  "name": "Git Commit",
+  "description": "Stage all changes and create a commit in a local Git repository.",
+  "category": "git",
+  "env_vars": [],
+  "is_builtin": true
+}

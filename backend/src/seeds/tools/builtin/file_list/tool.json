@@ -1,0 +1,8 @@
+{
+  "key": "file_list",
+  "name": "File List",
+  "description": "List files and directories at a given path on the agent's working filesystem.",
+  "category": "file",
+  "env_vars": [],
+  "is_builtin": true
+}

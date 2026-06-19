@@ -1,0 +1,18 @@
+{
+  "key": "hyperbolic",
+  "name": "Hyperbolic",
+  "description": "Hyperbolic open-access AI cloud — affordable open-source model inference",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.hyperbolic.xyz/v1",
+  "requires_base_url": false,
+  "default_model": "meta-llama/Llama-3.3-70B-Instruct",
+  "models": ["meta-llama/Llama-3.3-70B-Instruct", "deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"],
+  "website": "https://app.hyperbolic.xyz",
+  "setup_steps": [
+    {"text": "Login at app.hyperbolic.xyz", "url": "https://app.hyperbolic.xyz"},
+    {"text": "Open Settings → API Keys"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "key": "openai",
+  "name": "OpenAI",
+  "description": "Official OpenAI API — GPT-4 and o-series models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.openai.com/v1",
+  "requires_base_url": false,
+  "default_model": "gpt-5.5",
+  "models": ["gpt-4.5", "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"],
+  "website": "https://platform.openai.com",
+  "setup_steps": [
+    {"text": "Login at platform.openai.com", "url": "https://platform.openai.com"},
+    {"text": "Click your profile avatar → API keys"},
+    {"text": "Click Create new secret key"},
+    {"text": "Copy the key (shown once) and paste it here"}
+  ]
+}

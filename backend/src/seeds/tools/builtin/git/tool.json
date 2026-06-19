@@ -1,0 +1,10 @@
+{
+  "key": "git",
+  "name": "Git",
+  "description": "Read and write files in the project repository. Credentials are resolved automatically from the project settings — never pass tokens or credential IDs.",
+  "category": "git",
+  "group": "git",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": false
+}

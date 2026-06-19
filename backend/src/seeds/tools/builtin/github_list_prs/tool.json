@@ -1,0 +1,10 @@
+{
+  "key": "github_list_prs",
+  "name": "GitHub List Pull Requests",
+  "description": "List pull requests for a GitHub repository with optional filtering by state and base branch.",
+  "category": "github",
+  "group": "github_read",
+  "env_vars": ["GITHUB_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

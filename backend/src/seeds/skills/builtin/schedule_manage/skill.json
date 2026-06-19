@@ -1,0 +1,9 @@
+{
+  "key": "schedule_manage",
+  "name": "Schedule Manager",
+  "description": "Create, list, activate, and trigger recurring background schedules for autonomous agent tasks",
+  "category": "automation",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": true
+}

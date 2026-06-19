@@ -1,0 +1,18 @@
+{
+  "key": "zhipu",
+  "name": "Z.ai (GLM / Zhipu)",
+  "description": "Zhipu AI GLM models (GLM-4.6 etc.) via the OpenAI-compatible Z.ai endpoint",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.z.ai/api/paas/v4",
+  "requires_base_url": false,
+  "default_model": "glm-4.6",
+  "models": ["glm-4.6", "glm-4.5", "glm-4.5-air"],
+  "website": "https://z.ai",
+  "setup_steps": [
+    {"text": "Login at z.ai (or open.bigmodel.cn for China)", "url": "https://z.ai"},
+    {"text": "Open the API Keys page"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

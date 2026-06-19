@@ -1,0 +1,7 @@
+{
+  "key": "write_file",
+  "name": "Write File",
+  "description": "Create or overwrite files on the filesystem",
+  "category": "file",
+  "is_builtin": true
+}

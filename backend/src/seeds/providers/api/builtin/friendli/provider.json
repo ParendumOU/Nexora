@@ -1,0 +1,18 @@
+{
+  "key": "friendli",
+  "name": "FriendliAI",
+  "description": "Friendli Serverless Endpoints — fast OpenAI-compatible inference for open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.friendli.ai/serverless/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-ai/DeepSeek-R1",
+  "models": ["deepseek-ai/DeepSeek-R1", "meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen3-235B-A22B"],
+  "website": "https://friendli.ai",
+  "setup_steps": [
+    {"text": "Login at friendli.ai", "url": "https://friendli.ai"},
+    {"text": "Open Personal settings → Tokens"},
+    {"text": "Create a Friendli token"},
+    {"text": "Copy the token and paste it here"}
+  ]
+}

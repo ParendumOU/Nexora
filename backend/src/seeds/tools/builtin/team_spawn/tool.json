@@ -1,0 +1,42 @@
+{
+  "key": "team_spawn",
+  "name": "Spawn Team",
+  "description": "Create a full team of agents in one call by combining persona templates. Specify role counts like '3 developers, 1 QA, 1 DevOps' and all agents are created automatically with the correct skills and configuration.",
+  "category": "platform",
+  "group": "platform_create",
+  "is_builtin": true,
+  "platform_executor": true,
+  "args_schema": {
+    "members": {
+      "type": "array",
+      "description": "List of role specs. Each entry defines a persona_key and how many agents to create.",
+      "items": {
+        "type": "object",
+        "required": ["persona_key"],
+        "properties": {
+          "persona_key": {
+            "type": "string",
+            "description": "Persona template key, e.g. 'developer', 'qa_engineer', 'devops', 'researcher', 'designer'."
+          },
+          "count": {
+            "type": "integer",
+            "default": 1,
+            "description": "How many agents of this role to create."
+          },
+          "name_prefix": {
+            "type": "string",
+            "description": "Optional prefix added before the role name, e.g. 'Backend' → 'Backend Developer 1'."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Optional field overrides (soul, skills, tools, system_prompt, etc.)."
+          }
+        }
+      }
+    },
+    "team_name": {
+      "type": "string",
+      "description": "Optional label for this team (returned in the response for reference)."
+    }
+  }
+}

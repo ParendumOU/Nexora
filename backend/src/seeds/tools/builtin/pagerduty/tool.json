@@ -1,0 +1,9 @@
+﻿{
+  "key": "pagerduty",
+  "name": "PagerDuty",
+  "description": "Manage PagerDuty incidents and on-call schedules — list/create/resolve/acknowledge incidents, add notes, list schedules, get current on-call user.",
+  "category": "integration",
+  "env_vars": ["PAGERDUTY_API_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

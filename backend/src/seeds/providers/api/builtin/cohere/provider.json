@@ -1,0 +1,18 @@
+{
+  "key": "cohere",
+  "name": "Cohere",
+  "description": "Cohere AI — enterprise NLP models for search, summarization, and generation",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.cohere.com/compatibility/v1",
+  "requires_base_url": false,
+  "default_model": "command-r-plus",
+  "models": ["command-r-plus", "command-r", "command-a-03-2025"],
+  "website": "https://cohere.com",
+  "setup_steps": [
+    {"text": "Login at dashboard.cohere.com", "url": "https://dashboard.cohere.com"},
+    {"text": "Click API Keys in the left sidebar"},
+    {"text": "Click New Trial Key or New Production Key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

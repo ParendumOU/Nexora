@@ -1,0 +1,12 @@
+{
+  "key": "custom",
+  "name": "Custom (OpenAI-compatible)",
+  "description": "Any OpenAI-compatible API — provide your own base URL and API key",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": null,
+  "requires_base_url": true,
+  "default_model": null,
+  "models": [],
+  "website": null
+}

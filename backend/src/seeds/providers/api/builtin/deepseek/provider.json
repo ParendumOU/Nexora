@@ -1,0 +1,18 @@
+{
+  "key": "deepseek",
+  "name": "DeepSeek",
+  "description": "DeepSeek AI models — high-performance reasoning and chat models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.deepseek.com/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-chat",
+  "models": ["deepseek-chat", "deepseek-reasoner"],
+  "website": "https://platform.deepseek.com",
+  "setup_steps": [
+    {"text": "Login at platform.deepseek.com", "url": "https://platform.deepseek.com"},
+    {"text": "Click API Keys in the left sidebar"},
+    {"text": "Click Create API Key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

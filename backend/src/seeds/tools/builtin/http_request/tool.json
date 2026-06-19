@@ -1,0 +1,9 @@
+{
+  "key": "http_request",
+  "name": "HTTP Request",
+  "description": "Make HTTP requests to external APIs and web services. Supports GET, POST, PUT, PATCH, DELETE with custom headers, JSON body, and Basic/Bearer auth. URLs validated against HTTP_TOOL_ALLOWED_ORIGINS allowlist (SSRF guard). Also handles platform git-proxy paths directly.",
+  "category": "web",
+  "env_vars": ["HTTP_TOOL_ALLOWED_ORIGINS"],
+  "is_builtin": true,
+  "platform_executor": true
+}

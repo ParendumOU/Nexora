@@ -1,0 +1,7 @@
+{
+  "key": "gitlab_write",
+  "name": "GitLab Write",
+  "description": "Create issues, MRs, and push code to GitLab",
+  "category": "git",
+  "is_builtin": true
+}

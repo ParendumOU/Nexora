@@ -1,0 +1,27 @@
+{
+  "key": "bedrock",
+  "name": "AWS Bedrock",
+  "description": "AWS Bedrock — managed foundation models via your AWS account. Supports Claude, Llama 3, Mistral, and Amazon Titan models.",
+  "auth_type": "apikey",
+  "stream_type": "bedrock",
+  "base_url": null,
+  "requires_base_url": false,
+  "default_model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+  "models": [
+    "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "anthropic.claude-3-5-haiku-20241022-v1:0",
+    "anthropic.claude-3-opus-20240229-v1:0",
+    "meta.llama3-70b-instruct-v1:0",
+    "meta.llama3-8b-instruct-v1:0",
+    "mistral.mistral-large-2402-v1:0",
+    "amazon.titan-text-premier-v1:0"
+  ],
+  "website": "https://aws.amazon.com/bedrock/",
+  "setup_steps": [
+    {"text": "Login to AWS Console and open Bedrock", "url": "https://console.aws.amazon.com/bedrock/"},
+    {"text": "Go to Model access and enable the models you need"},
+    {"text": "Create an IAM user with AmazonBedrockFullAccess policy"},
+    {"text": "Generate an Access Key and paste both key and secret here"},
+    {"text": "Set region (e.g. us-east-1) in the credentials field as 'region'"}
+  ]
+}

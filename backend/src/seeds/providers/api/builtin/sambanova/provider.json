@@ -1,0 +1,18 @@
+{
+  "key": "sambanova",
+  "name": "SambaNova Cloud",
+  "description": "SambaNova RDU inference — very fast hosting of large open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.sambanova.ai/v1",
+  "requires_base_url": false,
+  "default_model": "Meta-Llama-3.3-70B-Instruct",
+  "models": ["Meta-Llama-3.3-70B-Instruct", "DeepSeek-V3.1", "Meta-Llama-3.1-8B-Instruct"],
+  "website": "https://cloud.sambanova.ai",
+  "setup_steps": [
+    {"text": "Login at cloud.sambanova.ai", "url": "https://cloud.sambanova.ai"},
+    {"text": "Open the API Keys section"},
+    {"text": "Generate a new API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

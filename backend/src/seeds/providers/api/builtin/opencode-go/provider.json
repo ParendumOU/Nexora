@@ -1,0 +1,17 @@
+{
+  "key": "opencode-go",
+  "name": "OpenCode Go",
+  "description": "OpenCode Go gateway — budget-tier access to fast models via subscription",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://opencode.ai/zen/go/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-v4-flash",
+  "models": ["claude-haiku-4-5-20251001", "gpt-4o-mini"],
+  "website": "https://opencode.ai",
+  "setup_steps": [
+    {"text": "Login at opencode.ai", "url": "https://opencode.ai"},
+    {"text": "Go to your account dashboard"},
+    {"text": "Copy your API key (starts with sk-oc-) — same key works for Zen and Go"}
+  ]
+}

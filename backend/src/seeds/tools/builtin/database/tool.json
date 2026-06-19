@@ -1,0 +1,9 @@
+{
+  "key": "database",
+  "name": "Database Query",
+  "description": "Run read-only SQL queries against configured databases. Supports SELECT, DESCRIBE, SHOW, EXPLAIN. Supports PostgreSQL, MySQL, and SQLite.",
+  "category": "data",
+  "env_vars": ["DB_TOOL_DSN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

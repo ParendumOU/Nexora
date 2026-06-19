@@ -1,0 +1,9 @@
+{
+  "key": "discord",
+  "name": "Discord",
+  "description": "Send messages, read channel history, create threads, and list channels in Discord servers. Requires DISCORD_BOT_TOKEN.",
+  "category": "integration",
+  "env_vars": ["DISCORD_BOT_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

@@ -1,0 +1,79 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Claude config
+.claude/
+.claude.json
+
+# External dependencies
+external-*
+
+# Log files
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Caches
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+*.cache
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Telegram file uploads
+backend/uploads/
+
+__pycache__
+# Custom seeds — deployment-specific, kept local, never pushed (builtins only sync)
+backend/src/seeds/skills/custom/*
+!backend/src/seeds/skills/custom/.gitkeep
+backend/src/seeds/tools/custom/*
+!backend/src/seeds/tools/custom/.gitkeep
+backend/src/seeds/agents/custom/*
+!backend/src/seeds/agents/custom/.gitkeep
+backend/src/seeds/personas/custom/*
+!backend/src/seeds/personas/custom/.gitkeep

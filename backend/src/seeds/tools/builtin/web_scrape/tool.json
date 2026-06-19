@@ -1,0 +1,8 @@
+{
+  "key": "web_scrape",
+  "name": "Web Scrape",
+  "description": "Fetch and extract text content from a public web page. Returns clean readable text stripped of HTML.",
+  "category": "web",
+  "env_vars": [],
+  "is_builtin": true
+}

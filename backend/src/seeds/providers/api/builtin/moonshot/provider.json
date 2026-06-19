@@ -1,0 +1,18 @@
+{
+  "key": "moonshot",
+  "name": "Moonshot AI (Kimi)",
+  "description": "Moonshot AI Kimi models — long-context Chinese and English language models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.moonshot.cn/v1",
+  "requires_base_url": false,
+  "default_model": "moonshot-v1-8k",
+  "models": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+  "website": "https://platform.moonshot.cn",
+  "setup_steps": [
+    {"text": "Login at platform.moonshot.cn", "url": "https://platform.moonshot.cn"},
+    {"text": "Click API Keys in the left sidebar"},
+    {"text": "Click Create API Key"},
+    {"text": "Copy the key (starts with sk-) and paste it here"}
+  ]
+}

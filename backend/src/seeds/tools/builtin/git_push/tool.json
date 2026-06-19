@@ -1,0 +1,8 @@
+{
+  "key": "git_push",
+  "name": "Git Push",
+  "description": "Push commits from a local Git repository to a remote.",
+  "category": "git",
+  "env_vars": [],
+  "is_builtin": true
+}

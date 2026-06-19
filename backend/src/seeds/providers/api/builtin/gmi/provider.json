@@ -1,0 +1,18 @@
+{
+  "key": "gmi",
+  "name": "GMI Cloud",
+  "description": "GMI Cloud — OpenAI-compatible inference API for many open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.gmi-serving.com/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-ai/DeepSeek-V3.1",
+  "models": ["deepseek-ai/DeepSeek-V3.1", "Qwen/Qwen3-235B-A22B", "meta-llama/Llama-3.3-70B-Instruct"],
+  "website": "https://www.gmicloud.ai",
+  "setup_steps": [
+    {"text": "Login at console.gmicloud.ai", "url": "https://console.gmicloud.ai"},
+    {"text": "Open the API keys page"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

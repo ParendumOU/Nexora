@@ -1,0 +1,7 @@
+{
+  "key": "agent_spawn",
+  "name": "Agent Spawn",
+  "description": "Spawn sub-agents to handle parallel workstreams",
+  "category": "ai",
+  "is_builtin": true
+}

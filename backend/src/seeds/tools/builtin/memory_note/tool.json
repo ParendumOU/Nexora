@@ -1,0 +1,18 @@
+{
+  "key": "memory_note",
+  "name": "Memory Note",
+  "description": "Write durable, well-structured markdown memory notes about your work, organised in virtual folders. Cross-reference other notes with [[Wikilinks]] and topics with #hashtags — these build a navigable knowledge graph. Use action='write' to create/overwrite a note at a path, 'append' to add to one, 'read' to fetch a note, 'list' to browse.",
+  "category": "platform",
+  "always_allowed": true,
+  "args": [
+    {"name": "action", "type": "string", "required": true, "description": "write | append | read | list"},
+    {"name": "path", "type": "string", "required": false, "description": "Virtual folder path incl. filename, e.g. 'research/auth-spike.md'. Defaults to a slug of the title."},
+    {"name": "title", "type": "string", "required": false, "description": "Note title (required for write)."},
+    {"name": "body", "type": "string", "required": false, "description": "Markdown body. Use [[Other Note]] to link notes and #tags for topics. Required for write/append."},
+    {"name": "tags", "type": "array", "required": false, "description": "Extra topic tags (merged with #hashtags found in the body)."},
+    {"name": "folder", "type": "string", "required": false, "description": "list: restrict to a folder prefix."},
+    {"name": "tag", "type": "string", "required": false, "description": "list: restrict to notes carrying this tag."},
+    {"name": "search", "type": "string", "required": false, "description": "list: case-insensitive match on title/body."},
+    {"name": "limit", "type": "number", "required": false, "description": "list: max results (default 30)."}
+  ]
+}

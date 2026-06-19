@@ -1,0 +1,18 @@
+{
+  "key": "nvidia",
+  "name": "NVIDIA NIM",
+  "description": "NVIDIA NIM inference microservices — optimized open-source model hosting",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://integrate.api.nvidia.com/v1",
+  "requires_base_url": false,
+  "default_model": "meta/llama-3.1-70b-instruct",
+  "models": ["meta/llama-3.1-70b-instruct", "mistralai/mixtral-8x7b-instruct"],
+  "website": "https://build.nvidia.com",
+  "setup_steps": [
+    {"text": "Login at build.nvidia.com", "url": "https://build.nvidia.com"},
+    {"text": "Click any model then click Get API Key"},
+    {"text": "Click Generate Key"},
+    {"text": "Copy the key (starts with nvapi-) and paste it here"}
+  ]
+}

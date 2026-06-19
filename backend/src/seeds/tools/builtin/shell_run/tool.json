@@ -1,0 +1,9 @@
+{
+  "key": "shell_run",
+  "name": "Shell Run",
+  "description": "Execute a shell command in the agent's container environment and return stdout, stderr, and exit code.",
+  "category": "code",
+  "env_vars": [],
+  "is_builtin": true,
+  "platform_executor": true
+}

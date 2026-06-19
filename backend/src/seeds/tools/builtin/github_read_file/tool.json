@@ -1,0 +1,10 @@
+{
+  "key": "github_read_file",
+  "name": "GitHub Read File",
+  "description": "Read the content of a file from a GitHub repository at a specific ref.",
+  "category": "github",
+  "group": "github_read",
+  "env_vars": ["GITHUB_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

@@ -1,0 +1,8 @@
+{
+  "key": "url_check",
+  "name": "URL Check",
+  "description": "Check whether a URL is reachable and return its HTTP status code and response time.",
+  "category": "web",
+  "env_vars": [],
+  "is_builtin": true
+}

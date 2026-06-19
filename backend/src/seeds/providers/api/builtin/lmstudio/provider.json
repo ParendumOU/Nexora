@@ -1,0 +1,12 @@
+{
+  "key": "lmstudio",
+  "name": "LM Studio",
+  "description": "LM Studio local server — run any GGUF model on your own hardware",
+  "auth_type": "none",
+  "stream_type": "openai_compat",
+  "base_url": "http://localhost:1234/v1",
+  "requires_base_url": false,
+  "default_model": "local-model",
+  "models": ["local-model"],
+  "website": "https://lmstudio.ai"
+}

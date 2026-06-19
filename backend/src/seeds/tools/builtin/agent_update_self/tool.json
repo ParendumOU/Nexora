@@ -1,0 +1,9 @@
+{
+  "key": "agent_update_self",
+  "name": "Agent Self-Update",
+  "description": "Allows an agent to modify its own configuration: append to system prompt, add/remove skills and tools, update description, soul, or temperature. All changes are logged. Agents cannot grant themselves tools that require explicit human approval.",
+  "category": "platform",
+  "is_builtin": true,
+  "always_allowed": false,
+  "platform_executor": true
+}

@@ -1,0 +1,10 @@
+{
+  "key": "github_repo_info",
+  "name": "GitHub Repo Info",
+  "description": "Fetch metadata for a GitHub repository: description, stars, forks, default branch, topics.",
+  "category": "github",
+  "group": "github_read",
+  "env_vars": ["GITHUB_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

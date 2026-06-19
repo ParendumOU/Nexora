@@ -1,0 +1,4 @@
+`platform_create_agent`  name* | agent_type? | description? | system_prompt? | skills? | tools? | env_vars? | temperature? — create a new persistent agent in the organisation. Returns the new agent's id for immediate use in task_create.
+`platform_create_skill`  key* | name? | description? | category? — register a new skill definition. After creating, write the executor script to `seeds/skills/custom/{key}/{key}_tool.py` using shell_run, or use the skill as a metadata-only label for documentation.
+`platform_create_tool`   key* | name? | description? | category? — register a new tool definition. After creating, write the executor to `seeds/tools/custom/{key}/executor.py` using shell_run if the tool needs platform-level logic.
+`platform_create_persona` name* | description? | role? — create a reusable persona template that agents can adopt.

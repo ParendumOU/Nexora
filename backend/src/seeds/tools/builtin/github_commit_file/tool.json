@@ -1,0 +1,10 @@
+{
+  "key": "github_commit_file",
+  "name": "GitHub Commit File",
+  "description": "Create or update a single file in a GitHub repository via the Contents API.",
+  "category": "github",
+  "group": "github_write",
+  "env_vars": ["GITHUB_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

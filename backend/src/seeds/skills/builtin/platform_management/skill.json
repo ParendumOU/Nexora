@@ -1,0 +1,7 @@
+{
+  "key": "platform_management",
+  "name": "Platform Management",
+  "description": "Operational control over Nexora platform services: audit source files, apply edits, view logs, restart containers",
+  "category": "integration",
+  "is_builtin": true
+}

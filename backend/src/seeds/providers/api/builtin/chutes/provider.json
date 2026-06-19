@@ -1,0 +1,17 @@
+{
+  "key": "chutes",
+  "name": "Chutes",
+  "description": "Chutes — decentralized OpenAI-compatible inference for open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://llm.chutes.ai/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-ai/DeepSeek-V3-0324",
+  "models": ["deepseek-ai/DeepSeek-V3-0324", "Qwen/Qwen2.5-72B-Instruct", "deepseek-ai/DeepSeek-R1"],
+  "website": "https://chutes.ai",
+  "setup_steps": [
+    {"text": "Login at chutes.ai", "url": "https://chutes.ai"},
+    {"text": "Create an API key (starts with cpk_)"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

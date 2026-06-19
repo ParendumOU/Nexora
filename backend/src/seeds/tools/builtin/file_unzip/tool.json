@@ -1,0 +1,8 @@
+{
+  "key": "file_unzip",
+  "name": "File Unzip",
+  "description": "Extract a ZIP archive to a target directory.",
+  "category": "file",
+  "env_vars": [],
+  "is_builtin": true
+}

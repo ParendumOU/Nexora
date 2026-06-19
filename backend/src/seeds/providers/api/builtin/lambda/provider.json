@@ -1,0 +1,18 @@
+{
+  "key": "lambda",
+  "name": "Lambda Inference",
+  "description": "Lambda — OpenAI-compatible inference for open-weight models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.lambda.ai/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-v3-0324",
+  "models": ["deepseek-v3-0324", "deepseek-r1-671b", "llama-3.3-70b-instruct-fp8"],
+  "website": "https://lambda.ai",
+  "setup_steps": [
+    {"text": "Login at cloud.lambda.ai", "url": "https://cloud.lambda.ai"},
+    {"text": "Open the API keys page"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

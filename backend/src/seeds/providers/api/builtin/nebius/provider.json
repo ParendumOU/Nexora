@@ -1,0 +1,21 @@
+{
+  "key": "nebius",
+  "name": "Nebius AI Studio",
+  "description": "Nebius AI Studio — European cloud inference for open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.studio.nebius.ai/v1/",
+  "requires_base_url": false,
+  "default_model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+  "models": [
+    "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    "mistralai/Mixtral-8x7B-Instruct-v0.1"
+  ],
+  "website": "https://studio.nebius.ai",
+  "setup_steps": [
+    {"text": "Login at studio.nebius.ai", "url": "https://studio.nebius.ai"},
+    {"text": "Click API Keys in the left sidebar"},
+    {"text": "Click Create API Key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

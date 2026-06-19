@@ -1,0 +1,25 @@
+{
+  "key": "together",
+  "name": "Together AI",
+  "description": "Together AI — open-source model hosting and fine-tuning platform",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.together.xyz/v1",
+  "requires_base_url": false,
+  "default_model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+  "models": [
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+    "Qwen/Qwen2.5-72B-Instruct-Turbo",
+    "deepseek-ai/DeepSeek-R1",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "google/gemma-2-27b-it"
+  ],
+  "website": "https://www.together.ai",
+  "setup_steps": [
+    {"text": "Login at api.together.xyz", "url": "https://api.together.xyz"},
+    {"text": "Go to Settings → API Keys"},
+    {"text": "Click Create API Key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "key": "mistral",
+  "name": "Mistral AI",
+  "description": "Mistral AI models — efficient open and proprietary models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.mistral.ai/v1",
+  "requires_base_url": false,
+  "default_model": "mistral-large-latest",
+  "models": ["mistral-large-latest", "mistral-small-latest", "codestral-latest", "open-mistral-nemo"],
+  "website": "https://console.mistral.ai",
+  "setup_steps": [
+    {"text": "Login at console.mistral.ai", "url": "https://console.mistral.ai"},
+    {"text": "Click API Keys in the left sidebar"},
+    {"text": "Click Create new key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

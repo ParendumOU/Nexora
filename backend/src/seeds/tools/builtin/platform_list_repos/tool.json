@@ -1,0 +1,10 @@
+{
+  "key": "platform_list_repos",
+  "name": "List Repos from Credential",
+  "description": "Browse groups, subgroups, and repositories accessible via a git credential (GitHub/GitLab PAT). Returns a flat list of repos with full_name, web_url, default_branch, and group context. Use platform_list_credentials first to get a credential_id.",
+  "category": "platform",
+  "group": "platform_create",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": true
+}

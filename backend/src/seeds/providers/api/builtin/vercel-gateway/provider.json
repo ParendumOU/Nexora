@@ -1,0 +1,18 @@
+{
+  "key": "vercel-gateway",
+  "name": "Vercel AI Gateway",
+  "description": "Vercel AI Gateway — one OpenAI-compatible endpoint routing to 100s of models (creator/model)",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://ai-gateway.vercel.sh/v1",
+  "requires_base_url": false,
+  "default_model": "openai/gpt-4o",
+  "models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-5", "xai/grok-4"],
+  "website": "https://vercel.com/ai-gateway",
+  "setup_steps": [
+    {"text": "Open the Vercel dashboard → AI Gateway", "url": "https://vercel.com/ai-gateway"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"},
+    {"text": "Use model ids in creator/model form, e.g. openai/gpt-4o"}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "key": "platform_list_credentials",
+  "name": "List Git Credentials",
+  "description": "List git credentials (GitLab/GitHub PATs) registered for the current org. Returns ids only — token values never leave the platform.",
+  "category": "platform",
+  "group": "platform_create",
+  "is_builtin": true,
+  "platform_executor": true,
+  "always_allowed": true
+}

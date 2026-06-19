@@ -1,0 +1,33 @@
+{
+  "key": "send_message_to_agent",
+  "name": "Send Message to Agent",
+  "description": "Send a direct message to another agent in your org and optionally wait for a reply. Use this for peer-to-peer agent communication without routing through the orchestrator. Supports blocking (sync) and fire-and-forget (async) modes.",
+  "category": "platform",
+  "is_builtin": true,
+  "always_allowed": true,
+  "platform_executor": false,
+  "args_schema": {
+    "to_agent_id": {
+      "type": "string",
+      "description": "ID of the agent to message. Use list_available_agents to discover valid IDs."
+    },
+    "subject": {
+      "type": "string",
+      "description": "Short subject line describing the request."
+    },
+    "body": {
+      "type": "string",
+      "description": "Full message body with all context the recipient needs to respond."
+    },
+    "reply_to_id": {
+      "type": "string",
+      "description": "ID of the original message being replied to. Include this when you are the recipient responding to a message."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["sync", "async"],
+      "default": "sync",
+      "description": "sync: block and wait up to 120s for a reply. async: fire-and-forget, result injected later via orchestrator."
+    }
+  }
+}

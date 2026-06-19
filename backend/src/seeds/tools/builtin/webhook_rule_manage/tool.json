@@ -1,0 +1,9 @@
+{
+  "key": "webhook_rule_manage",
+  "name": "Webhook Rule Manager",
+  "description": "Create, update, list, and delete GitLab/GitHub webhook rules that trigger agent tasks automatically when repository events occur (push, MR, pipeline, issue, etc.).",
+  "category": "platform",
+  "is_builtin": true,
+  "always_allowed": false,
+  "platform_executor": true
+}

@@ -1,0 +1,9 @@
+{
+  "key": "google_drive",
+  "name": "Google Drive",
+  "description": "List, read, create and share files in Google Drive. Requires GOOGLE_SERVICE_ACCOUNT_JSON (service account key JSON).",
+  "category": "integration",
+  "env_vars": ["GOOGLE_SERVICE_ACCOUNT_JSON", "GOOGLE_DRIVE_DELEGATE_EMAIL"],
+  "is_builtin": true,
+  "platform_executor": true
+}

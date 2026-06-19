@@ -1,0 +1,18 @@
+{
+  "key": "perplexity",
+  "name": "Perplexity",
+  "description": "Perplexity AI — search-augmented models with real-time web access",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.perplexity.ai",
+  "requires_base_url": false,
+  "default_model": "sonar-pro",
+  "models": ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning"],
+  "website": "https://www.perplexity.ai",
+  "setup_steps": [
+    {"text": "Login at perplexity.ai", "url": "https://www.perplexity.ai"},
+    {"text": "Go to Settings → API"},
+    {"text": "Click Generate under API Key"},
+    {"text": "Copy the key (starts with pplx-) and paste it here"}
+  ]
+}

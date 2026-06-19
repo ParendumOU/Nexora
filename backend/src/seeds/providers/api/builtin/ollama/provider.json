@@ -1,0 +1,12 @@
+{
+  "key": "ollama",
+  "name": "Ollama",
+  "description": "Ollama local server — run and manage open-source models on your own hardware",
+  "auth_type": "none",
+  "stream_type": "ollama",
+  "base_url": "http://localhost:11434",
+  "requires_base_url": false,
+  "default_model": "llama3",
+  "models": ["llama3.3", "llama3.1", "mistral", "codellama", "phi4", "gemma3", "qwen2.5"],
+  "website": "https://ollama.com"
+}

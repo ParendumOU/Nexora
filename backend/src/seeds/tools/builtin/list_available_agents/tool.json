@@ -1,0 +1,10 @@
+{
+  "key": "list_available_agents",
+  "name": "List Available Agents",
+  "description": "List all active agents in your org with their descriptions and skills. Use this to discover which agent to message before calling send_message_to_agent.",
+  "category": "platform",
+  "is_builtin": true,
+  "always_allowed": true,
+  "platform_executor": false,
+  "args_schema": {}
+}

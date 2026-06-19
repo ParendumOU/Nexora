@@ -1,0 +1,9 @@
+{
+  "key": "plan_complete",
+  "name": "Plan Complete",
+  "description": "Finalize an active plan once ALL steps are marked done. Call this before delivering the final summary to the user.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

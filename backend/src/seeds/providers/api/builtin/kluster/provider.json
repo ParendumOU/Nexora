@@ -1,0 +1,18 @@
+{
+  "key": "kluster",
+  "name": "kluster.ai",
+  "description": "kluster.ai — OpenAI-compatible real-time and batch inference for open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.kluster.ai/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-ai/DeepSeek-V3",
+  "models": ["deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "klusterai/Meta-Llama-3.3-70B-Instruct-Turbo"],
+  "website": "https://kluster.ai",
+  "setup_steps": [
+    {"text": "Login at platform.kluster.ai", "url": "https://platform.kluster.ai"},
+    {"text": "Open API Keys"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

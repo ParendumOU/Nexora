@@ -1,0 +1,8 @@
+{
+  "key": "playwright_extract",
+  "name": "Browser Extract",
+  "description": "Extract text, attributes, or HTML from elements on a rendered web page.",
+  "category": "browser",
+  "env_vars": [],
+  "is_builtin": true
+}

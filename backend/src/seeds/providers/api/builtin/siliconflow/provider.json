@@ -1,0 +1,18 @@
+{
+  "key": "siliconflow",
+  "name": "SiliconFlow",
+  "description": "SiliconFlow — one OpenAI-compatible API for many open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.siliconflow.com/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-ai/DeepSeek-V3",
+  "models": ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct", "deepseek-ai/DeepSeek-R1"],
+  "website": "https://siliconflow.com",
+  "setup_steps": [
+    {"text": "Login at siliconflow.com (.cn for China)", "url": "https://siliconflow.com"},
+    {"text": "Open the API Keys page"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

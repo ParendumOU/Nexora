@@ -1,0 +1,9 @@
+{
+  "key": "slack",
+  "name": "Slack",
+  "description": "Send and read Slack messages, manage channels, and look up users. Requires SLACK_BOT_TOKEN.",
+  "category": "integration",
+  "env_vars": ["SLACK_BOT_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

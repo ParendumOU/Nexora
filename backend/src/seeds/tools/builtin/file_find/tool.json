@@ -1,0 +1,8 @@
+{
+  "key": "file_find",
+  "name": "File Find",
+  "description": "Search for files matching a name pattern or containing specific text within a directory tree.",
+  "category": "file",
+  "env_vars": [],
+  "is_builtin": true
+}

@@ -1,0 +1,8 @@
+{
+  "key": "playwright_screenshot",
+  "name": "Browser Screenshot",
+  "description": "Take a screenshot of a web page using a headless browser. Returns a base64-encoded PNG image.",
+  "category": "browser",
+  "env_vars": [],
+  "is_builtin": true
+}

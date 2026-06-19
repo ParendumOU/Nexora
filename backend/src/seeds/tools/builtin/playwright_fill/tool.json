@@ -1,0 +1,8 @@
+{
+  "key": "playwright_fill",
+  "name": "Browser Fill Form",
+  "description": "Fill an input field or form element in a headless browser session.",
+  "category": "browser",
+  "env_vars": [],
+  "is_builtin": true
+}

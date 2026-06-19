@@ -1,0 +1,8 @@
+{
+  "key": "docker_run",
+  "name": "Docker Run",
+  "description": "Run a command in a Docker container or start a new container.",
+  "category": "docker",
+  "env_vars": [],
+  "is_builtin": true
+}

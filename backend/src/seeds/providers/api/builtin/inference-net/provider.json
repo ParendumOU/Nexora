@@ -1,0 +1,18 @@
+{
+  "key": "inference-net",
+  "name": "Inference.net",
+  "description": "Inference.net — OpenAI-compatible serverless inference for open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.inference.net/v1",
+  "requires_base_url": false,
+  "default_model": "deepseek-ai/deepseek-v3-0324",
+  "models": ["deepseek-ai/deepseek-v3-0324", "meta-llama/llama-3.3-70b-instruct/fp-8", "deepseek-ai/deepseek-r1"],
+  "website": "https://inference.net",
+  "setup_steps": [
+    {"text": "Login at inference.net", "url": "https://inference.net"},
+    {"text": "Open the API keys page"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

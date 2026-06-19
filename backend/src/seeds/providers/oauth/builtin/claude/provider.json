@@ -1,0 +1,20 @@
+{
+  "key": "claude",
+  "name": "Claude (Anthropic)",
+  "description": "Anthropic Claude models via CLI OAuth — uses your Claude.ai subscription",
+  "auth_type": "oauth",
+  "stream_type": "claude",
+  "base_url": null,
+  "requires_base_url": false,
+  "default_model": "claude-sonnet-4-6",
+  "models": ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+  "cli_command": "claude",
+  "cli_login_args": ["auth", "login", "--claudeai"],
+  "credential_paths": [
+    ".claude/.credentials.json",
+    ".config/claude-code/auth.json",
+    ".config/anthropic/auth.json"
+  ],
+  "credential_format": "claude_oauth",
+  "website": "https://anthropic.com"
+}

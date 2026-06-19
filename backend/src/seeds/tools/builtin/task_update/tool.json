@@ -1,0 +1,9 @@
+{
+  "key": "task_update",
+  "name": "Task Update",
+  "description": "Update the status, priority, blockers, or result of an existing task. Fields: task_id*, title, description, status (pending|queued|running|paused|completed|failed), priority (low|medium|high|critical), blocked_by (list of task IDs), output, checklist.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

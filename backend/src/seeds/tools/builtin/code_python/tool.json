@@ -1,0 +1,8 @@
+{
+  "key": "code_python",
+  "name": "Run Python",
+  "description": "Execute a Python code snippet in a sandboxed environment and return stdout, stderr, and return value.",
+  "category": "code",
+  "env_vars": [],
+  "is_builtin": true
+}

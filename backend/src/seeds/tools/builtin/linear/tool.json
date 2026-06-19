@@ -1,0 +1,9 @@
+{
+  "key": "linear",
+  "name": "Linear",
+  "description": "Manage issues in Linear — list, search, create, update issues, add comments, and list teams and projects. Requires a Linear personal API key.",
+  "category": "integration",
+  "env_vars": ["LINEAR_API_KEY"],
+  "is_builtin": true,
+  "platform_executor": true
+}

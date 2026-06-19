@@ -1,0 +1,18 @@
+{
+  "key": "venice",
+  "name": "Venice AI",
+  "description": "Venice AI — privacy-focused, OpenAI-compatible inference for open-source models",
+  "auth_type": "apikey",
+  "stream_type": "openai_compat",
+  "base_url": "https://api.venice.ai/api/v1",
+  "requires_base_url": false,
+  "default_model": "llama-3.3-70b",
+  "models": ["llama-3.3-70b", "deepseek-ai-DeepSeek-R1", "venice-uncensored"],
+  "website": "https://venice.ai",
+  "setup_steps": [
+    {"text": "Login at venice.ai", "url": "https://venice.ai/settings/api"},
+    {"text": "Open Settings → API"},
+    {"text": "Create an API key"},
+    {"text": "Copy the key and paste it here"}
+  ]
+}

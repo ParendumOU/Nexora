@@ -1,0 +1,9 @@
+{
+  "key": "jira",
+  "name": "Jira",
+  "description": "Manage Jira issues — search with JQL, create, update, comment, and get sprint info. Supports Jira Cloud (email + API token) and Jira Server/Data Center (PAT).",
+  "category": "integration",
+  "env_vars": ["JIRA_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
+  "is_builtin": true,
+  "platform_executor": true
+}

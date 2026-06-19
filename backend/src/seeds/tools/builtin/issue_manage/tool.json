@@ -1,0 +1,22 @@
+{
+  "key": "issue_manage",
+  "name": "Issue",
+  "description": "Manage issues in the platform tracker. action='create' to create, 'update' to modify status/priority/labels/assignment, 'comment' to add a markdown comment, 'list' to query issues.",
+  "category": "issues",
+  "group": "issues",
+  "is_builtin": true,
+  "platform_executor": true,
+  "args": [
+    {"name": "action", "type": "string", "required": true, "description": "create | update | comment | list"},
+    {"name": "issue_id", "type": "string", "required": false, "description": "[update/comment] The issue to modify"},
+    {"name": "title", "type": "string", "required": false, "description": "[create] Issue title"},
+    {"name": "description", "type": "string", "required": false, "description": "[create/update] Markdown description"},
+    {"name": "status", "type": "string", "required": false, "description": "[update/list] open | in_progress | review | closed"},
+    {"name": "priority", "type": "string", "required": false, "description": "[create/update/list] critical | high | medium | low"},
+    {"name": "labels", "type": "array", "required": false, "description": "[create/update] Label strings"},
+    {"name": "assigned_agent_id", "type": "string", "required": false, "description": "[create/update] Agent to assign"},
+    {"name": "project_id", "type": "string", "required": false, "description": "[create/list] Override project (defaults to chat's project)"},
+    {"name": "content", "type": "string", "required": false, "description": "[comment] Markdown comment body"},
+    {"name": "limit", "type": "integer", "required": false, "description": "[list] Max issues to return (default 25)"}
+  ]
+}

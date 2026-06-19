@@ -1,0 +1,448 @@
+"""Agent tool execution — task/issue/skill/platform tools invoked from tool_calls fences."""
+import json
+import logging
+import re
+import uuid
+from datetime import datetime, timezone
+from sqlalchemy import select
+from fastapi import WebSocket
+from src.core.database import AsyncSessionLocal
+from src.models.skill import Skill
+from src.models.tool import Tool
+
+# Re-export everything external callers depend on
+from src.services.agent_tools.task_helpers import (
+    _ws_status,
+    _task_to_dict,
+    _resolve_agent_id,
+    _bubble_complete_parent,
+    _fail_task,
+)
+from src.services.agent_tools.tool_executor import (
+    _build_executor_registry,
+    _get_executor,
+    _parse_tool_calls,
+    _run_single_tool,
+)
+from src.services.agent_tools.skill_runner import (
+    _build_skill_registry,
+    _get_skill_registry,
+    _resolve_skill_tool,
+    _to_cli_args,
+    _run_skill_tool,
+)
+from src.services.agent_tools.tool_permissions import (
+    _always_allowed,
+    _optional_builtins,
+    _get_agent_enabled_tools,
+)
+
+logger = logging.getLogger(__name__)
+
+# Native/internal tool names CLI providers may leak into their text response as
+# bogus tool_calls (their own agent loop, not Nexora's). Ignored by the parser
+# so they don't generate "Unknown tool" failures that loop the orchestrator.
+# (MCP tools also leak with an `mcp__` prefix — handled separately.)
+# NOTE: only names that are NOT also valid Nexora tool/skill keys. Gemini's
+# read_file/write_file collide with real Nexora skills, so they are deliberately
+# excluded here (a genuine call must still run).
+_CLI_INTERNAL_TOOLS = {
+    "update_topic", "save_memory", "google_web_search", "web_fetch",
+    "run_shell_command", "read_many_files", "list_directory",
+    "search_file_content",
+}
+
+_TOOL_FENCE_RE = re.compile(
+    r'```(?:tool_calls|json|tools)?\s*\n(?:tool_calls|json|tools)\n([\s\S]*?)\n?```'
+    r'|```(?:tool_calls|json|tools)\s*\n([\s\S]*?)\n?```'
+    # Empty fence where LLM writes "tool_calls [...]" inline (e.g. ```\ntool_calls [{...}]\n```)
+    r'|```[ \t]*\n(tool_calls\s*[\[{][\s\S]*?)\n?```',
+    re.IGNORECASE,
+)
+
+# Greedy fallback: used when lazy match produces malformed JSON (e.g. embedded ``` inside a string value)
+_TOOL_FENCE_GREEDY_RE = re.compile(
+    r'```(?:tool_calls|json|tools)?\s*\n(?:tool_calls|json|tools)\n([\s\S]*)\n?```'
+    r'|```(?:tool_calls|json|tools)\s*\n([\s\S]*)\n?```'
+    r'|```[ \t]*\n(tool_calls\s*[\[{][\s\S]*)\n?```',
+    re.IGNORECASE,
+)
+
+# Truncated-fence fallback: LLM hit max_tokens before closing ```. Match from fence open to end of string.
+_TOOL_FENCE_TRUNCATED_RE = re.compile(
+    r'```(?:tool_calls|json|tools)?\s*\n(?:tool_calls|json|tools)\n([\s\S]+)\Z'
+    r'|```(?:tool_calls|json|tools)\s*\n([\s\S]+)\Z'
+    r'|```[ \t]*\n(tool_calls\s*[\[{][\s\S]+)\Z',
+    re.IGNORECASE,
+)
+
+# XML-style <tool_calls> format — LLM occasionally uses this instead of backtick fences.
+# Normalise to backtick format before the main regex runs.
+_XML_TOOL_CALLS_RE = re.compile(r'<tool_calls>([\s\S]*?)</tool_calls>', re.IGNORECASE)
+
+# <|tool_call|> or <|tool_calls|> ... <|end|> — special-token format used by some instruct models
+# (Qwen2.5, Mistral-Nemo, OpenCode variants). Normalise to backtick fence before main parser.
+# Also catches <lend> which some renderers produce when stripping pipe chars from <|end|>.
+_TOKEN_TOOL_CALLS_RE = re.compile(
+    r'<\|tool_calls?\|>\s*([\s\S]*?)\s*(?:<\|end\|>|<lend>)',
+    re.IGNORECASE,
+)
+
+_HTML_COMMENT_RE = re.compile(r'<!--[\s\S]*?-->', re.DOTALL)
+
+# nexora_spawn directive — the plain-text sub-agent spawn block (primary path for
+# Gemini, but any provider can emit it by copying the format from history). The
+# Gemini stream strips it before save; this handles every other provider so the
+# raw block never leaks into the chat. Parsed + spawned in _execute_agent_tools.
+_NEXORA_SPAWN_RE = re.compile(r"```nexora_spawn\s*\n([\s\S]*?)\n?```", re.IGNORECASE)
+
+
+def _extract_nexora_spawn(text: str) -> tuple[str, list[dict]]:
+    directives: list[dict] = []
+
+    def _collect(m: "re.Match") -> str:
+        body = (m.group(1) or "").strip()
+        try:
+            obj = json.loads(body)
+        except Exception:
+            return ""
+        for d in (obj if isinstance(obj, list) else [obj]):
+            if isinstance(d, dict) and (d.get("title") or d.get("task")):
+                directives.append(d)
+        return ""
+
+    return _NEXORA_SPAWN_RE.sub(_collect, text).strip(), directives
+
+# Bare `<final/>` turn-end marker. Stripped from user-visible content but the
+# watchdog detector reads the raw response_text BEFORE this strip, so the
+# signal still counts.
+_FINAL_TAG_STRIP_RE = re.compile(
+    r"<\s*final\s*/?\s*>|<\s*final\s*>\s*<\s*/\s*final\s*>",
+    re.IGNORECASE,
+)
+
+# Internal-protocol prefixes the LLM occasionally echoes back. Strip from saved
+# assistant content so the user never sees these in chat history.
+_LEAK_PREFIX_RE = re.compile(
+    r'^\s*(?:'
+    r'\[Tool results[^\]]*\]'
+    r'|\[Resumed[^\]]*\]'
+    r'|<system_observation[^>]*>[\s\S]*?</system_observation>'
+    r')\s*',
+    re.IGNORECASE,
+)
+
+
+def _strip_protocol_leaks(text: str) -> str:
+    """Remove internal-protocol prefixes that leaked into model output."""
+    prev = None
+    out = text
+    while prev != out:
+        prev = out
+        out = _LEAK_PREFIX_RE.sub('', out)
+    return out
+
+
+async def _execute_agent_tools(
+    response_text: str,
+    chat_id: str,
+    agent_id: str | None,
+    agent_name: str | None,
+    websocket: WebSocket | None = None,
+    task_id: str | None = None,
+    parent_chat_id: str | None = None,
+    message_id: str | None = None,
+) -> tuple[str, list[dict], list[dict], bool, str | None]:
+    """Find tool_calls fences in the response, execute them, return
+    (cleaned text, results, counted_calls, had_fence, parse_error).
+
+    had_fence=False AND parse_error is None → agent sent plain text with no
+    tool_calls fence at all. Caller nudges agent to use tools.
+
+    had_fence=False AND parse_error is non-None → agent attempted a fence but
+    the JSON was unrecoverable. Caller should send a targeted retry that quotes
+    the parse error rather than the generic "use tools" nudge.
+    """
+    from src.models.task import TaskStep
+    from src.core.pubsub import broadcast as _broadcast
+
+    _status_pub = chat_id if not websocket else None
+
+    response_text = _HTML_COMMENT_RE.sub('', response_text).strip()
+    response_text = _strip_protocol_leaks(response_text)
+    # Normalise XML-style <tool_calls> to backtick fence so the main parser handles it.
+    response_text = _XML_TOOL_CALLS_RE.sub(
+        lambda m: f"```tool_calls\n{m.group(1).strip()}\n```", response_text
+    )
+    # Normalise <|tool_call|>/<|tool_calls|>...<|end|> token format to backtick fence.
+    response_text = _TOKEN_TOOL_CALLS_RE.sub(
+        lambda m: f"```tool_calls\n{m.group(1).strip()}\n```", response_text
+    )
+    # NOTE: `<final/>` is intentionally NOT stripped here — the watchdog reads
+    # it from the saved Message.content row. The frontend hides it for users.
+
+    # Handle nexora_spawn directives from ANY provider (the Gemini stream already
+    # strips its own; this catches non-Gemini providers that copy the format from
+    # history, so the raw block never leaks into the chat). Dedup in
+    # spawn_subagent_task prevents a duplicate of an already-spawned sub-agent.
+    response_text, _spawn_dirs = _extract_nexora_spawn(response_text)
+    if _spawn_dirs:
+        from src.services.sub_agent.spawn import spawn_subagent_task, already_spawned_this_turn
+        # Block a resume/fallback turn from re-spawning the same work (e.g. when
+        # the orchestrator falls from Gemini to opencode-zen, which paraphrases
+        # the directive — defeating exact-match dedup). Parallel spawns in one
+        # batch are unaffected (they're created after this check, in this loop).
+        if await already_spawned_this_turn(chat_id):
+            logger.info(
+                f"[tools] ignoring {len(_spawn_dirs)} nexora_spawn directive(s) — "
+                f"a sub-agent was already spawned this turn for chat {chat_id}"
+            )
+        else:
+            for _d in _spawn_dirs:
+                try:
+                    await spawn_subagent_task(_d, chat_id, agent_id, agent_name)
+                except Exception as _exc:
+                    logger.warning(f"[tools] nexora_spawn directive failed: {_exc}")
+
+    match = _TOOL_FENCE_RE.search(response_text)
+
+    tool_calls = None
+    raw_json = ""
+
+    if not match:
+        # Truncated-fence fallback: LLM hit max_tokens before writing closing ```.
+        # Match from fence open to end of string and attempt JSON extraction.
+        trunc_match = _TOOL_FENCE_TRUNCATED_RE.search(response_text)
+        if trunc_match:
+            trunc_json = (trunc_match.group(1) or trunc_match.group(2) or trunc_match.group(3) or "").strip()
+            trunc_calls = _parse_tool_calls(trunc_json)
+            if trunc_calls is not None:
+                logger.info(
+                    f"[tools] truncated fence recovered {len(trunc_calls)} call(s) "
+                    "(no closing backticks — likely max_tokens cut-off)"
+                )
+                match = trunc_match
+                raw_json = trunc_json
+                tool_calls = trunc_calls
+
+        if tool_calls is None:
+            logger.debug(f"[tools] no tool_calls fence found in response (len={len(response_text)})")
+            await _ws_status(websocket, "idle", pub_chat_id=_status_pub)
+            return response_text, [], [], False, None
+
+    if tool_calls is None:
+        raw_json = (match.group(1) or match.group(2) or match.group(3) or "").strip()
+        logger.info(f"[tools] tool_calls fence found: {raw_json[:300]}")
+        tool_calls = _parse_tool_calls(raw_json)
+
+    if tool_calls is None:
+        # Lazy match may have been cut short by an embedded ``` inside a JSON string value
+        # (e.g. task_create description with a code example). Try greedy match as fallback.
+        greedy_match = _TOOL_FENCE_GREEDY_RE.search(response_text)
+        if greedy_match:
+            greedy_json = (greedy_match.group(1) or greedy_match.group(2) or greedy_match.group(3) or "").strip()
+            if greedy_json != raw_json:
+                tool_calls = _parse_tool_calls(greedy_json)
+                if tool_calls is not None:
+                    logger.info(f"[tools] greedy fence match recovered {len(tool_calls)} call(s)")
+                    match = greedy_match
+                    raw_json = greedy_json
+
+    if tool_calls is None:
+        logger.warning(f"[tools] tool_calls JSON parse failed — raw: {raw_json[:400]}")
+        await _ws_status(websocket, "idle", pub_chat_id=_status_pub)
+        clean = response_text[:match.start()].rstrip() + response_text[match.end():]
+        # Caller receives parse_error so it can emit a targeted retry quoting the
+        # malformed JSON (much more useful than the generic "use tools" nudge).
+        parse_err = f"Could not parse tool_calls JSON. Raw payload (first 400 chars): {raw_json[:400]}"
+        return clean.strip(), [], [], False, parse_err
+
+    clean_text = (response_text[:match.start()].rstrip() + response_text[match.end():]).strip()
+
+    # Resolve which optional built-in tools this agent may call
+    agent_enabled = await _get_agent_enabled_tools(agent_id, chat_id)
+
+    # Group ID for PM-level actions (no task_id = agent running directly in main chat)
+    _pm_group_id = str(uuid.uuid4()) if not task_id and message_id else None
+
+    # Batch-resolve all tool/skill display labels in a single DB round-trip
+    _all_names = [c.get("name", "") for c in tool_calls if c.get("name")]
+    _label_map: dict[str, str] = {}
+    if _all_names:
+        async with AsyncSessionLocal() as db:
+            tr = await db.execute(select(Tool.key, Tool.name).where(Tool.key.in_(_all_names)))
+            for tkey, tname in tr.all():
+                _label_map[tkey] = f"{tname}…"
+            _missing = [n for n in _all_names if n not in _label_map]
+            if _missing:
+                sr = await db.execute(select(Skill.key, Skill.name).where(Skill.key.in_(_missing)))
+                for skey, sname in sr.all():
+                    _label_map[skey] = f"{sname}…"
+                _still_missing = [n for n in _missing if n not in _label_map]
+                if _still_missing:
+                    _prefixes = {n.split("_", 1)[0] for n in _still_missing if "_" in n}
+                    if _prefixes:
+                        psr = await db.execute(select(Skill.key, Skill.name).where(Skill.key.in_(_prefixes)))
+                        _prefix_map = {pk: pn for pk, pn in psr.all()}
+                        for n in _still_missing:
+                            if "_" in n:
+                                pfx, act = n.split("_", 1)
+                                if pfx in _prefix_map:
+                                    _label_map[n] = f"{_prefix_map[pfx]} ({act.replace('_', ' ').title()})…"
+
+    tool_results: list[dict] = []
+    for call in tool_calls:
+        name = call.get("name", "")
+        args = dict(call.get("args", {}))
+        if not name:
+            continue
+        # CLI providers (esp. Gemini) sometimes serialise their OWN native /
+        # MCP function calls into the response text instead of executing them.
+        # These leak into this parser as bogus tool_calls; failing them back
+        # ("Unknown tool") fuels an endless resume loop. Drop them silently.
+        if name.startswith("mcp__") or name in _CLI_INTERNAL_TOOLS:
+            logger.info(f"[tools] ignoring leaked CLI-internal tool call {name!r}")
+            continue
+        # Gate optional built-ins — None means unrestricted (no tools configured)
+        if name in _optional_builtins() and name not in _always_allowed() and agent_enabled is not None and name not in agent_enabled:
+            logger.warning(f"[tools] agent {agent_id!r} called ungated tool {name!r} — skipping")
+            tool_results.append({"tool": name, "error": f"Tool '{name}' is not enabled for this agent."})
+            continue
+        label = _label_map.get(name)
+
+        if not label:
+            formatted_name = name.replace("_", " ").title()
+            label = f"{formatted_name}…"
+
+        if name == "task_create" and args.get("title"):
+            label = f"Create: {str(args['title'])[:60]}"
+        elif name == "task_update" and args.get("task_id"):
+            label = f"Update task…"
+        elif name == "log_entry" and args.get("message"):
+            label = f"Log: {str(args['message'])[:60]}"
+        elif name == "read_url" and args.get("url"):
+            label = f"Fetch: {str(args['url'])[:60]}"
+        elif name == "issue_manage" and args.get("action") == "create" and args.get("title"):
+            label = f"Issue: {str(args['title'])[:60]}"
+        elif name == "issue_manage" and args.get("action") == "comment" and args.get("issue_id"):
+            label = f"Comment on issue…"
+        elif name == "issue_manage" and args.get("action") == "update" and args.get("issue_id"):
+            label = f"Update issue…"
+        await _ws_status(websocket, "executing_tool", name, label, pub_chat_id=_status_pub)
+
+        # Emit action card event for PM/direct-chat tool calls (not sub-agent tasks)
+        if _pm_group_id:
+            await _broadcast(chat_id, {
+                "type": "agent_action_start",
+                "group_id": _pm_group_id,
+                "message_id": message_id,
+                "agent_name": agent_name or "Agent",
+                "tool": name,
+                "label": label.rstrip("…"),
+            })
+
+        step_id = str(uuid.uuid4())
+        if task_id and parent_chat_id:
+            async with AsyncSessionLocal() as db:
+                step = TaskStep(
+                    id=step_id,
+                    task_id=task_id,
+                    name=name,
+                    label=label,
+                    status="running",
+                )
+                db.add(step)
+                await db.commit()
+
+            step_start_event = {
+                "type": "sub_agent_step_start",
+                "task_id": task_id,
+                "step_id": step_id,
+                "step_name": name,
+                "step_label": label,
+            }
+            await _broadcast(parent_chat_id, step_start_event)
+            if chat_id != parent_chat_id:
+                await _broadcast(chat_id, step_start_event)
+
+        try:
+            result = await _run_single_tool(name, args, chat_id, agent_id, agent_name, parent_chat_id=parent_chat_id)
+            logger.info(f"[tools] executed {name} args={json.dumps(args)[:120]}")
+
+            tool_errored = isinstance(result, dict) and "error" in result
+
+            if task_id and parent_chat_id:
+                async with AsyncSessionLocal() as db:
+                    step = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+                    step_rec = step.scalar_one_or_none()
+                    if step_rec:
+                        step_rec.status = "failed" if tool_errored else "success"
+                        if result is not None:
+                            step_rec.result_data = result
+                        if tool_errored:
+                            step_rec.error = str(result.get("error", ""))[:500]
+                        step_rec.completed_at = datetime.now(timezone.utc)
+                        await db.commit()
+
+                step_done_ok = {
+                    "type": "sub_agent_step_done",
+                    "task_id": task_id,
+                    "step_id": step_id,
+                    "status": "failed" if tool_errored else "success",
+                }
+                await _broadcast(parent_chat_id, step_done_ok)
+                if chat_id != parent_chat_id:
+                    await _broadcast(chat_id, step_done_ok)
+
+            if _pm_group_id:
+                await _broadcast(chat_id, {
+                    "type": "agent_action_done",
+                    "group_id": _pm_group_id,
+                    "tool": name,
+                    "status": "failed" if tool_errored else "success",
+                    "error": str(result.get("error", ""))[:200] if tool_errored else None,
+                })
+
+            if result is not None:
+                tool_results.append(result)
+        except Exception as exc:
+            logger.warning(f"[tools] {name} failed: {exc}")
+
+            if task_id and parent_chat_id:
+                async with AsyncSessionLocal() as db:
+                    step = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+                    step_rec = step.scalar_one_or_none()
+                    if step_rec:
+                        step_rec.status = "failed"
+                        step_rec.error = str(exc)[:500]
+                        step_rec.completed_at = datetime.now(timezone.utc)
+                        await db.commit()
+
+                step_done_fail = {
+                    "type": "sub_agent_step_done",
+                    "task_id": task_id,
+                    "step_id": step_id,
+                    "status": "failed",
+                    "error": str(exc)[:200],
+                }
+                await _broadcast(parent_chat_id, step_done_fail)
+                if chat_id != parent_chat_id:
+                    await _broadcast(chat_id, step_done_fail)
+
+            if _pm_group_id:
+                await _broadcast(chat_id, {
+                    "type": "agent_action_done",
+                    "group_id": _pm_group_id,
+                    "tool": name,
+                    "status": "failed",
+                    "error": str(exc)[:200],
+                })
+
+    await _ws_status(websocket, "idle", pub_chat_id=_status_pub)
+    _STATS_HIDDEN = {"log_entry"}
+    counted = [
+        {"name": c.get("name", ""), "args": c.get("args", {})}
+        for c in tool_calls
+        if c.get("name") and c["name"] not in _STATS_HIDDEN and not c["name"].startswith("task_")
+    ]
+    return clean_text, tool_results, counted, True, None

@@ -1,0 +1,9 @@
+{
+  "key": "note_append",
+  "name": "Append to chat notes",
+  "description": "Append a markdown section to the shared notes for the current chat tree. Auto-prefixes a timestamp + agent name.",
+  "category": "memory",
+  "is_builtin": true,
+  "always_allowed": true,
+  "platform_executor": true
+}
