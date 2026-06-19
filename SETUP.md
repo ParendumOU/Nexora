@@ -14,7 +14,7 @@ Nexora is the open-source core. Run it standalone for development or self-hostin
 ## Quick start
 
 ```bash
-git clone https://gitlab.com/parendum/nexora/nexora.git
+git clone https://github.com/ParendumOU/Nexora.git
 cd nexora
 cp .env.example .env
 ```
