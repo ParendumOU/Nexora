@@ -12,6 +12,8 @@ decompose work, delegate to sub-agents, and stream results — all self-hosted, 
 ![Release](https://img.shields.io/github/v/release/ParendumOU/Nexora?sort=semver)
 ![Stars](https://img.shields.io/github/stars/ParendumOU/Nexora?style=social)
 
+**[🌐 Website](https://nexora.parendum.com) · [📖 Docs](https://docs.nexora.parendum.com) · [🧩 Marketplace](https://marketplace.nexora.parendum.com)**
+
 <br>
 
 <a href="https://nexora.parendum.com">
@@ -49,6 +51,16 @@ self-hosted product (NexoraCloud) consumes this repo and layers commercial featu
 - **Full-platform backup / restore** — export a whole instance (or one org) to a portable ZIP.
 - **Clients** — web UI, [terminal client (NexoraCLI)](https://github.com/ParendumOU/Nexora-CLI),
   and a [mobile app (NexoraMobile)](https://github.com/ParendumOU/Nexora-Mobile).
+
+---
+
+## Screenshots
+
+| Chat | Orchestration (sub-agents + task tree) |
+|------|----------------------------------------|
+| <img src=".github/chat-interface.png" alt="Nexora chat" width="420"> | <img src=".github/pm-08-panel-task-tree.png" alt="Nexora orchestration" width="420"> |
+
+More in the [documentation](https://docs.nexora.parendum.com).
 
 ---
 
