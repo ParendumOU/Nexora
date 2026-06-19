@@ -10,6 +10,12 @@ decompose work, delegate to sub-agents, and stream results — all self-hosted, 
 ![Release](https://img.shields.io/github/v/release/ParendumOU/Nexora?sort=semver)
 ![Stars](https://img.shields.io/github/stars/ParendumOU/Nexora?style=social)
 
+<br>
+
+<video src="https://github.com/ParendumOU/Nexora/releases/download/v1.1.3/NexoraLandscape.mp4" controls muted loop playsinline width="720"></video>
+
+▶ **[Watch the demo](https://nexora.parendum.com/NexoraLandscape.mp4)** · [nexora.parendum.com](https://nexora.parendum.com)
+
 </div>
 
 ---
@@ -114,5 +120,5 @@ SETUP.md        standalone setup guide
 ## Star history
 
 <a href="https://star-history.com/#ParendumOU/Nexora&Date">
-  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ParendumOU/Nexora&type=Date" width="640">
+  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ParendumOU/Nexora&type=Date&theme=dark" width="640">
 </a>
