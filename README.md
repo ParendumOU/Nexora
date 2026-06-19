@@ -89,7 +89,6 @@ make clean    # stop + wipe volumes (DESTRUCTIVE)
 ```
 backend/        FastAPI app (agents, orchestration, providers, tools, RAG, auth)
 frontend/       Next.js 15 web UI
-cli/            Python (Typer) terminal client shipped with the core
 nginx/          reverse proxy config
 docker-compose*.yml   prod / dev / data-only stacks
 SETUP.md        standalone setup guide
