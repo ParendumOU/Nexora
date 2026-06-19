@@ -120,5 +120,9 @@ SETUP.md        standalone setup guide
 ## Star history
 
 <a href="https://star-history.com/#ParendumOU/Nexora&Date">
-  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ParendumOU/Nexora&type=Date&theme=dark" width="640">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ParendumOU/Nexora&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ParendumOU/Nexora&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ParendumOU/Nexora&type=Date&theme=dark" width="100%" />
+  </picture>
 </a>
