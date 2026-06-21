@@ -20,7 +20,9 @@ decompose work, delegate to sub-agents, and stream results — all self-hosted, 
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20+%20pgvector-4169E1?logo=postgresql&logoColor=white&style=flat-square)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)
 
-<video src="https://nexora.parendum.com/NexoraLandscape.mp4" controls muted loop playsinline width="720"></video>
+<a href="https://nexora.parendum.com">
+  <img src=".github/nexora-demo.gif" alt="Nexora — AI-agent orchestration platform (click to watch the full demo)" width="760">
+</a>
 
 **[🌐 Website](https://nexora.parendum.com) · [📖 Docs](https://docs.nexora.parendum.com) · [🧩 Marketplace](https://marketplace.nexora.parendum.com)**
 
