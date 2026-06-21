@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, Zap } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { authApi } from "@/lib/api";
+import { BrandMark } from "@/components/BrandMark";
 import { useAuthStore } from "@/store/auth";
 import toast from "react-hot-toast";
 
@@ -52,9 +53,7 @@ function OAuthCallbackInner() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4 animate-fade-in">
-        <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-          <Zap className="w-5 h-5 text-primary-foreground" />
-        </div>
+        <BrandMark className="w-9 h-9" />
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
           <Loader2 className="w-4 h-4 animate-spin" />
           Completing sign-in…

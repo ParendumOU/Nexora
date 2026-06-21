@@ -2,8 +2,9 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Zap, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import api from "@/lib/api";
+import { BrandMark } from "@/components/BrandMark";
 
 function VerifyEmailForm() {
   const params = useSearchParams();
@@ -25,9 +26,7 @@ function VerifyEmailForm() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-6 animate-fade-in">
         <div className="flex items-center justify-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-            <Zap className="w-5 h-5 text-primary-foreground" />
-          </div>
+          <BrandMark className="w-9 h-9" />
           <span className="text-xl font-semibold tracking-tight">Nexora</span>
         </div>
 

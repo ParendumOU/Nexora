@@ -1,8 +1,9 @@
 "use client";
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, Loader2, Eye, EyeOff, Shuffle, Copy, Check } from "lucide-react";
+import { Loader2, Eye, EyeOff, Shuffle, Copy, Check } from "lucide-react";
 import { authApi } from "@/lib/api";
+import { BrandMark } from "@/components/BrandMark";
 import { useAuthStore } from "@/store/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -86,9 +87,7 @@ export default function SetupPage() {
       <div className="w-full max-w-sm space-y-6 animate-fade-in">
         {/* Logo */}
         <div className="flex items-center justify-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-            <Zap className="w-5 h-5 text-primary-foreground" />
-          </div>
+          <BrandMark className="w-9 h-9" />
           <span className="text-xl font-semibold tracking-tight">Nexora</span>
         </div>
 

@@ -2,8 +2,9 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Zap, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { authApi } from "@/lib/api";
+import { BrandMark } from "@/components/BrandMark";
 import { useAuthStore } from "@/store/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,9 +49,7 @@ function ResetPasswordForm() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-6 animate-fade-in">
         <div className="flex items-center justify-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-            <Zap className="w-5 h-5 text-primary-foreground" />
-          </div>
+          <BrandMark className="w-9 h-9" />
           <span className="text-xl font-semibold tracking-tight">Nexora</span>
         </div>
         <div className="bg-card border border-border rounded-2xl p-8 space-y-6 shadow-lg">

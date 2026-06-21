@@ -15,6 +15,7 @@ import { useUIModeStore } from "@/store/ui-mode";
 import { useOnboardingStore } from "@/store/onboarding";
 import { ActiveAgentsPanel, AgentFilterPayload } from "@/components/sidebar/ActiveAgentsPanel";
 import { chatsApi, projectsApi } from "@/lib/api";
+import { BrandMark } from "@/components/BrandMark";
 import { OrgSwitcher } from "@/components/layout/org-switcher";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { Button } from "@/components/ui/button";
@@ -482,16 +483,12 @@ export function Sidebar() {
       <div className="flex items-center justify-between px-3 py-4 border-b border-sidebar-border">
         {!collapsed && (
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-              <Zap className="w-4 h-4 text-primary-foreground" />
-            </div>
+            <BrandMark className="w-7 h-7" />
             <span className="font-semibold text-sm tracking-tight">Nexora</span>
           </div>
         )}
         {collapsed && (
-          <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center mx-auto">
-            <Zap className="w-4 h-4 text-primary-foreground" />
-          </div>
+          <BrandMark className="w-7 h-7 mx-auto" />
         )}
         {!collapsed && (
           <Button variant="ghost" size="icon" onClick={toggle} className="h-7 w-7 shrink-0">

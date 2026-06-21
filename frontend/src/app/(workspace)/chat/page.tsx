@@ -2,8 +2,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { MessageSquare, Zap, Bot, FolderKanban, ChevronDown, X } from "lucide-react";
+import { MessageSquare, Bot, FolderKanban, ChevronDown, X } from "lucide-react";
 import { chatsApi, projectsApi } from "@/lib/api";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { ProjectPicker } from "@/components/ui/project-picker";
 
@@ -49,9 +50,7 @@ export default function ChatHomePage() {
       <div className="w-full max-w-2xl space-y-8">
         {/* Hero */}
         <div className="text-center space-y-3">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 mb-2">
-            <Zap className="w-7 h-7 text-primary" />
-          </div>
+          <BrandMark className="w-14 h-14 mb-2 inline-block" />
           <h1 className="text-2xl font-semibold tracking-tight">How can I help you today?</h1>
           <p className="text-muted-foreground text-sm">
             Start a chat, create a project, or build an agent.
