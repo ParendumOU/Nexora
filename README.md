@@ -24,11 +24,11 @@ decompose work, delegate to sub-agents, and stream results — all self-hosted, 
 
 <br>
 
-<a href="https://nexora.parendum.com">
-  <img src="https://github.com/ParendumOU/Nexora/releases/download/v1.1.3/nexora_demo.gif" alt="Nexora demo" width="720">
+<a href="https://raw.githubusercontent.com/ParendumOU/Nexora/main/.github/nexora-demo.mp4">
+  <img src=".github/nexora-demo.gif" alt="Nexora demo" width="720">
 </a>
 
-▶ **[Watch the full demo at nexora.parendum.com](https://nexora.parendum.com)**
+▶ **Watch the full demo** — [video (69s)](https://raw.githubusercontent.com/ParendumOU/Nexora/main/.github/nexora-demo.mp4) · [nexora.parendum.com](https://nexora.parendum.com)
 
 </div>
 
