@@ -8,9 +8,17 @@
 Define agents with personas, skills, and tools. Let them chat in real time, execute tools,
 decompose work, delegate to sub-agents, and stream results — all self-hosted, on your own infra.
 
-![License](https://img.shields.io/github/license/ParendumOU/Nexora)
-![Release](https://img.shields.io/github/v/release/ParendumOU/Nexora?sort=semver)
+![License](https://img.shields.io/github/license/ParendumOU/Nexora?color=6366f1&style=flat-square)
+![Release](https://img.shields.io/github/v/release/ParendumOU/Nexora?sort=semver&color=8b5cf6&style=flat-square)
+![Last commit](https://img.shields.io/github/last-commit/ParendumOU/Nexora?color=6366f1&style=flat-square)
+![PRs welcome](https://img.shields.io/badge/PRs-welcome-6366f1?style=flat-square)
 ![Stars](https://img.shields.io/github/stars/ParendumOU/Nexora?style=social)
+
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white&style=flat-square)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white&style=flat-square)
+![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white&style=flat-square)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20+%20pgvector-4169E1?logo=postgresql&logoColor=white&style=flat-square)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)
 
 **[🌐 Website](https://nexora.parendum.com) · [📖 Docs](https://docs.nexora.parendum.com) · [🧩 Marketplace](https://marketplace.nexora.parendum.com)**
 
@@ -35,6 +43,21 @@ over WebSocket or SSE.
 
 This repository is **pure platform** — zero billing, licensing, or paywall logic. The paid
 self-hosted product (NexoraCloud) consumes this repo and layers commercial features on top.
+
+### Why Nexora?
+
+- **🔒 Self-hosted, your data stays yours.** Runs entirely on your own infra — no agent traffic leaves your network.
+- **🔌 No vendor lock-in.** ~46 LLM providers behind one interface; swap Claude ↔ GPT ↔ Gemini ↔ local Ollama without touching your agents.
+- **🤝 Real multi-agent orchestration.** Agents delegate to sub-agents, run tools, and stream results in parallel — not just a single chat loop.
+- **🧩 Extensible by design.** Knowledge bases (RAG), semantic memory, ~90 built-in tools, and a package marketplace.
+- **🆓 MIT-licensed core.** Use it, fork it, ship it. Commercial features are opt-in via NexoraCloud.
+
+### Use cases
+
+- Internal **AI ops** assistants that touch Slack, Jira, Kubernetes, and your own APIs.
+- **Research / RAG** agents grounded in your private knowledge bases.
+- **Automation crews** that decompose a goal into tasks and execute them across sub-agents.
+- A **self-hosted alternative** to closed agent platforms, with full control over models and data.
 
 ### Highlights
 
@@ -127,9 +150,24 @@ SETUP.md        standalone setup guide
 
 ---
 
+## Contributing
+
+Issues and PRs welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and our
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). For security reports, see [`SECURITY.md`](SECURITY.md).
+
+---
+
 ## License
 
 [MIT](LICENSE) © Parendum OÜ
+
+---
+
+## ⭐ Like what you see?
+
+If Nexora saves you from wiring agents together by hand, **drop a star** — it helps others
+discover the project and directly shapes the roadmap. Got a question or want to show what you
+built? Open an issue or join us at **[nexora.parendum.com](https://nexora.parendum.com)**.
 
 ---
 
