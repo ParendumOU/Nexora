@@ -1,4 +1,4 @@
-﻿{
+{
   "key": "knowledge_search",
   "name": "Knowledge Search",
   "description": "Semantic search across org knowledge bases. Returns relevant document chunks matching the query.",
@@ -6,5 +6,23 @@
   "env_vars": [],
   "is_builtin": true,
   "always_allowed": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": "Semantic search query"
+    },
+    {
+      "name": "kb_id",
+      "type": "string",
+      "description": "Knowledge base id (default: all accessible)"
+    },
+    {
+      "name": "top_k",
+      "type": "integer",
+      "description": "Max chunks to return"
+    }
+  ]
 }

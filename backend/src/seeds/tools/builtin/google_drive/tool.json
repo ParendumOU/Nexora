@@ -3,7 +3,83 @@
   "name": "Google Drive",
   "description": "List, read, create and share files in Google Drive. Requires GOOGLE_SERVICE_ACCOUNT_JSON (service account key JSON).",
   "category": "integration",
-  "env_vars": ["GOOGLE_SERVICE_ACCOUNT_JSON", "GOOGLE_DRIVE_DELEGATE_EMAIL"],
+  "env_vars": [
+    "GOOGLE_SERVICE_ACCOUNT_JSON",
+    "GOOGLE_DRIVE_DELEGATE_EMAIL"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "action"
+    },
+    {
+      "name": "file_id",
+      "type": "string",
+      "description": "file id"
+    },
+    {
+      "name": "folder_id",
+      "type": "string",
+      "description": "folder id"
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "name"
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "description": "title"
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "description": "content"
+    },
+    {
+      "name": "content_type",
+      "type": "string",
+      "description": "content type"
+    },
+    {
+      "name": "query",
+      "type": "string",
+      "description": "query"
+    },
+    {
+      "name": "email",
+      "type": "string",
+      "description": "email"
+    },
+    {
+      "name": "role",
+      "type": "string",
+      "description": "role"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "description": "type"
+    },
+    {
+      "name": "notify",
+      "type": "boolean",
+      "description": "notify"
+    },
+    {
+      "name": "order_by",
+      "type": "string",
+      "description": "order by"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "limit"
+    }
+  ]
 }

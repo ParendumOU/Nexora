@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core import pubsub
 from src.core.database import AsyncSessionLocal, get_db
 from src.api.deps import get_current_user, get_active_org_id
 from src.models.user import User
@@ -17,15 +18,12 @@ from src.models.agent import Agent
 from src.models.org import OrgMember
 from src.providers.router import stream_response, AllProvidersExhausted, _METADATA_PREFIX
 from src.services.agent_context import (
-    get_chain_providers,
     get_live_chat,
     get_platform_context,
     get_agent_system_prompt,
-    get_effective_chain_id,
-    get_direct_provider,
     MODE_PREFIXES,
 )
-from src.services.agent_tools import _execute_agent_tools
+from src.services.turn_engine import resolve_providers, run_tools_and_finalize, load_agent_gen_params
 from src.api.routers.chats.access import _can_access_chat
 
 router = APIRouter()
@@ -140,14 +138,10 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
                     await _pdb.commit()
             live_chat.provider_chain_id = chain_override
 
-        direct = await get_direct_provider(live_chat) if not chain_override else []
-        effective_chain_id = chain_override or await get_effective_chain_id(live_chat)
-        chain = await get_chain_providers(effective_chain_id, org_id)
-        if direct:
-            direct_ids = {p.id for p, _ in direct}
-            providers = direct + [(p, mo) for p, mo in chain if p.id not in direct_ids]
-        else:
-            providers = chain
+        providers, effective_chain_id = await resolve_providers(
+            live_chat, org_id, chain_override=chain_override,
+            agent_id=agent_id if req.enable_agent else None,
+        )
 
         if not providers:
             yield _sse({"type": "error", "message": "No providers configured. Please add a provider in Settings."})
@@ -188,7 +182,11 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
         provider_used = providers[0][0].name if providers else None
 
         yield _sse({"type": "stream_start"})
+        # Fan out to other connected clients (WS tabs, etc.) on the same chat so an
+        # SSE-driven turn is live everywhere — parity with the WS path (#225).
+        await pubsub.broadcast(chat_id, {"type": "stream_start"})
 
+        _gen_params = await load_agent_gen_params(agent_id if req.enable_agent else None)
         try:
             async for chunk in stream_response(
                 providers, messages,
@@ -198,6 +196,8 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
                 model_override=req.model_name,
                 org_id=org_id,
                 user_id=user.id,
+                mode=req.mode,
+                **_gen_params,
             ):
                 if chunk.startswith(_METADATA_PREFIX):
                     try:
@@ -207,6 +207,7 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
                     continue
                 full_response += chunk
                 yield _sse({"type": "chunk", "content": chunk})
+                await pubsub.broadcast(chat_id, {"type": "chunk", "content": chunk})
         except AllProvidersExhausted as e:
             yield _sse({"type": "error", "message": str(e)})
             return
@@ -230,16 +231,20 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
             created_at = assistant_msg.created_at.isoformat() if assistant_msg.created_at else None
 
         # ── Tool execution (background) ────────────────────────────────────────
-        clean_response, tool_results, calls_made, had_fence, _parse_err = await _execute_agent_tools(
-            full_response, chat_id, agent_id, agent_name,
-            websocket=None,
+        # SSE path historically does not run proposals, does not append <final/>,
+        # and does not record parse errors in metadata — flags preserve that exactly.
+        _tr = await run_tools_and_finalize(
+            full_response, chat_id, agent_id, agent_name, msg_metadata,
             message_id=msg_id,
+            run_proposals=False, append_final_if_stuck=False,
+            record_parse_err_in_meta=False,
         )
-
-        new_meta = dict(msg_metadata or {})
+        clean_response = _tr.clean_response
+        tool_results = _tr.tool_results
+        calls_made = _tr.calls_made
+        had_fence = _tr.had_fence
+        new_meta = _tr.save_meta
         if calls_made:
-            new_meta["tool_call_count"] = len(calls_made)
-            new_meta["tool_calls_detail"] = calls_made
             for call in calls_made:
                 yield _sse({"type": "tool_call", "tool": call.get("tool"), "args": call.get("args", {})})
         async with AsyncSessionLocal() as db:
@@ -269,15 +274,17 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
             asyncio.create_task(_auto_title(chat_id, org_id))
 
         from src.services.sub_agent import _run_delegated_tasks
-        asyncio.create_task(_run_delegated_tasks(chat_id, org_id, user.id, nudge_if_idle=not had_fence and not tool_results))
+        asyncio.create_task(_run_delegated_tasks(chat_id, org_id, user.id, nudge_if_idle=not had_fence and not tool_results, last_turn_empty=not clean_response.strip()))
 
-        yield _sse({
+        _end_frame = {
             "type": "stream_end",
             "message_id": msg_id,
             "content": clean_response,
             "metadata": msg_metadata,
             "created_at": created_at,
-        })
+        }
+        yield _sse(_end_frame)
+        await pubsub.broadcast(chat_id, _end_frame)
 
         from src.services.webhook import fire_webhook_and_inject as _fire_webhook
         asyncio.create_task(_fire_webhook(

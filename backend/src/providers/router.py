@@ -12,8 +12,15 @@ from src.core.security import decrypt
 from src.models.provider import Provider
 from src.providers.oauth_sessions import read_provider_credentials
 from src.providers.exceptions import ProviderError, RateLimitError, AllProvidersExhausted  # noqa: F401 — re-exported
+from src.providers.provider_health import (
+    parse_retry_after,
+    record_provider_success,
+    record_provider_failure,
+)
 from src.providers.cli_streams import (
     _METADATA_PREFIX,  # noqa: F401 — re-exported for callers that import it from here
+    _STATUS_PREFIX,  # noqa: F401 — re-exported
+    _status_event,
     _stream_claude_cli,
     _stream_gemini_cli,
     _stream_codex_cli,
@@ -54,6 +61,34 @@ def _fire_metering(org_id: int | None) -> None:
 _OPENAI_COMPAT_URLS: dict[str, str | None] = {}
 _DEFAULT_MODELS: dict[str, str] = {}
 _OPENAI_COMPAT_TYPES: set[str] = set()
+
+
+def _temp(kw: dict) -> float | None:
+    """Per-agent sampling temperature passed by the caller, or None to use the
+    provider/SDK default. Non-numeric values are ignored (treated as unset)."""
+    t = kw.get("temperature")
+    return float(t) if isinstance(t, (int, float)) and not isinstance(t, bool) else None
+
+
+def _is_gemini_rate_limit(exc: object) -> bool:
+    """Prefer the typed HTTP status (429) on the genai error; fall back to a string
+    match so a wording change can't silently turn a limit into a hard failure."""
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    if code == 429:
+        return True
+    err = str(exc).lower()
+    return any(s in err for s in ("quota", "rate", "resource_exhausted", "429"))
+
+
+def _is_bedrock_throttle(exc: object) -> bool:
+    """Prefer the botocore error code; fall back to a string match."""
+    resp = getattr(exc, "response", None)
+    if isinstance(resp, dict):
+        code = (resp.get("Error") or {}).get("Code", "")
+        if code in ("ThrottlingException", "TooManyRequestsException", "ServiceQuotaExceededException"):
+            return True
+    err = str(exc).lower()
+    return "throttling" in err or "too many" in err
 
 
 # ── Rate limit helpers ────────────────────────────────────────────────────────
@@ -137,18 +172,47 @@ async def stream_claude(provider: Provider, messages: list[dict], **kw) -> Async
             if system_prompt else None
         )
         final_msg = None
-        async with client.messages.stream(
+        _claude_kw: dict = dict(
             model=model,
             max_tokens=kw.get("max_tokens", 8192),
             messages=_to_anthropic_messages(messages),
             system=system_param,
-        ) as stream:
+        )
+        _t = _temp(kw)
+        if _t is not None:
+            # Anthropic accepts temperature in [0, 1]; clamp so an out-of-range
+            # per-agent setting can't 400 the request.
+            _claude_kw["temperature"] = min(max(_t, 0.0), 1.0)
+        # Mode → extended thinking (think/deep on a reasoning-capable Claude). The
+        # model reasons server-side for a better answer. Anthropic requires no custom
+        # temperature with thinking, and max_tokens > budget, so adjust both.
+        from src.providers.reasoning import anthropic_thinking
+        _think = anthropic_thinking(kw.get("mode"), model)
+        if _think:
+            _claude_kw["thinking"] = _think
+            _claude_kw.pop("temperature", None)
+            _claude_kw["max_tokens"] = max(_claude_kw.get("max_tokens", 8192),
+                                           _think["budget_tokens"] + 4096)
+        # Native tool calling (#214): expose schema-backed tools; results are
+        # converted back into the ```tool_calls fence below.
+        _tool_keys = kw.get("tool_keys")
+        if _tool_keys:
+            from src.services.agent_tools.tool_schemas import build_provider_tools
+            _atools = build_provider_tools(_tool_keys, "anthropic")
+            if _atools:
+                _claude_kw["tools"] = _atools
+        async with client.messages.stream(**_claude_kw) as stream:
             async for text in stream.text_stream:
                 yield text
             try:
                 final_msg = await stream.get_final_message()
             except Exception:
                 pass
+        if final_msg is not None:
+            from src.providers.native_tools import anthropic_tool_uses, fence_from_calls
+            _native_calls = anthropic_tool_uses(final_msg)
+            if _native_calls:
+                yield fence_from_calls(_native_calls)
         from src.providers.cli_streams import _metadata_event
         meta: dict = {"provider": "claude", "model": model}
         if final_msg and final_msg.usage:
@@ -163,9 +227,13 @@ async def stream_claude(provider: Provider, messages: list[dict], **kw) -> Async
                 meta["usage"]["cached_input_tokens"] = cache_read
             if cache_created:
                 meta["usage"]["cache_creation_input_tokens"] = cache_created
+        # Anthropic reports stop_reason="max_tokens" when the reply hit the cap;
+        # normalize to finish_reason="length" so the router auto-continues.
+        if final_msg and getattr(final_msg, "stop_reason", None) == "max_tokens":
+            meta["finish_reason"] = "length"
         yield _metadata_event(meta)
-    except anthropic.RateLimitError:
-        raise RateLimitError("Claude rate limit")
+    except anthropic.RateLimitError as e:
+        raise RateLimitError("Claude rate limit", cooldown_seconds=parse_retry_after(e))
     except anthropic.AuthenticationError as e:
         raise ProviderError(f"Claude auth error: {e}")
 
@@ -192,14 +260,42 @@ async def stream_gemini(provider: Provider, messages: list[dict], **kw) -> Async
             config["system_instruction"] = system_parts[-1]
         if kw.get("max_tokens"):
             config["max_output_tokens"] = kw["max_tokens"]
+        _t = _temp(kw)
+        if _t is not None:
+            config["temperature"] = _t
+        # Mode → Gemini 2.5 thinking budget (0 disables for flash; a budget for
+        # think/deep). Left unset for models without a thinking knob.
+        from src.providers.reasoning import gemini_thinking_budget
+        _tb = gemini_thinking_budget(kw.get("mode"), model_name)
+        if _tb is not None:
+            config["thinking_config"] = {"thinking_budget": _tb}
+        # Native tool calling (#214): expose schema-backed tools; function_call parts
+        # are converted back into the ```tool_calls fence below.
+        _tool_keys = kw.get("tool_keys")
+        if _tool_keys:
+            from src.services.agent_tools.tool_schemas import build_provider_tools
+            _gdecls = build_provider_tools(_tool_keys, "gemini")
+            if _gdecls:
+                config["tools"] = [{"function_declarations": _gdecls}]
+        _gem_calls: list[dict] = []
 
         async for chunk in client.aio.models.generate_content_stream(
             model=model_name,
             contents=contents,
             config=config or None,
         ):
-            if chunk.text:
-                yield chunk.text
+            try:
+                _txt = chunk.text
+            except Exception:
+                _txt = None
+            if _txt:
+                yield _txt
+            if _tool_keys:
+                from src.providers.native_tools import gemini_function_calls
+                _gem_calls.extend(gemini_function_calls(chunk))
+        if _gem_calls:
+            from src.providers.native_tools import fence_from_calls
+            yield fence_from_calls(_gem_calls)
     except ImportError:
         # Fall back to legacy synchronous SDK via thread if google-genai not installed
         import google.generativeai as genai_legacy
@@ -219,14 +315,12 @@ async def stream_gemini(provider: Provider, messages: list[dict], **kw) -> Async
                 if chunk.text:
                     yield chunk.text
         except Exception as e:
-            err = str(e).lower()
-            if "quota" in err or "rate" in err or "resource_exhausted" in err:
-                raise RateLimitError(f"Gemini rate limit: {e}")
+            if _is_gemini_rate_limit(e):
+                raise RateLimitError(f"Gemini rate limit: {e}", cooldown_seconds=parse_retry_after(e))
             raise ProviderError(f"Gemini error: {e}")
     except Exception as e:
-        err = str(e).lower()
-        if "quota" in err or "rate" in err or "resource_exhausted" in err:
-            raise RateLimitError(f"Gemini rate limit: {e}")
+        if _is_gemini_rate_limit(e):
+            raise RateLimitError(f"Gemini rate limit: {e}", cooldown_seconds=parse_retry_after(e))
         raise ProviderError(f"Gemini error: {e}")
 
 
@@ -260,43 +354,91 @@ async def stream_openai_compat(provider: Provider, messages: list[dict], **kw) -
         formatted.insert(0, {"role": "system", "content": kw["system_prompt"]})
 
     try:
-        # Try with usage reporting; fall back silently if provider rejects stream_options
+        _oai_kw: dict = dict(
+            model=model,
+            messages=formatted,
+            stream=True,
+            max_tokens=kw.get("max_tokens", 8192),
+            extra_headers=extra_headers or None,
+        )
+        _t = _temp(kw)
+        if _t is not None:
+            _oai_kw["temperature"] = _t
+        # Native tool calling (#214): expose schema-backed tools; structured calls
+        # are accumulated across deltas and emitted as a ```tool_calls fence below.
+        _tool_keys = kw.get("tool_keys")
+        if _tool_keys:
+            from src.services.agent_tools.tool_schemas import build_provider_tools
+            _otools = build_provider_tools(_tool_keys, "openai")
+            if _otools:
+                _oai_kw["tools"] = _otools
+                _oai_kw["tool_choice"] = "auto"
+        # Mode → reasoning effort (think/deep on an OpenAI reasoning model).
+        from src.providers.reasoning import openai_reasoning_effort
+        _re = openai_reasoning_effort(kw.get("mode"), ptype, model)
+        if _re:
+            _oai_kw["reasoning_effort"] = _re
+        # Try with usage reporting; fall back without the optional extras if the
+        # provider/model rejects stream_options and/or reasoning_effort.
         try:
             stream = await client.chat.completions.create(
-                model=model,
-                messages=formatted,
-                stream=True,
-                stream_options={"include_usage": True},
-                max_tokens=kw.get("max_tokens", 8192),
-                extra_headers=extra_headers or None,
+                stream_options={"include_usage": True}, **_oai_kw,
             )
         except Exception:
-            stream = await client.chat.completions.create(
-                model=model,
-                messages=formatted,
-                stream=True,
-                max_tokens=kw.get("max_tokens", 8192),
-                extra_headers=extra_headers or None,
-            )
+            _oai_kw.pop("reasoning_effort", None)
+            stream = await client.chat.completions.create(**_oai_kw)
         usage_data = None
+        finish_reason = None
+        _tc_acc: dict = {}
+        _reasoning_open = False
         async for chunk in stream:
             if chunk.usage:
                 usage_data = chunk.usage
             if not chunk.choices:
                 continue
-            delta = chunk.choices[0].delta.content
+            if chunk.choices[0].finish_reason:
+                finish_reason = chunk.choices[0].finish_reason
+            _delta_obj = chunk.choices[0].delta
+            # Provider-native reasoning (DeepSeek `reasoning_content`, OpenRouter /
+            # others `reasoning`): surface it wrapped in <think> so the UI renders it
+            # as a collapsible thinking block. Free — just relays what the provider
+            # already streamed; no-op when the field is absent.
+            _rc = getattr(_delta_obj, "reasoning_content", None) or getattr(_delta_obj, "reasoning", None)
+            if _rc:
+                if not _reasoning_open:
+                    yield "<think>"
+                    _reasoning_open = True
+                yield _rc
+            _delta_tcs = getattr(_delta_obj, "tool_calls", None)
+            if _delta_tcs:
+                from src.providers.native_tools import accumulate_openai_tool_calls
+                accumulate_openai_tool_calls(_tc_acc, _delta_tcs)
+            delta = _delta_obj.content
             if delta:
+                if _reasoning_open:
+                    yield "</think>\n"
+                    _reasoning_open = False
                 yield delta
+        if _reasoning_open:
+            yield "</think>"
+        if _tc_acc:
+            from src.providers.native_tools import finalize_openai_tool_calls, fence_from_calls
+            _native_calls = finalize_openai_tool_calls(_tc_acc)
+            if _native_calls:
+                yield fence_from_calls(_native_calls)
+        from src.providers.cli_streams import _metadata_event
+        _meta: dict = {"provider": ptype, "model": model}
         if usage_data:
-            from src.providers.cli_streams import _metadata_event
-            yield _metadata_event({
-                "provider": ptype,
-                "model": model,
-                "usage": {
-                    "input_tokens": usage_data.prompt_tokens or 0,
-                    "output_tokens": usage_data.completion_tokens or 0,
-                },
-            })
+            _meta["usage"] = {
+                "input_tokens": usage_data.prompt_tokens or 0,
+                "output_tokens": usage_data.completion_tokens or 0,
+            }
+        # Surface truncation so the router can auto-continue instead of leaving the
+        # reply cut off mid-output (a hit on max_tokens reports finish_reason="length").
+        if finish_reason:
+            _meta["finish_reason"] = finish_reason
+        if usage_data or finish_reason:
+            yield _metadata_event(_meta)
     except OAIRateLimit as e:
         err_code = getattr(e, "code", None) or ""
         body = getattr(e, "body", {}) or {}
@@ -325,9 +467,11 @@ async def stream_openai_compat(provider: Provider, messages: list[dict], **kw) -
                     # FreeUsageLimitError: daily free tier — default 24h
                     # GoUsageLimitError without time info: default 5h
                     cooldown_hint = 86400 if err_type == "FreeUsageLimitError" else 5 * 3600
+        # A Retry-After / ratelimit-reset header (when present) is the most accurate
+        # signal; fall back to the parsed provider-specific usage-limit hint.
         raise RateLimitError(
             f"{ptype}: {e.message if hasattr(e, 'message') else str(e)}",
-            cooldown_seconds=cooldown_hint,
+            cooldown_seconds=parse_retry_after(e) or cooldown_hint,
         )
     except OAIAuth as e:
         raise ProviderError(f"{ptype} auth error: {e}")
@@ -341,11 +485,21 @@ async def stream_ollama(provider: Provider, messages: list[dict], **kw) -> Async
     model = provider.model_name or _DEFAULT_MODELS.get("ollama", "")
     formatted = [{"role": m["role"], "content": m["content"]} for m in messages]
 
+    _options: dict = {}
+    _t = _temp(kw)
+    if _t is not None:
+        _options["temperature"] = _t
+    if kw.get("max_tokens"):
+        _options["num_predict"] = kw["max_tokens"]
+    _body: dict = {"model": model, "messages": formatted, "stream": True}
+    if _options:
+        _body["options"] = _options
+
     async with httpx.AsyncClient(timeout=120) as client:
         try:
             async with client.stream(
                 "POST", f"{base_url}/api/chat",
-                json={"model": model, "messages": formatted, "stream": True},
+                json=_body,
             ) as response:
                 async for line in response.aiter_lines():
                     if line:
@@ -400,18 +554,22 @@ async def stream_vertex_ai(provider: Provider, messages: list[dict], **kw) -> As
     if kw.get("system_prompt"):
         formatted.insert(0, {"role": "system", "content": kw["system_prompt"]})
 
+    _vx_kw: dict = dict(
+        model=model_name,
+        messages=formatted,
+        stream=True,
+        max_tokens=kw.get("max_tokens", 8192),
+    )
+    _t = _temp(kw)
+    if _t is not None:
+        _vx_kw["temperature"] = _t
     try:
-        stream = await client.chat.completions.create(
-            model=model_name,
-            messages=formatted,
-            stream=True,
-            max_tokens=kw.get("max_tokens", 8192),
-        )
+        stream = await client.chat.completions.create(**_vx_kw)
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
     except OAIRateLimit as e:
-        raise RateLimitError(f"Vertex AI rate limit: {e}")
+        raise RateLimitError(f"Vertex AI rate limit: {e}", cooldown_seconds=parse_retry_after(e))
     except OAIAuth as e:
         raise ProviderError(f"Vertex AI auth error: {e}")
     except Exception as e:
@@ -447,6 +605,10 @@ async def stream_bedrock(provider: Provider, messages: list[dict], **kw) -> Asyn
     ]
 
     max_tokens = kw.get("max_tokens", 8192)
+    _inference: dict = {"maxTokens": max_tokens}
+    _t = _temp(kw)
+    if _t is not None:
+        _inference["temperature"] = _t
 
     def _call():
         client = boto3.client("bedrock-runtime", **kw_boto)
@@ -456,20 +618,20 @@ async def stream_bedrock(provider: Provider, messages: list[dict], **kw) -> Asyn
         return client.converse_stream(
             modelId=model,
             messages=converse_msgs,
-            inferenceConfig={"maxTokens": max_tokens},
+            inferenceConfig=_inference,
             **extra,
         )
 
     try:
         response = await asyncio.to_thread(_call)
     except Exception as e:
-        err = str(e).lower()
-        if "throttling" in err or "too many" in err:
-            raise RateLimitError(f"Bedrock rate limit: {e}")
+        if _is_bedrock_throttle(e):
+            raise RateLimitError(f"Bedrock rate limit: {e}", cooldown_seconds=parse_retry_after(e))
         raise ProviderError(f"Bedrock error: {e}")
 
     input_tokens = 0
     output_tokens = 0
+    stop_reason = None
     try:
         for event in response["stream"]:
             if "contentBlockDelta" in event:
@@ -477,6 +639,8 @@ async def stream_bedrock(provider: Provider, messages: list[dict], **kw) -> Asyn
                 text = delta.get("text", "")
                 if text:
                     yield text
+            elif "messageStop" in event:
+                stop_reason = event["messageStop"].get("stopReason")
             elif "metadata" in event:
                 usage = event["metadata"].get("usage", {})
                 input_tokens = usage.get("inputTokens", 0)
@@ -488,6 +652,9 @@ async def stream_bedrock(provider: Provider, messages: list[dict], **kw) -> Asyn
     meta: dict = {"provider": "bedrock", "model": model}
     if input_tokens or output_tokens:
         meta["usage"] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+    # Bedrock Converse reports stopReason="max_tokens" on truncation → auto-continue.
+    if stop_reason == "max_tokens":
+        meta["finish_reason"] = "length"
     yield _metadata_event(meta)
 
 
@@ -532,82 +699,71 @@ def _build_provider_registry() -> None:
 _build_provider_registry()
 
 
-# ── Provider health tracking ──────────────────────────────────────────────────
-
-def _record_provider_error(provider_id: str, error: str) -> None:
-    """Fire-and-forget: persist auth error to providers table."""
-    import asyncio as _asyncio
-    from datetime import datetime, timezone
-
-    async def _write() -> None:
-        try:
-            from src.core.database import AsyncSessionLocal
-            from sqlalchemy import update as _update
-            from src.models.provider import Provider as _P
-            async with AsyncSessionLocal() as db:
-                await db.execute(
-                    _update(_P).where(_P.id == provider_id).values(
-                        last_error=error[:500],
-                        last_error_at=datetime.now(timezone.utc),
-                    )
-                )
-                await db.commit()
-        except Exception as exc:
-            logger.debug("Failed to record provider error: %s", exc)
-
-    try:
-        loop = _asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(_write())
-    except Exception:
-        pass
-
-
-def _record_provider_success(provider_id: str) -> None:
-    """Fire-and-forget: clear last_error and update last_used_at."""
-    import asyncio as _asyncio
-    from datetime import datetime, timezone
-
-    async def _write() -> None:
-        try:
-            from src.core.database import AsyncSessionLocal
-            from sqlalchemy import update as _update
-            from src.models.provider import Provider as _P
-            async with AsyncSessionLocal() as db:
-                await db.execute(
-                    _update(_P).where(_P.id == provider_id).values(
-                        last_error=None,
-                        last_error_at=None,
-                        last_used_at=datetime.now(timezone.utc),
-                    )
-                )
-                await db.commit()
-        except Exception as exc:
-            logger.debug("Failed to record provider success: %s", exc)
-
-    try:
-        loop = _asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(_write())
-    except Exception:
-        pass
-
-
 # ── Main fallback chain ───────────────────────────────────────────────────────
+
+
+def _is_durably_cooling(provider: Provider) -> bool:
+    """Durable (DB-backed) cooldown gate complementing the fast Redis check.
+
+    Survives a Redis flush/restart: an account whose ``cooling_until`` is still in
+    the future is skipped even if the ephemeral Redis key is gone.
+    """
+    cu = getattr(provider, "cooling_until", None)
+    if not cu:
+        return False
+    from datetime import datetime, timezone
+    if cu.tzinfo is None:
+        cu = cu.replace(tzinfo=timezone.utc)
+    return cu > datetime.now(timezone.utc)
 
 async def stream_response(
     providers: list[tuple[Provider, str | None]],
     messages: list[dict],
+    *,
+    status_events: bool = False,
     **kwargs,
 ) -> AsyncIterator[str]:
-    """Try each (provider, step_model_override) pair in order, falling back on rate limits."""
+    """Try each (provider, step_model_override) pair in order, falling back on rate limits.
+
+    When ``status_events`` is set, the generator also yields ``_STATUS_PREFIX`` lines
+    describing the live fallback chain (which provider is being tried, failovers,
+    empty-retries). Only opt-in callers (the chat WebSocket) consume these; other
+    callers (titles, telegram, sub-agents) leave it False so the sentinel never leaks
+    into accumulated text.
+    """
     last_error = None
+    _tried_any = False  # becomes True after the first attempt → later picks are "failovers"
+
+    # Native tool calling (#214): resolve the agent's schema-backed tools once and
+    # pass their keys to the adapters (which convert structured calls back into the
+    # ```tool_calls fence). No-op when the flag is off → text-fence path unchanged.
+    from src.core.config import get_settings as _get_settings_nt
+    if _get_settings_nt().native_tools_enabled and "tool_keys" not in kwargs:
+        _aid = kwargs.get("agent_id")
+        _cid = kwargs.get("chat_id")
+        if _aid and _cid:
+            try:
+                from src.services.agent_tools.tool_permissions import _get_agent_enabled_tools
+                from src.providers.native_tools import all_schemaed_tool_keys
+                _enabled = await _get_agent_enabled_tools(_aid, _cid)
+                kwargs["tool_keys"] = sorted(_enabled) if _enabled else all_schemaed_tool_keys()
+            except Exception as _nt_exc:
+                logger.debug("native tool_keys resolve failed: %s", _nt_exc)
+
+    def _status(label: str) -> str | None:
+        return _status_event(label) if status_events else None
 
     for provider, step_model in providers:
         if not provider.is_active:
             continue
-        if await is_cooling(provider.id):
+        # Skip a cooling/exhausted account: fast ephemeral Redis gate OR the durable
+        # DB cooling_until (so a cooldown survives a Redis flush/restart). Failover
+        # then advances to the next account of the same type, then the next type.
+        if await is_cooling(provider.id) or _is_durably_cooling(provider):
             logger.info(f"Provider {provider.name} cooling, skipping")
+            _s = _status(f"{provider.name} cooling down — skipping")
+            if _s:
+                yield _s
             continue
 
         stream_fn = PROVIDER_STREAMS.get(provider.provider_type)
@@ -619,33 +775,121 @@ async def stream_response(
         if step_model:
             effective.model_name = step_model
 
+        _model_lbl = effective.model_name or "default"
+        _s = _status(
+            (f"Switching to {provider.name}" if _tried_any else f"Using {provider.name}")
+            + f" · {_model_lbl}"
+        )
+        if _s:
+            yield _s
+        _tried_any = True
+
         try:
             logger.info(f"Using provider: {provider.name} ({provider.provider_type}, model={effective.model_name or 'default'})")
+            from src.core.config import get_settings as _get_settings
+            _settings = _get_settings()
+            _max_continues = _settings.max_truncation_continuations
+            _max_empty_retries = _settings.max_empty_retries
             content_yielded = False
-            async for chunk in stream_fn(effective, messages, **kwargs):
-                if not chunk.startswith(_METADATA_PREFIX):
-                    content_yielded = True
-                yield chunk
+            # Retry-on-empty: flaky weak models (e.g. OpenCode Go fallback when Claude
+            # OAuth is down) intermittently stream ZERO content — one such empty turn
+            # used to kill the whole chat. Retry the SAME provider a few times. Safe
+            # because we only retry while content_yielded is False (nothing emitted
+            # downstream yet), so a later success can't duplicate earlier output.
+            for _empty_attempt in range(_max_empty_retries + 1):
+                # Auto-continue a reply truncated at max_tokens (finish_reason="length"):
+                # re-call with the partial + a "continue where you left off" instruction so
+                # the user gets the full response (and the watchdog doesn't mark a truncated
+                # turn as <final/>). Capped to avoid runaway loops.
+                cont_messages = list(messages)
+                partial_acc = ""
+                continues = 0
+                while True:
+                    finish_reason = None
+                    turn_text = ""
+                    async for chunk in stream_fn(effective, cont_messages, **kwargs):
+                        if chunk.startswith(_METADATA_PREFIX):
+                            try:
+                                _m = json.loads(chunk[len(_METADATA_PREFIX):])
+                                if _m.get("finish_reason"):
+                                    finish_reason = _m["finish_reason"]
+                            except Exception:
+                                pass
+                            # Metadata (usage/finish_reason) trails content in every stream
+                            # fn. Emit it only for the first content-bearing turn — so an
+                            # empty turn we're about to retry emits no usage, and continuation
+                            # turns don't double-emit. Account-name metadata is added at the end.
+                            if continues == 0 and content_yielded:
+                                yield chunk
+                            continue
+                        content_yielded = True
+                        turn_text += chunk
+                        yield chunk
+                    if finish_reason == "length" and turn_text and continues < _max_continues:
+                        continues += 1
+                        partial_acc += turn_text
+                        logger.info(
+                            f"Provider {provider.name} truncated at max_tokens — "
+                            f"auto-continuing ({continues}/{_max_continues})"
+                        )
+                        from src.seeds.loader import get_prompt as _get_prompt
+                        try:
+                            _cont_instr = _get_prompt("continue_truncated").strip()
+                        except Exception:
+                            _cont_instr = "Continue exactly where you left off without repeating anything."
+                        cont_messages = list(messages) + [
+                            {"role": "assistant", "content": partial_acc},
+                            {"role": "user", "content": _cont_instr},
+                        ]
+                        continue
+                    break
+                if content_yielded:
+                    break  # got a real response — stop retrying
+                if _empty_attempt < _max_empty_retries:
+                    logger.warning(
+                        f"Provider {provider.name} streamed empty — retrying same provider "
+                        f"({_empty_attempt + 1}/{_max_empty_retries})"
+                    )
+                    _s = _status(
+                        f"{provider.name} returned empty — retrying "
+                        f"({_empty_attempt + 1}/{_max_empty_retries})"
+                    )
+                    if _s:
+                        yield _s
+                    await asyncio.sleep(0.6)
             if content_yielded:
                 from src.providers.cli_streams import _metadata_event
                 yield _metadata_event({"account_name": provider.name})
                 _fire_metering(kwargs.get("org_id"))
-                _record_provider_success(provider.id)
+                record_provider_success(provider.id)
                 return
             logger.warning(f"Provider {provider.name} returned an empty response, trying next")
+            _s = _status(f"{provider.name} returned empty — trying next provider")
+            if _s:
+                yield _s
             last_error = ProviderError(f"{provider.name} returned an empty response")
+            record_provider_failure(provider.id, "empty response", rate_limited=False)
         except RateLimitError as e:
+            # Prefer the provider's own cooldown hint (adapters parse Retry-After /
+            # ratelimit-reset headers into cooldown_seconds), else the per-account default.
             cooldown = getattr(e, "cooldown_seconds", None) or provider.cooldown_seconds
             logger.warning(f"Rate limit on {provider.name}: {e} (cooling {cooldown}s)")
+            _s = _status(f"{provider.name} rate-limited — failing over")
+            if _s:
+                yield _s
             await set_cooling(provider.id, cooldown)
+            record_provider_failure(provider.id, str(e), rate_limited=True, cooldown_seconds=cooldown)
             last_error = e
         except ProviderError as e:
             logger.warning(f"Provider error on {provider.name}: {e}")
+            _s = _status(f"{provider.name} failed — failing over")
+            if _s:
+                yield _s
             last_error = e
-            # Auth errors (401/403/auth keyword) recorded so the UI can surface them
-            err_str = str(e).lower()
-            if any(w in err_str for w in ("auth", "401", "403", "unauthorized", "invalid api key", "permission")):
-                _record_provider_error(provider.id, str(e))
+            # Record every provider failure so health/circuit state is accurate (not
+            # just auth errors): consecutive non-rate failures eventually mark the
+            # account exhausted so it's skipped for a while.
+            record_provider_failure(provider.id, str(e), rate_limited=False)
 
     msg = str(last_error) if last_error else "No available providers"
     raise AllProvidersExhausted(msg)

@@ -1,9 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { User, Bot, Copy, Check, ChevronDown, Pencil, X, SendHorizonal, EyeOff, Eye, Briefcase, AlertTriangle, CornerDownRight } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { User, Bot, Copy, Check, ChevronDown, ChevronRight, Pencil, X, SendHorizonal, EyeOff, Eye, Briefcase, AlertTriangle, CornerDownRight } from "lucide-react";
+import { cn, copyToClipboard } from "@/lib/utils";
 
 interface UsageMeta {
   input_tokens?: number;
@@ -23,6 +23,7 @@ interface MessageMeta {
   kind?: "task_brief" | "task_error" | "tool_result_injection" | "child_task_injection" | "nudge";
   from_agent_id?: string | null;
   tg_user_display?: string;
+  error?: boolean;
 }
 
 interface MessageProps {
@@ -66,7 +67,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-[#161b22]">
         <span className="text-[10px] font-mono text-muted-foreground">{language || "code"}</span>
         <button
-          onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+          onClick={() => { copyToClipboard(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
           className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
         >
           {copied ? <><Check className="w-3 h-3 text-green-400" />Copied</> : <><Copy className="w-3 h-3" />Copy</>}
@@ -225,21 +226,135 @@ function ToolResultDisplay({ content }: { content: string }) {
 const THINKING_RE = /<(?:thinking|think)>([\s\S]*?)<\/(?:thinking|think)>/gi;
 const PROPOSAL_RE = /<proposal>([\s\S]*?)<\/proposal>/gi;
 
-function ThinkingBlock({ blocks }: { blocks: string[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const combined = blocks.join("\n\n---\n\n");
+// Inside reasoning, the model often pastes tool-call JSON / fenced code. Match those
+// spans so they can render as a compact chip instead of a raw JSON dump.
+const TOOLCALL_IN_THOUGHT_RE =
+  /```[\s\S]*?```|\[\s*\{[\s\S]*?"name"\s*:[\s\S]*?\}\s*\]|\{\s*"name"\s*:\s*"[\w-]+"[\s\S]*?\}/g;
+
+function toolNamesIn(snippet: string): string[] {
+  const names: string[] = [];
+  const re = /"name"\s*:\s*"([\w-]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(snippet))) names.push(m[1]);
+  return names;
+}
+
+// Replace embedded tool-call JSON / code fences inside a thought with an inline-code
+// chip (`⚙ tool names`) so the reasoning renders as readable markdown instead of a
+// raw JSON dump.
+function toThoughtMarkdown(text: string): string {
+  return text.replace(TOOLCALL_IN_THOUGHT_RE, (m) => {
+    const names = toolNamesIn(m);
+    return "`⚙ " + (names.length ? names.join(" · ") : "code") + "`";
+  });
+}
+
+function thoughtSummary(text: string): string {
+  const names = toolNamesIn(text);
+  const rawFirst = (text.split("\n").find((l) => l.trim()) || "").trim();
+  // Code / tool-call paragraph → chip-style summary.
+  if (rawFirst.startsWith("```") || rawFirst.startsWith("[") || rawFirst.startsWith("{")) {
+    return names.length ? "⚙ " + names.join(", ") : "⚙ code";
+  }
+  // Strip list/heading markers (leading) then markdown emphasis/code markers
+  // (anywhere) so a summary like "2. **Determine the Workflow:**" reads
+  // "Determine the Workflow".
+  const clean = rawFirst
+    .replace(/^[#>\-*\d.\s]+/, "")
+    .replace(/[*`_~]+/g, "")
+    .replace(/:\s*$/, "")
+    .trim();
+  return (clean || (names.length ? "⚙ " + names.join(", ") : "")).slice(0, 90);
+}
+
+// One reasoning paragraph ("thought"). Collapsed → first-line summary; expanded →
+// full text (tool-call JSON rendered as chips). `defaultOpen` follows the live
+// state — only the LATEST thought is open while thinking; past ones fold as new
+// ones arrive, and everything folds once thinking finishes. A click overrides.
+function ThoughtItem({ text, index, defaultOpen }: { text: string; index: number; defaultOpen: boolean }) {
+  const [open, setOpen] = useState<boolean | null>(null);
+  const isOpen = open ?? defaultOpen;
+  return (
+    <div className="py-px">
+      <button
+        onClick={() => setOpen(!isOpen)}
+        className="flex items-start gap-1 text-left w-full text-muted-foreground/70 hover:text-muted-foreground transition-colors"
+      >
+        <ChevronRight className={cn("w-3 h-3 mt-0.5 shrink-0 transition-transform", isOpen && "rotate-90")} />
+        {isOpen
+          ? <span className="text-[10px] uppercase tracking-wide opacity-50">Thought {index + 1}</span>
+          : <span className="truncate">{thoughtSummary(text) || `Thought ${index + 1}`}</span>}
+      </button>
+      {isOpen && (
+        <div className="pl-4 leading-relaxed text-muted-foreground prose-chat max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_code]:text-[10px]">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{toThoughtMarkdown(text)}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThinkingBlock({ blocks, live }: { blocks: string[]; live?: boolean }) {
+  // Expanded while the model is still thinking (no answer yet), auto-collapsed once
+  // the answer streams in. A manual click takes over after. CLI-like.
+  const [manual, setManual] = useState<boolean | null>(null);
+  const expanded = manual ?? !!live;
+
+  const combined = blocks.join("\n\n");
+  // Each paragraph (double newline) is one "thought".
+  const thoughts = useMemo(
+    () => combined.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean),
+    [combined],
+  );
+
+  // Auto-scroll to the latest reasoning while live, unless the user scrolled up.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
+  useEffect(() => {
+    if (expanded && pinnedRef.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [combined, expanded]);
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (el) pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  };
+
+  // Duration: start when live begins, freeze when it ends → "Thought for Ns".
+  const startRef = useRef<number>(Date.now());
+  const wasLive = useRef(false);
+  const [elapsed, setElapsed] = useState<number | null>(null);
+  useEffect(() => {
+    if (live && !wasLive.current) { startRef.current = Date.now(); wasLive.current = true; }
+    else if (!live && wasLive.current) {
+      setElapsed(Math.max(1, Math.round((Date.now() - startRef.current) / 1000)));
+      wasLive.current = false;
+    }
+  }, [live]);
+
+  const label = live ? "Thinking…" : (elapsed != null ? `Thought for ${elapsed}s` : "Thought");
+
   return (
     <div className="mb-2">
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => setManual(!expanded)}
         className="flex items-center gap-1.5 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors italic"
       >
         <ChevronDown className={cn("w-3 h-3 transition-transform shrink-0", expanded && "rotate-180")} />
-        Thinking…
+        {label}
+        {thoughts.length > 1 && <span className="opacity-60 not-italic"> · {thoughts.length} steps</span>}
       </button>
       {expanded && (
-        <div className="mt-2 pl-3 border-l-2 border-border/40 text-[11px] text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto">
-          {combined.trim()}
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="mt-2 pl-3 border-l-2 border-border/40 text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-0.5"
+        >
+          {thoughts.map((t, i) => (
+            // While live, only the LATEST thought stays open; past ones fold to a
+            // summary as new ones arrive. Once thinking ends, all fold (re-expandable).
+            <ThoughtItem key={i} text={t} index={i} defaultOpen={!!live && i === thoughts.length - 1} />
+          ))}
         </div>
       )}
     </div>
@@ -280,6 +395,18 @@ export function ChatMessage({
       </div>
     );
   }
+  if (metadata?.error) {
+    return (
+      <div className="mx-4 my-3 rounded-xl border border-destructive/40 bg-destructive/5 text-xs overflow-hidden animate-fade-in">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-destructive/30">
+          <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0" />
+          <span className="font-medium text-foreground">{agentName || "Agent"}</span>
+          <span className="text-[10px] uppercase tracking-wide text-destructive/80 ml-auto">Failed to respond</span>
+        </div>
+        <div className="px-4 py-3 text-[13px] text-destructive whitespace-pre-wrap break-words">{content}</div>
+      </div>
+    );
+  }
   if (metadata?.kind === "task_error") {
     return (
       <div className="mx-4 my-3 rounded-xl border border-destructive/40 bg-destructive/5 text-xs overflow-hidden animate-fade-in">
@@ -317,11 +444,31 @@ export function ChatMessage({
     .replace(/```[ \t]*\ntool_calls[\s\S]*?```/gi, "")
     // Strip tool_calls XML format (LLM sometimes uses this instead of backtick fences)
     .replace(/<tool_calls>[\s\S]*?<\/tool_calls>/gi, "")
+    // Defensive: strip a leaked, unfenced tool-call args fragment (malformed JSON that
+    // escaped backend cleaning). Anchored on keys that never appear in real prose, so
+    // this only removes machine residue — e.g. ..."assigned_agent_id":"…","agent_overrides":{…}}}]
+    .replace(/[^\n]*?"(?:assigned_agent_id|agent_overrides|system_prompt_append|tool_name)"\s*:[\s\S]*?\}{1,3}\s*\]?/gi, "")
     // Strip echoed tool-result header lines: **toolname**: (model re-echoing injection format)
     .replace(/^\*\*[\w_]+\*\*:[ \t]*$/gm, "")
     // Remove orphaned backtick-only lines left after fence stripping
     .replace(/^```\s*$/gm, "")
     .trim();
+  // Live: an as-yet-unclosed <think>/<thinking> (closing tag not streamed yet).
+  // THINKING_RE only matches closed blocks, so while streaming we surface the
+  // open block's current text as a live reasoning block and keep it out of the
+  // answer body — "watch it think", matching NexoraCLI. A finished message always
+  // has the closing tag, handled above.
+  if (isStreaming) {
+    const oThink = strippedContent.lastIndexOf("<think>");
+    const oThinking = strippedContent.lastIndexOf("<thinking>");
+    const idx = Math.max(oThink, oThinking);
+    if (idx !== -1) {
+      const tag = oThinking > oThink ? "<thinking>" : "<think>";
+      const live = strippedContent.slice(idx + tag.length).trim();
+      if (live) thinkingBlocks.push(live);
+      strippedContent = strippedContent.slice(0, idx).trim();
+    }
+  }
   // A whole-message bare tool-call/decompose JSON the model emitted instead of using
   // the protocol — [{"name":"task_create","args":{…}}] or [{"title":…,"task":…}] or a
   // single {"name":…,"args":…} object. Not user-facing; drop it.
@@ -348,7 +495,7 @@ export function ChatMessage({
   const [editContent, setEditContent] = useState(content);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(content);
+    copyToClipboard(content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -463,7 +610,9 @@ export function ChatMessage({
                 : "bg-card border border-border rounded-tl-sm prose-chat"
             )}
           >
-            {thinkingBlocks.length > 0 && <ThinkingBlock blocks={thinkingBlocks} />}
+            {thinkingBlocks.length > 0 && (
+              <ThinkingBlock blocks={thinkingBlocks} live={!!isStreaming && !strippedContent} />
+            )}
             {isToolResult ? (
               <ToolResultDisplay content={strippedContent} />
             ) : isUser && !isAgent ? (

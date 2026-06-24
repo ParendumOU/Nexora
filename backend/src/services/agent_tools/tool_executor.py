@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -147,6 +148,51 @@ def _get_executor(name: str):
     return _executor_registry.get(name)
 
 
+# Platform tools implemented inline in _run_single_tool (no executor.py). Kept as a
+# constant so is_executable_tool() and the dispatch agree on what's "real".
+_INLINE_TOOLS: frozenset[str] = frozenset({
+    "task_create", "task_update", "task_delete", "spawn_subagent",
+    "plan_create", "plan_step_complete", "plan_complete",
+    "board_read", "log_entry", "attach_file",
+})
+
+
+def is_executable_tool(key: str) -> bool:
+    """True if a tool key resolves to a real handler (GitLab #226).
+
+    Mirrors the dispatch resolution order in `_run_single_tool`: inline platform
+    tool, local-exec proxy tool, an `executor.py` (tools or skills), a subprocess
+    (requirements.txt) tool, or a skill `<key>_<cmd>` tool. "Phantom" tools that
+    ship only `tool.json` + `TOOL.md` (no handler) return False so the catalog can
+    avoid advertising a tool that would just answer "Unknown tool".
+    """
+    if not key:
+        return False
+    if key in _INLINE_TOOLS:
+        return True
+    try:
+        from src.services.agent_tools import local_exec
+        if key in local_exec.LOCAL_TOOLS:
+            return True
+    except Exception:
+        pass
+    if _get_executor(key) is not None:
+        return True
+    try:
+        from src.services.agent_tools import tool_subprocess
+        if tool_subprocess.has_requirements(key):
+            return True
+    except Exception:
+        pass
+    try:
+        from src.services.agent_tools.skill_runner import _resolve_skill_tool
+        if _resolve_skill_tool(key) is not None:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _parse_tool_calls(raw_json: str) -> list[dict] | None:
     """Parse tool calls JSON tolerantly.
 
@@ -212,6 +258,36 @@ def _titles_overlap(a: str, b: str) -> bool:
     return len(short) >= 15 and long.startswith(short)
 
 
+_RETRIEVAL_VERB_RE = re.compile(
+    r'\b(find|locate|retrieve|look\s+for|search\s+for|check\s+for|fetch|'
+    r'buscar|encontrar|localizar|recuperar)\b', re.IGNORECASE)
+_RETRIEVAL_OBJECT_RE = re.compile(
+    r'\b(files?|outputs?|attachments?|cards?|documents?|results?|'
+    r'archivos?|ficheros?)\b', re.IGNORECASE)
+# Imperative creation/modification verbs (whole words only — NOT "created"/"produced",
+# which describe PRIOR work being retrieved, the exact case we want to block).
+_CREATION_VERB_RE = re.compile(
+    r'\b(create|build|generate|write|implement|fix|refactor|make|design|'
+    r'crear|generar|escribir|construir)\b', re.IGNORECASE)
+
+
+def _is_pure_retrieval_delegation(title: str, desc: str) -> bool:
+    """Heuristic: is this delegated task just 'go find/retrieve the file(s) a previous
+    agent produced'? Such tasks are pointless — produced files are tracked + delivered —
+    and were a real spin loop (orchestrator spawns 'Local Operator' to hunt the disk).
+    Conservative: requires BOTH a retrieval verb AND a file-ish object, and no imperative
+    creation verb, so genuine specialist work ('find the bug', 'build + save a report')
+    is not blocked. Word-boundary matching so 'created/produced by' doesn't read as 'create'."""
+    blob = f"{title} {desc}"
+    if not _RETRIEVAL_VERB_RE.search(blob):
+        return False
+    if not _RETRIEVAL_OBJECT_RE.search(blob):
+        return False
+    if _CREATION_VERB_RE.search(blob):
+        return False
+    return True
+
+
 async def _resolve_local_bridge(chat_id: str, parent_chat_id: str | None):
     """Find a registered local-exec bridge for this chat or any ancestor chat.
 
@@ -238,6 +314,269 @@ async def _resolve_local_bridge(chat_id: str, parent_chat_id: str | None):
             row = await db.execute(select(Chat.parent_chat_id).where(Chat.id == cur))
             cur = row.scalar_one_or_none()
     return None
+
+
+async def _attach_file(
+    args: dict,
+    chat_id: str,
+    agent_id: str | None,
+    agent_name: str | None,
+    parent_chat_id: str | None,
+) -> dict:
+    """Register a file the agent produced as a downloadable chat attachment.
+
+    Web/container chats: read the file from the container filesystem.
+    CLI local-exec chats: read it back from the user's host through the local bridge.
+    Either way the bytes are stored in upload_dir and a ChatFile row is created so the
+    file shows in the Files panel and is downloadable in one click. A `file_created`
+    event is broadcast (to the root chat, and the sub-chat if different) for live refresh.
+    """
+    import mimetypes
+    from pathlib import Path
+    from src.core.config import get_settings
+    from src.core.pubsub import broadcast
+    from src.models.chat_file import ChatFile
+    from src.models.chat import ChatParticipant
+
+    path_str = (args.get("path") or "").strip()
+    if not path_str:
+        return {"tool": "attach_file", "error": "path is required"}
+    display_name = (args.get("name") or Path(path_str).name or "file").strip()
+
+    # Resolve the root chat (files hang off the conversation root) and an owner user_id.
+    root_id = chat_id
+    owner_id: str | None = None
+    async with AsyncSessionLocal() as db:
+        seen: set[str] = set()
+        cur: str | None = chat_id
+        while cur and cur not in seen:
+            seen.add(cur)
+            row = (await db.execute(select(Chat).where(Chat.id == cur))).scalar_one_or_none()
+            if not row:
+                break
+            if row.user_id and owner_id is None:
+                owner_id = row.user_id
+            if not row.parent_chat_id:
+                root_id = row.id
+                if row.user_id:
+                    owner_id = row.user_id
+                break
+            cur = row.parent_chat_id
+        if not owner_id:
+            part = (await db.execute(
+                select(ChatParticipant.user_id)
+                .where(ChatParticipant.chat_id == root_id)
+                .limit(1)
+            )).scalar_one_or_none()
+            owner_id = part
+    if not owner_id:
+        return {"tool": "attach_file", "error": "Could not resolve a file owner for this chat"}
+
+    # Acquire the file bytes — via the local-exec bridge if this chat proxies to a CLI host,
+    # otherwise straight from the container filesystem.
+    bridge = await _resolve_local_bridge(chat_id, parent_chat_id)
+    content_bytes: bytes | None = None
+    local_path: str | None = None
+    if bridge is not None:
+        local_path = path_str
+        try:
+            raw = await bridge.run("file_read", {"path": path_str})
+        except Exception as exc:
+            return {"tool": "attach_file", "error": f"Could not read local file: {exc}"}
+        data = (raw or {}).get("data") if isinstance(raw, dict) else None
+        text = data.get("content") if isinstance(data, dict) else None
+        if isinstance(text, str):
+            content_bytes = text.encode("utf-8", errors="replace")
+    else:
+        p = Path(path_str)
+        if not p.exists() or not p.is_file():
+            return {"tool": "attach_file", "error": f"File not found: {path_str}"}
+        try:
+            content_bytes = p.read_bytes()
+        except Exception as exc:
+            return {"tool": "attach_file", "error": str(exc)}
+
+    if content_bytes is None:
+        # Local binary/unreadable file — surface the path so the user can still find it.
+        if local_path:
+            return {"tool": "attach_file", "data": {
+                "attached": False,
+                "local_path": local_path,
+                "message": f"The file is on your machine at {local_path}. It couldn't be read "
+                           "as text to copy into the conversation (likely binary).",
+            }}
+        return {"tool": "attach_file", "error": "Could not read file content"}
+
+    stored = await _store_and_register_file(
+        chat_id, root_id, owner_id, display_name, content_bytes, suffix_hint=path_str
+    )
+    if "error" in stored:
+        return {"tool": "attach_file", "error": stored["error"]}
+    result = {
+        "attached": True,
+        "file_id": stored["file_id"],
+        "name": display_name,
+        "size_bytes": len(content_bytes),
+        "download_url": stored["download_url"],
+        "message": f"Attached '{display_name}' to the conversation — downloadable from the Files panel.",
+    }
+    if local_path:
+        result["local_path"] = local_path
+    return {"tool": "attach_file", "data": result}
+
+
+async def _resolve_file_owner(chat_id: str) -> tuple[str, str | None]:
+    """Walk up the chat's parent chain to find the conversation root + an owner user_id.
+    Files hang off the root chat so a sub-agent's output lands in the user's Files panel."""
+    from src.models.chat import ChatParticipant
+    root_id = chat_id
+    owner_id: str | None = None
+    async with AsyncSessionLocal() as db:
+        seen: set[str] = set()
+        cur: str | None = chat_id
+        while cur and cur not in seen:
+            seen.add(cur)
+            row = (await db.execute(select(Chat).where(Chat.id == cur))).scalar_one_or_none()
+            if not row:
+                break
+            if row.user_id and owner_id is None:
+                owner_id = row.user_id
+            if not row.parent_chat_id:
+                root_id = row.id
+                if row.user_id:
+                    owner_id = row.user_id
+                break
+            cur = row.parent_chat_id
+        if not owner_id:
+            owner_id = (await db.execute(
+                select(ChatParticipant.user_id).where(ChatParticipant.chat_id == root_id).limit(1)
+            )).scalar_one_or_none()
+    return root_id, owner_id
+
+
+async def _store_and_register_file(
+    chat_id: str,
+    root_id: str,
+    owner_id: str,
+    display_name: str,
+    content_bytes: bytes,
+    suffix_hint: str = "",
+) -> dict:
+    """Persist bytes under upload_dir, create a ChatFile row on the conversation root,
+    and broadcast file_created. Shared by attach_file, the inline file fence, and the
+    file_write auto-deliver hook. Returns {file_id, download_url} or {error}."""
+    import mimetypes
+    from pathlib import Path
+    from src.core.config import get_settings
+    from src.core.pubsub import broadcast
+    from src.models.chat_file import ChatFile
+
+    settings = get_settings()
+    upload_root = Path(settings.upload_dir) / root_id
+    try:
+        upload_root.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        return {"error": f"Failed to prepare attachment storage: {exc}"}
+    ext = Path(display_name).suffix or Path(suffix_hint).suffix
+    stored_name = f"{uuid.uuid4()}{ext}"
+    try:
+        (upload_root / stored_name).write_bytes(content_bytes)
+    except Exception as exc:
+        return {"error": f"Failed to store attachment: {exc}"}
+
+    content_type = mimetypes.guess_type(display_name)[0] or "application/octet-stream"
+    file_id = str(uuid.uuid4())
+    async with AsyncSessionLocal() as db:
+        cf = ChatFile(
+            id=file_id,
+            chat_id=chat_id,
+            root_chat_id=root_id,
+            user_id=owner_id,
+            original_filename=display_name,
+            stored_filename=stored_name,
+            content_type=content_type,
+            size_bytes=len(content_bytes),
+        )
+        db.add(cf)
+        await db.commit()
+        await db.refresh(cf)
+        created_iso = cf.created_at.isoformat() if cf.created_at else None
+
+    file_payload = {
+        "id": file_id, "name": display_name, "size": len(content_bytes),
+        "content_type": content_type, "chat_id": chat_id, "created_at": created_iso,
+    }
+    await broadcast(root_id, {"type": "file_created", "file": file_payload})
+    if root_id != chat_id:
+        await broadcast(chat_id, {"type": "file_created", "file": file_payload})
+    return {"file_id": file_id, "download_url": f"/api/chats/{chat_id}/files/{file_id}/content"}
+
+
+async def deliver_inline_file(
+    chat_id: str, parent_chat_id: str | None, display_name: str, content: str,
+) -> dict:
+    """Write+deliver a file straight from inline text content (the ```file:PATH fence).
+
+    Bypasses JSON tool-call escaping entirely — weak models can't reliably embed a 10KB
+    HTML/code string inside a JSON arg without producing invalid JSON, which silently
+    dropped the deliverable. The raw fence is just a code block, so it always survives.
+    """
+    content_bytes = content.encode("utf-8", errors="replace")
+    root_id, owner_id = await _resolve_file_owner(chat_id)
+    if not owner_id:
+        return {"error": "Could not resolve a file owner for this chat"}
+    stored = await _store_and_register_file(chat_id, root_id, owner_id, display_name, content_bytes)
+    if "error" in stored:
+        return stored
+    return {
+        "delivered": True,
+        "file_id": stored["file_id"],
+        "name": display_name,
+        "size_bytes": len(content_bytes),
+        "download_url": stored["download_url"],
+    }
+
+
+async def auto_deliver_written_file(
+    chat_id: str, parent_chat_id: str | None, path_str: str,
+) -> dict | None:
+    """After a successful file_write, register the written file as a downloadable
+    ChatFile so the output reaches the user even if the agent forgets attach_file.
+    Returns the delivery info, or None if the file couldn't be read/delivered."""
+    from pathlib import Path
+    # Local-exec chats: file lives on the user's host → read back via the bridge.
+    bridge = await _resolve_local_bridge(chat_id, parent_chat_id)
+    content_bytes: bytes | None = None
+    if bridge is not None:
+        try:
+            raw = await bridge.run("file_read", {"path": path_str})
+            data = (raw or {}).get("data") if isinstance(raw, dict) else None
+            text = data.get("content") if isinstance(data, dict) else None
+            if isinstance(text, str):
+                content_bytes = text.encode("utf-8", errors="replace")
+        except Exception:
+            return None
+    else:
+        p = Path(path_str)
+        try:
+            if not p.exists() or not p.is_file():
+                return None
+            content_bytes = p.read_bytes()
+        except Exception:
+            return None
+    if content_bytes is None:
+        return None
+    root_id, owner_id = await _resolve_file_owner(chat_id)
+    if not owner_id:
+        return None
+    display_name = Path(path_str).name or "file"
+    stored = await _store_and_register_file(
+        chat_id, root_id, owner_id, display_name, content_bytes, suffix_hint=path_str
+    )
+    if "error" in stored:
+        return None
+    return {"file_id": stored["file_id"], "name": display_name,
+            "download_url": stored["download_url"], "size_bytes": len(content_bytes)}
 
 
 async def _run_single_tool(
@@ -279,6 +618,22 @@ async def _run_single_tool(
         _is_delegation = bool(args.get("assigned_agent_id") or args.get("agent_persona"))
         _dup_title = (args.get("title") or "").strip()
         _dup_desc = (args.get("description") or "").strip()
+
+        # Over-delegation guard: refuse to spawn a sub-agent whose only job is to FIND /
+        # RETRIEVE / LOCATE files or output a previous agent produced. Files are tracked
+        # and already in the user's Files panel; spinning up a "Local Operator" to hunt
+        # the disk for them is the exact loop that wedged real chats. The orchestrator
+        # should use file_find/file_list/board_read directly, or just recognize delivery.
+        if _is_delegation and _is_pure_retrieval_delegation(_dup_title, _dup_desc):
+            logger.info("[task_create] blocked pure-retrieval delegation '%s' in chat %s", _dup_title, chat_id)
+            return {"tool": "task_create", "data": (
+                "Do NOT delegate file/output retrieval to a sub-agent. Any file a prior task "
+                "produced is already delivered to the user (Files panel) and tracked. If you "
+                "genuinely need to inspect the filesystem, call `file_find`/`file_list` yourself "
+                "in a tool_calls fence — don't spawn an agent for it. If the work is already done, "
+                "confirm to the user and end with <final/>."
+            )}
+
         if _is_delegation and (_dup_title or _dup_desc):
             async with AsyncSessionLocal() as _ddb:
                 _new_agent = await _resolve_agent_id(args.get("assigned_agent_id"), _ddb)
@@ -795,6 +1150,9 @@ async def _run_single_tool(
         # Propagate to parent chat so the main conversation UI sees it live
         if parent_chat_id and parent_chat_id != chat_id:
             await broadcast(parent_chat_id, {"type": "log_entry", "log": log_payload})
+
+    elif name == "attach_file":
+        return await _attach_file(args, chat_id, agent_id, agent_name, parent_chat_id)
 
     # Isolated-venv tool: a seed dir with a requirements.txt runs as a subprocess
     # in its own per-pack venv (dependency isolation). Checked BEFORE the

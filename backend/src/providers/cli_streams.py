@@ -11,13 +11,34 @@ from typing import AsyncIterator
 from src.core.config import get_settings
 from src.core.cli_rate_limiter import check_cli_rate_limit
 from src.models.provider import Provider
-from src.providers.exceptions import ProviderError
+from src.providers.exceptions import ProviderError, RateLimitError
 
 logger = logging.getLogger(__name__)
+
+
+async def _enforce_cli_rate_limit(user_id: str, org_id: str) -> None:
+    """Raise ``RateLimitError`` when the per-user/org CLI hourly cap is hit.
+
+    Surfacing a rate-limit (rather than a raw HTTP 429) lets the provider router
+    fail over to the next account/provider in the chain. The CLI cap is per
+    user/org, so a sibling CLI account re-checks and also fails over — the chain
+    naturally lands on an API provider if one is configured (GitLab #217).
+    """
+    if not (user_id or org_id):
+        return
+    allowed, reason = await check_cli_rate_limit(user_id, org_id)
+    if not allowed:
+        raise RateLimitError(reason)
 
 # Sentinel prefix used to pass metadata through the string-based stream protocol.
 # The null byte ensures no real LLM text can collide with it.
 _METADATA_PREFIX = "\x00META:"
+
+# Sentinel prefix for live provider/fallback-chain status lines (which provider is
+# being tried, rate-limit failovers, empty-response retries). The router yields these
+# so the UI can show the chain working instead of an empty bubble. Same null-byte
+# guarantee as metadata so real LLM text can never collide.
+_STATUS_PREFIX = "\x00STATUS:"
 
 # Gemini spawn-directive fence: ```nexora_spawn\n<JSON array|object>\n```
 # Gemini has no native sub-agent tool and its MCP path is unverified in
@@ -64,6 +85,11 @@ def _get_cli_command(provider_key: str) -> str:
 
 def _metadata_event(data: dict) -> str:
     return f"{_METADATA_PREFIX}{json.dumps(data, separators=(',', ':'))}"
+
+
+def _status_event(label: str) -> str:
+    """A transient provider/fallback-chain status line for the UI status strip."""
+    return f"{_STATUS_PREFIX}{json.dumps({'label': label}, separators=(',', ':'))}"
 
 
 def _cli_env(home_dir: str) -> dict:
@@ -154,13 +180,7 @@ async def _stream_claude_cli(provider: Provider, messages: list[dict], **kw) -> 
     if not home_dir or not Path(home_dir).exists():
         raise ProviderError("Claude OAuth: auth directory not found — re-authenticate in Settings")
 
-    _user_id = str(kw.get("user_id") or "")
-    _org_id = str(kw.get("org_id") or "")
-    if _user_id or _org_id:
-        _allowed, _reason = await check_cli_rate_limit(_user_id, _org_id)
-        if not _allowed:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=429, detail=_reason)
+    await _enforce_cli_rate_limit(str(kw.get("user_id") or ""), str(kw.get("org_id") or ""))
 
     model = kw.get("model_override") or provider.model_name or _get_default_model("claude")
     system_ctx, user_prompt = _build_cli_prompt(messages, kw.get("system_prompt"))
@@ -310,13 +330,7 @@ async def _stream_gemini_cli(provider: Provider, messages: list[dict], **kw) -> 
     if not home_dir or not Path(home_dir).exists():
         raise ProviderError("Gemini OAuth: auth directory not found — re-authenticate in Settings")
 
-    _user_id = str(kw.get("user_id") or "")
-    _org_id = str(kw.get("org_id") or "")
-    if _user_id or _org_id:
-        _allowed, _reason = await check_cli_rate_limit(_user_id, _org_id)
-        if not _allowed:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=429, detail=_reason)
+    await _enforce_cli_rate_limit(str(kw.get("user_id") or ""), str(kw.get("org_id") or ""))
 
     import tempfile, shutil
     from src.core.config import get_settings
@@ -532,13 +546,7 @@ async def _stream_codex_cli(provider: Provider, messages: list[dict], **kw) -> A
     if not home_dir or not Path(home_dir).exists():
         raise ProviderError("Codex OAuth: auth directory not found — re-authenticate in Settings")
 
-    _user_id = str(kw.get("user_id") or "")
-    _org_id = str(kw.get("org_id") or "")
-    if _user_id or _org_id:
-        _allowed, _reason = await check_cli_rate_limit(_user_id, _org_id)
-        if not _allowed:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=429, detail=_reason)
+    await _enforce_cli_rate_limit(str(kw.get("user_id") or ""), str(kw.get("org_id") or ""))
 
     system_ctx, user_prompt = _build_cli_prompt(messages, kw.get("system_prompt"))
     full_prompt = f"{system_ctx}\n\n{user_prompt}".strip() if system_ctx else user_prompt

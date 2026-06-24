@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { McpCapabilitySelector } from "@/components/shared/McpCapabilitySelector";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import toast from "react-hot-toast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -1283,7 +1283,7 @@ function ShareSection({ agentId }: { agentId: string }) {
 
   const copyUrl = () => {
     if (!shareData?.share_url) return;
-    navigator.clipboard.writeText(shareData.share_url).then(() => {
+    copyToClipboard(shareData.share_url).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -1295,7 +1295,7 @@ function ShareSection({ agentId }: { agentId: string }) {
 
   const copyEmbed = () => {
     if (!embedSnippet) return;
-    navigator.clipboard.writeText(embedSnippet).then(() => {
+    copyToClipboard(embedSnippet).then(() => {
       setEmbedCopied(true);
       setTimeout(() => setEmbedCopied(false), 2000);
     });

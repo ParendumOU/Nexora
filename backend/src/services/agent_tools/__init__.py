@@ -23,6 +23,9 @@ from src.services.agent_tools.tool_executor import (
     _get_executor,
     _parse_tool_calls,
     _run_single_tool,
+    deliver_inline_file,
+    auto_deliver_written_file,
+    is_executable_tool,
 )
 from src.services.agent_tools.skill_runner import (
     _build_skill_registry,
@@ -35,7 +38,9 @@ from src.services.agent_tools.tool_permissions import (
     _always_allowed,
     _optional_builtins,
     _get_agent_enabled_tools,
+    is_tool_allowed,
 )
+from src.services.agent_tools.tool_schemas import validate_tool_args
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +94,41 @@ _TOKEN_TOOL_CALLS_RE = re.compile(
 )
 
 _HTML_COMMENT_RE = re.compile(r'<!--[\s\S]*?-->', re.DOTALL)
+
+# Inline file-output fence: ```file:relative/or/abs/path.ext\n<raw content>\n```
+# Lets an agent deliver a file (HTML, code, CSV, …) as a downloadable attachment WITHOUT
+# embedding the content inside a JSON tool-call arg — weak models routinely produce invalid
+# JSON when a 10KB HTML/code blob has to be escaped into a string, silently dropping the
+# whole deliverable. The raw fence is just a labelled code block, so it always survives.
+# The optional 4th capture lets the language follow the path (```file:card.html html).
+_FILE_OUTPUT_FENCE_RE = re.compile(
+    r'```file:[ \t]*([^\n`]+?)[ \t]*\n([\s\S]*?)\n?```',
+    re.IGNORECASE,
+)
+
+# Whole ```tool_calls|json|tools``` fence span — used only to protect a tool-call
+# JSON region from the inline file-output extraction above. A task_create
+# description can legitimately contain a ```file:...``` example; extracting that
+# inner fence corrupts the surrounding JSON, so the call fails to parse, the raw
+# JSON leaks into the chat, and the agent pointlessly retries the turn.
+_ANY_TOOL_FENCE_SPAN_RE = re.compile(
+    r'```(?:tool_calls|json|tools)\b[\s\S]*?```',
+    re.IGNORECASE,
+)
+
+# Dangling, unfenced tool-call args fragment that escaped parsing (malformed JSON).
+# Anchored on arg keys that NEVER occur in normal prose, so scrubbing it is safe.
+# Removes from the start of the line carrying the key through the trailing braces.
+_TOOL_RESIDUE_RE = re.compile(
+    r'[^\n]*?"(?:assigned_agent_id|agent_overrides|system_prompt_append|tool_name)"\s*:[\s\S]*?\}{1,3}\s*\]?',
+    re.IGNORECASE,
+)
+
+# Orphan trailing JSON-closer run left when a mangled/partial tool-call fence is
+# stripped but its tail survives (weak models): e.g. '...procede directamente."}}}]'.
+# A run of 2+ closing braces/brackets at the very end (optionally after a quote/comma)
+# is machine residue — legitimate prose effectively never ends this way.
+_ORPHAN_JSON_TAIL_RE = re.compile(r'\s*["\',]?\s*[}\]]{2,}\s*\Z')
 
 # nexora_spawn directive — the plain-text sub-agent spawn block (primary path for
 # Gemini, but any provider can emit it by copying the format from history). The
@@ -204,6 +244,52 @@ async def _execute_agent_tools(
                 except Exception as _exc:
                     logger.warning(f"[tools] nexora_spawn directive failed: {_exc}")
 
+    # Inline file-output fences (```file:PATH) → deliver each as a downloadable
+    # attachment. Done BEFORE tool_calls parsing so a deliverable survives even when
+    # the model also emits a malformed JSON tool call in the same turn.
+    # Protect tool_calls JSON regions: never extract/replace a ```file:``` fence that
+    # sits INSIDE a ```tool_calls``` block (a task_create description may contain one as
+    # an example). Doing so would corrupt the JSON → parse failure → raw-JSON leak + loop.
+    _tool_fence_spans = [(m.start(), m.end()) for m in _ANY_TOOL_FENCE_SPAN_RE.finditer(response_text)]
+    def _inside_tool_fence(pos: int) -> bool:
+        return any(s <= pos < e for s, e in _tool_fence_spans)
+
+    _file_deliveries: list[dict] = []
+    _file_fence_matches = [
+        m for m in _FILE_OUTPUT_FENCE_RE.finditer(response_text)
+        if not _inside_tool_fence(m.start())
+    ]
+    for _fm in _file_fence_matches:
+        _fpath = (_fm.group(1) or "").strip()
+        _fcontent = _fm.group(2) or ""
+        # First whitespace-delimited token is the path; a trailing language hint
+        # (```file:card.html html) is ignored. Take the basename for the display name.
+        _first = _fpath.split()[0] if _fpath else "file"
+        _name = _first.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "file"
+        try:
+            _dres = await deliver_inline_file(chat_id, parent_chat_id, _name, _fcontent)
+        except Exception as _exc:
+            _dres = {"error": str(_exc)}
+        if "error" in _dres:
+            logger.warning(f"[tools] inline file '{_name}' delivery failed: {_dres['error']}")
+            _file_deliveries.append({"tool": "file_deliver", "error": _dres["error"]})
+        else:
+            logger.info(f"[tools] delivered inline file '{_name}' ({_dres['size_bytes']} bytes)")
+            _file_deliveries.append({"tool": "file_deliver", "data": {
+                "delivered": True, "name": _dres["name"],
+                "download_url": _dres["download_url"], "size_bytes": _dres["size_bytes"],
+                "message": f"Delivered '{_dres['name']}' to the user (Files panel) — do NOT "
+                           "re-create or re-search for it.",
+            }})
+    if _file_fence_matches:
+        # Replace ONLY the delivered (outside-tool) fences with a short marker so the raw
+        # blob doesn't flood the chat. Splice in reverse to keep offsets valid; any
+        # ```file:``` living inside a tool_calls JSON is left intact for the parser.
+        for _fm in sorted(_file_fence_matches, key=lambda m: m.start(), reverse=True):
+            _marker = f"📎 {((_fm.group(1) or 'file').strip().split() or ['file'])[0].rsplit('/', 1)[-1]}"
+            response_text = response_text[:_fm.start()] + _marker + response_text[_fm.end():]
+        response_text = response_text.strip()
+
     match = _TOOL_FENCE_RE.search(response_text)
 
     tool_calls = None
@@ -228,7 +314,9 @@ async def _execute_agent_tools(
         if tool_calls is None:
             logger.debug(f"[tools] no tool_calls fence found in response (len={len(response_text)})")
             await _ws_status(websocket, "idle", pub_chat_id=_status_pub)
-            return response_text, [], [], False, None
+            # An inline file fence still counts as work done (had_fence=True) and its
+            # delivery result drives the resume so the orchestrator confirms to the user.
+            return response_text, _file_deliveries, [], bool(_file_deliveries), None
 
     if tool_calls is None:
         raw_json = (match.group(1) or match.group(2) or match.group(3) or "").strip()
@@ -252,12 +340,24 @@ async def _execute_agent_tools(
         logger.warning(f"[tools] tool_calls JSON parse failed — raw: {raw_json[:400]}")
         await _ws_status(websocket, "idle", pub_chat_id=_status_pub)
         clean = response_text[:match.start()].rstrip() + response_text[match.end():]
+        # The fence boundaries can be ambiguous when the bad JSON contains stray ```
+        # or real newlines, so removing only `match` can leave a raw-JSON tail visible.
+        # Scrub any residual fenced tool block + dangling tool-call args fragment — these
+        # keys never appear in legitimate prose, so this only removes leaked machine text.
+        clean = _ANY_TOOL_FENCE_SPAN_RE.sub("", clean)
+        clean = _TOOL_RESIDUE_RE.sub("", clean)
+        clean = _ORPHAN_JSON_TAIL_RE.sub("", clean)
         # Caller receives parse_error so it can emit a targeted retry quoting the
         # malformed JSON (much more useful than the generic "use tools" nudge).
+        # But if an inline file fence already delivered the real work this turn,
+        # suppress the retry — the deliverable landed; the broken JSON was redundant.
+        if _file_deliveries:
+            return clean.strip(), _file_deliveries, [], True, None
         parse_err = f"Could not parse tool_calls JSON. Raw payload (first 400 chars): {raw_json[:400]}"
         return clean.strip(), [], [], False, parse_err
 
     clean_text = (response_text[:match.start()].rstrip() + response_text[match.end():]).strip()
+    clean_text = _ORPHAN_JSON_TAIL_RE.sub("", clean_text).rstrip()
 
     # Resolve which optional built-in tools this agent may call
     agent_enabled = await _get_agent_enabled_tools(agent_id, chat_id)
@@ -303,10 +403,20 @@ async def _execute_agent_tools(
         if name.startswith("mcp__") or name in _CLI_INTERNAL_TOOLS:
             logger.info(f"[tools] ignoring leaked CLI-internal tool call {name!r}")
             continue
-        # Gate optional built-ins — None means unrestricted (no tools configured)
-        if name in _optional_builtins() and name not in _always_allowed() and agent_enabled is not None and name not in agent_enabled:
-            logger.warning(f"[tools] agent {agent_id!r} called ungated tool {name!r} — skipping")
+        # Authoritative gate (#222): when the agent is restricted (has a tool config),
+        # EVERY tool must be in its enabled set (or always-allowed) — not just the
+        # platform_executor builtins. None = unrestricted (no tools configured).
+        if not is_tool_allowed(name, agent_enabled):
+            logger.warning(f"[tools] agent {agent_id!r} called tool {name!r} not enabled for it — skipping")
             tool_results.append({"tool": name, "error": f"Tool '{name}' is not enabled for this agent."})
+            continue
+        # Validate declared required args (#214): a structured "missing required
+        # argument" correction beats a deep executor failure. No-op for tools that
+        # declare no schema.
+        _arg_err = validate_tool_args(name, args)
+        if _arg_err:
+            logger.info(f"[tools] {name!r} arg validation: {_arg_err}")
+            tool_results.append({"tool": name, "error": _arg_err})
             continue
         label = _label_map.get(name)
 
@@ -405,6 +515,27 @@ async def _execute_agent_tools(
 
             if result is not None:
                 tool_results.append(result)
+
+            # Guaranteed delivery: a successful file_write writes to a throwaway
+            # container path that the user never sees. Auto-register it as a downloadable
+            # ChatFile so the output always reaches the Files panel even if the agent
+            # never calls attach_file. (Skip if the agent already attached it explicitly.)
+            if name == "file_write" and not tool_errored and isinstance(result, dict):
+                _wpath = ((result.get("data") or {}) if isinstance(result.get("data"), dict) else {}).get("path")
+                if _wpath:
+                    try:
+                        _deliv = await auto_deliver_written_file(chat_id, parent_chat_id, str(_wpath))
+                    except Exception as _dexc:
+                        _deliv = None
+                        logger.warning(f"[tools] auto-deliver of {_wpath} failed: {_dexc}")
+                    if _deliv:
+                        logger.info(f"[tools] auto-delivered written file '{_deliv['name']}'")
+                        tool_results.append({"tool": "file_deliver", "data": {
+                            "delivered": True, "name": _deliv["name"],
+                            "download_url": _deliv["download_url"], "size_bytes": _deliv["size_bytes"],
+                            "message": f"'{_deliv['name']}' is now downloadable from the Files panel — "
+                                       "already delivered to the user; do NOT re-create it.",
+                        }})
         except Exception as exc:
             logger.warning(f"[tools] {name} failed: {exc}")
 
@@ -445,4 +576,6 @@ async def _execute_agent_tools(
         for c in tool_calls
         if c.get("name") and c["name"] not in _STATS_HIDDEN and not c["name"].startswith("task_")
     ]
-    return clean_text, tool_results, counted, True, None
+    # Prepend any inline ```file: deliveries (handled before the tool_calls fence) so the
+    # resume sees them alongside the JSON tool results.
+    return clean_text, _file_deliveries + tool_results, counted, True, None

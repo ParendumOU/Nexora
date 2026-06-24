@@ -86,10 +86,39 @@ async def _bump_nudge_counter(chat_id: str) -> int:
     return int(count or 0)
 
 
+async def _peek_nudge_counter(chat_id: str) -> int:
+    """Read the nudge counter WITHOUT bumping it or re-arming its TTL."""
+    from src.core.redis import get_redis
+    r = get_redis()
+    val = await r.get(f"wd:nudge:{chat_id}")
+    return int(val or 0)
+
+
 async def reset_nudge_counter(chat_id: str) -> None:
     from src.core.redis import get_redis
     r = get_redis()
     await r.delete(f"wd:nudge:{chat_id}")
+
+
+# ── Anti-spin breaker ───────────────────────────────────────────────────────────
+# Counts consecutive resume turns that made no real progress (no file delivered, no
+# task completed, no <final/>). A weak orchestrator can otherwise read_file → resume →
+# read_file → resume… forever, burning tokens and never answering. Reset on genuine
+# progress and at the start of each new user message.
+
+async def bump_spin_counter(chat_id: str) -> int:
+    from src.core.redis import get_redis
+    r = get_redis()
+    key = f"wd:spin:{chat_id}"
+    count = await r.incr(key)
+    await r.expire(key, NUDGE_TTL_SECONDS)
+    return int(count or 0)
+
+
+async def reset_spin_counter(chat_id: str) -> None:
+    from src.core.redis import get_redis
+    r = get_redis()
+    await r.delete(f"wd:spin:{chat_id}")
 
 
 # ── Force-unblock for one chat ────────────────────────────────────────────────
@@ -171,6 +200,15 @@ async def force_unblock_chat(chat_id: str) -> bool:
         # Last turn was structurally complete — reset the counter so a future
         # stall doesn't inherit stale state.
         await reset_nudge_counter(chat_id)
+        return False
+
+    # Already exhausted: do NOT bump again. Bumping re-arms the counter's TTL on
+    # every sweep, so a permanently-stuck chat (e.g. its provider is down) would
+    # keep the counter alive forever and re-log "giving up" every tick. By not
+    # touching it here, the counter lapses after NUDGE_TTL_SECONDS and the chat
+    # can self-heal once the underlying provider recovers.
+    if await _peek_nudge_counter(chat_id) >= MAX_AUTO_NUDGES:
+        logger.debug(f"[watchdog] {chat_id} already exhausted MAX_AUTO_NUDGES={MAX_AUTO_NUDGES} — leaving counter to lapse")
         return False
 
     count = await _bump_nudge_counter(chat_id)

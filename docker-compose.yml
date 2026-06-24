@@ -50,6 +50,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      RUN_QUEUE_ENABLED: ${RUN_QUEUE_ENABLED:-false}
       DOCKER_HOST: unix:///var/run/docker.sock
       AUTH_PROVIDERS_DIR: /auth_providers
       BRAINDUMP_URL: ${BRAINDUMP_URL:-}
@@ -81,6 +82,51 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+
+  # ─── Runner (GitLab #219) ──────────────────────────────────────
+  # Executes background runs (sub-agent dispatch, resumes) off the durable Redis
+  # Stream when RUN_QUEUE_ENABLED=true. Inert otherwise (idle-blocks on an empty
+  # group). Scale with `--scale runner=N`.
+  runner:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    command: python -m src.runner
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nexora}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-nexora}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-super-secret-key-change-in-production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RUN_QUEUE_ENABLED: ${RUN_QUEUE_ENABLED:-false}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      AUTH_PROVIDERS_DIR: /auth_providers
+      BRAINDUMP_URL: ${BRAINDUMP_URL:-}
+      BRAINDUMP_USERNAME: ${BRAINDUMP_USERNAME:-}
+      BRAINDUMP_API_KEY: ${BRAINDUMP_API_KEY:-}
+      ROADMAP_URL: ${ROADMAP_URL:-}
+      ROADMAP_USERNAME: ${ROADMAP_USERNAME:-}
+      ROADMAP_API_KEY: ${ROADMAP_API_KEY:-}
+      LILDIARY_URL: ${LILDIARY_URL:-}
+      LILDIARY_USERNAME: ${LILDIARY_USERNAME:-}
+      LILDIARY_API_KEY: ${LILDIARY_API_KEY:-}
+    volumes:
+      - ./backend:/app
+      - ../:/workspace-root
+      - /var/run/docker.sock:/var/run/docker.sock
+      - workspace_data:/workspaces
+      - auth_providers_data:/auth_providers
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
 
   # ─── Frontend ──────────────────────────────────────────────────
   frontend:

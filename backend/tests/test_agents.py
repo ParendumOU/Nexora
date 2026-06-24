@@ -46,6 +46,38 @@ async def test_get_agent_not_found(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_agent_model_profile_binding(client, auth_headers):
+    # Create a model profile, bind it to an agent on create, then clear it on update (#215).
+    prof = await client.post("/api/model-profiles", headers=auth_headers, json={
+        "name": "cheap-fast", "provider_type": "openai",
+    })
+    assert prof.status_code in (200, 201), prof.text
+    prof_id = prof.json()["id"]
+
+    created = await client.post("/api/agents", headers=auth_headers, json={
+        "name": "Bound Agent", "model_profile_id": prof_id,
+    })
+    assert created.status_code in (200, 201), created.text
+    assert created.json()["model_profile_id"] == prof_id
+    agent_id = created.json()["id"]
+
+    cleared = await client.patch(
+        f"/api/agents/{agent_id}", headers=auth_headers, json={"model_profile_id": None}
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["model_profile_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_agent_rejects_unknown_model_profile(client, auth_headers):
+    # A profile id that doesn't exist in this org must be rejected (cross-org/FK guard).
+    resp = await client.post("/api/agents", headers=auth_headers, json={
+        "name": "Bad Bind", "model_profile_id": "00000000-0000-0000-0000-000000000000",
+    })
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_create_and_get_agent(client, auth_headers):
     create_resp = await client.post("/api/agents", headers=auth_headers, json={
         "name": "Fetch Me",

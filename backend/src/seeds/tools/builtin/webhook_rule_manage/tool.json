@@ -5,5 +5,73 @@
   "category": "platform",
   "is_builtin": true,
   "always_allowed": false,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "action"
+    },
+    {
+      "name": "rule_id",
+      "type": "string",
+      "description": "rule id"
+    },
+    {
+      "name": "event_type",
+      "type": "string",
+      "description": "event type"
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "description": "source"
+    },
+    {
+      "name": "project_id",
+      "type": "string",
+      "description": "project id"
+    },
+    {
+      "name": "agent_id",
+      "type": "string",
+      "description": "agent id"
+    },
+    {
+      "name": "task_title_template",
+      "type": "string",
+      "description": "task title template"
+    },
+    {
+      "name": "task_description_template",
+      "type": "string",
+      "description": "task description template"
+    },
+    {
+      "name": "filter_json",
+      "type": "string",
+      "description": "filter json"
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "description": "is active"
+    },
+    {
+      "name": "active_only",
+      "type": "boolean",
+      "description": "active only"
+    },
+    {
+      "name": "webhook_secret",
+      "type": "string",
+      "description": "webhook secret"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "limit"
+    }
+  ]
 }

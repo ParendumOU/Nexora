@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { orgsApi, authApi } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { Copy, Check, Trash2, UserPlus, RefreshCw, AlertTriangle, LogOut, ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import toast from "react-hot-toast";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
@@ -252,7 +252,7 @@ export default function OrgSettingsPage() {
 
   const copyInvite = () => {
     if (!inviteUrl) return;
-    navigator.clipboard.writeText(inviteUrl);
+    copyToClipboard(inviteUrl);
     setCopiedOrg(true);
     setTimeout(() => setCopiedOrg(false), 2000);
   };
@@ -568,7 +568,7 @@ export default function OrgSettingsPage() {
                 <div className="flex items-center gap-2">
                   <input readOnly value={combinedInviteUrl}
                     className="flex-1 text-xs font-mono bg-background border border-border rounded-lg px-3 py-2 focus:outline-none" />
-                  <button onClick={() => { navigator.clipboard.writeText(combinedInviteUrl); setCopiedCombined(true); setTimeout(() => setCopiedCombined(false), 2000); }}
+                  <button onClick={() => { copyToClipboard(combinedInviteUrl); setCopiedCombined(true); setTimeout(() => setCopiedCombined(false), 2000); }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent text-sm font-medium hover:bg-accent/80 transition-colors shrink-0">
                     {copiedCombined ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
                     {copiedCombined ? "Copied!" : "Copy"}
@@ -600,7 +600,7 @@ export default function OrgSettingsPage() {
                 <div className="flex items-center gap-2">
                   <input readOnly value={inviteUrl}
                     className="flex-1 text-xs font-mono bg-background border border-border rounded-lg px-3 py-2 focus:outline-none" />
-                  <button onClick={() => { navigator.clipboard.writeText(inviteUrl); setCopiedOrg(true); setTimeout(() => setCopiedOrg(false), 2000); }}
+                  <button onClick={() => { copyToClipboard(inviteUrl); setCopiedOrg(true); setTimeout(() => setCopiedOrg(false), 2000); }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent text-xs font-medium hover:bg-accent/80 transition-colors shrink-0">
                     {copiedOrg ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                     {copiedOrg ? "Copied!" : "Copy"}

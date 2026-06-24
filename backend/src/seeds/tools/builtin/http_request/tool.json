@@ -3,7 +3,42 @@
   "name": "HTTP Request",
   "description": "Make HTTP requests to external APIs and web services. Supports GET, POST, PUT, PATCH, DELETE with custom headers, JSON body, and Basic/Bearer auth. URLs validated against HTTP_TOOL_ALLOWED_ORIGINS allowlist (SSRF guard). Also handles platform git-proxy paths directly.",
   "category": "web",
-  "env_vars": ["HTTP_TOOL_ALLOWED_ORIGINS"],
+  "env_vars": [
+    "HTTP_TOOL_ALLOWED_ORIGINS"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": "Target URL (subject to the SSRF allowlist)"
+    },
+    {
+      "name": "method",
+      "type": "string",
+      "description": "GET | POST | PUT | PATCH | DELETE (default GET)"
+    },
+    {
+      "name": "headers",
+      "type": "object",
+      "description": "Request headers"
+    },
+    {
+      "name": "body",
+      "type": "string",
+      "description": "Request body"
+    },
+    {
+      "name": "auth",
+      "type": "object",
+      "description": "Auth config"
+    },
+    {
+      "name": "timeout",
+      "type": "number",
+      "description": "Seconds"
+    }
+  ]
 }

@@ -53,7 +53,7 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
 
   const activeChain = chains.find((c) => c.id === currentChainId);
   const activeDirectProvider = providers.find((p) => p.id === currentDirectProviderId);
-  const defaultChain = chains.find((c) => c.is_default && c.steps.length >= 2);
+  const defaultChain = chains.find((c) => c.is_default && c.steps.length >= 1);
   const isAuto = !currentChainId && !currentDirectProviderId;
 
   const label = isAuto
@@ -109,7 +109,7 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
           </div>
 
           {/* Fallback chains */}
-          {chains.filter((c) => c.steps.length >= 2).length > 0 && (
+          {chains.filter((c) => c.steps.length >= 1).length > 0 && (
             <>
               <Separator.Root className="h-px bg-border my-1" />
               <div className="px-2 py-1.5">
@@ -117,7 +117,7 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
                   <GitMerge className="w-3 h-3" />Fallback Chains
                 </p>
                 <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                  {chains.filter((c) => c.steps.length >= 2).map((c) => {
+                  {chains.filter((c) => c.steps.length >= 1).map((c) => {
                     const isActive = currentChainId === c.id;
                     return (
                       <button

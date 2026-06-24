@@ -88,6 +88,18 @@ class Settings(BaseSettings):
     tasks_per_batch: int = 2                 # max tasks dispatched per _run_delegated_tasks call
     max_subdelegation_depth: int = 4         # max agent→sub-agent nesting depth
 
+    # Run queue / runners (GitLab #219) — durable background-run execution.
+    # OFF by default: background runs (sub-agent dispatch, orchestrator resumes,
+    # webhook events) keep using in-process asyncio.create_task. When enabled they
+    # are XADD'd to a Redis Stream and executed by dedicated `runner` workers, with
+    # a cross-worker concurrency governor and event-driven sub-agent resume.
+    run_queue_enabled: bool = False
+    run_queue_stream: str = "nexora:runs"
+    run_queue_group: str = "runners"
+    runner_concurrency: int = 4              # concurrent runs per runner worker
+    runner_block_ms: int = 5000              # XREADGROUP block timeout
+    runner_claim_min_idle_ms: int = 120000   # reclaim a pending run abandoned by a dead runner after this
+
     # Proactive proposals
     proposal_auto_approve_confidence: float = 0.85  # confidence >= this → auto-execute without human review
 
@@ -95,6 +107,39 @@ class Settings(BaseSettings):
     max_task_retries: int = 3                # max retry attempts before moving task to dead-letter
     circuit_breaker_threshold: int = 3       # consecutive failures before circuit opens (5 min TTL)
     heartbeat_timeout_minutes: int = 5       # minutes before a stale heartbeat triggers task recovery
+
+    # Native tool calling (GitLab #214) — OFF by default. When on, API adapters
+    # that support it (Anthropic, OpenAI-compatible) send the agent's schema-backed
+    # tools to the provider's native function-calling API and convert the structured
+    # tool calls back into the existing ```tool_calls fence, so the rest of the
+    # pipeline (parser, executor, frontend) is unchanged. Tools without a declared
+    # schema stay on the text-fence path.
+    native_tools_enabled: bool = False
+
+    # Tool permissions (GitLab #222)
+    tools_default_deny: bool = False         # when true, an agent with NO configured tools is
+                                             # deny-all (only always-allowed + its skills/local
+                                             # tools pass) instead of the default allow-all
+
+    # Provider failover (per-account health/circuit — GitLab #216)
+    provider_failure_circuit_threshold: int = 5   # consecutive non-rate failures before an account is marked "exhausted"
+    provider_exhausted_cooldown_seconds: int = 300  # how long an "exhausted" account is skipped before being retried
+
+    # Streaming
+    provider_stream_idle_timeout_seconds: int = 300  # abort a turn if the provider emits no
+                                             # chunk for this long (hung stream guard, #223). 0 = off.
+    pubsub_queue_maxsize: int = 2000         # per-subscriber pub/sub queue cap; a stuck/slow
+                                             # consumer drops OLDEST events instead of growing
+                                             # memory unbounded (GitLab #225). 0 = unbounded.
+    max_truncation_continuations: int = 3    # times to auto-continue a reply cut off at max_tokens (0 disables)
+    max_empty_retries: int = 2               # retry the SAME provider when it streams nothing (flaky weak models
+                                             # return empty completions intermittently); 0 disables. Safe — only
+                                             # retries when zero content was yielded, so no duplicate output.
+
+    # Anti-spin: max consecutive tool-resume turns with no progress (no file delivered,
+    # no task completed, no <final/>) before the orchestrator is halted with an honest
+    # message instead of looping forever. 0 disables the breaker.
+    max_resume_spin: int = 8
 
     # Registration gating
     require_invite: bool = False  # set True to require a signup invite token to register

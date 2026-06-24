@@ -5,5 +5,27 @@
   "category": "agent_bus",
   "is_builtin": true,
   "always_allowed": true,
-  "platform_executor": false
+  "platform_executor": false,
+  "args": [
+    {
+      "name": "target_agent_id",
+      "type": "string",
+      "description": "target agent id"
+    },
+    {
+      "name": "event_type",
+      "type": "string",
+      "description": "event type"
+    },
+    {
+      "name": "message",
+      "type": "string",
+      "description": "message"
+    },
+    {
+      "name": "payload",
+      "type": "object",
+      "description": "payload"
+    }
+  ]
 }

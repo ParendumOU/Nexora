@@ -6,5 +6,22 @@
   "group": "platform_create",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "credential_id",
+      "type": "string",
+      "description": "credential id"
+    },
+    {
+      "name": "group",
+      "type": "string",
+      "description": "group"
+    },
+    {
+      "name": "visibility",
+      "type": "string",
+      "description": "visibility"
+    }
+  ]
 }

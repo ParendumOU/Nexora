@@ -7,6 +7,7 @@ from src.models.chat import Chat
 
 async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: str | None) -> dict | None:
     org_id = None
+    chat_orchestrator_id = None
     async with AsyncSessionLocal() as db:
         if agent_id:
             r = await db.execute(select(Agent).where(Agent.id == agent_id))
@@ -14,10 +15,11 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
             if ag:
                 org_id = ag.org_id
 
-        if not org_id:
-            r2 = await db.execute(select(Chat).where(Chat.id == chat_id))
-            chat_rec = r2.scalar_one_or_none()
-            if chat_rec and chat_rec.agent_id:
+        r2 = await db.execute(select(Chat).where(Chat.id == chat_id))
+        chat_rec = r2.scalar_one_or_none()
+        if chat_rec and chat_rec.agent_id:
+            chat_orchestrator_id = chat_rec.agent_id
+            if not org_id:
                 r3 = await db.execute(select(Agent).where(Agent.id == chat_rec.agent_id))
                 orch = r3.scalar_one_or_none()
                 if orch:
@@ -40,7 +42,7 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
             "skills": a.skills or [],
         }
         for a in agents
-        if a.id != agent_id
+        if a.id != chat_orchestrator_id
     ]
 
     return {"data": {"agents": result, "total": len(result)}}

@@ -239,8 +239,14 @@ async def get_platform_context(
             from src.models.tool import Tool
             r_sk = await db.execute(select(Skill.key).where(Skill.org_id == org_id))
             available_skills_keys = [row[0] for row in r_sk.all()]
+            # Only advertise tools that actually resolve to a handler — phantom tools
+            # (tool.json + TOOL.md but no executor) would otherwise be listed in the
+            # orchestrator's "Available Tools" and just answer "Unknown tool" (#226).
+            from src.services.agent_tools import is_executable_tool
             r_tl = await db.execute(select(Tool.key).where(Tool.org_id == org_id))
-            available_tools_keys = [row[0] for row in r_tl.all()]
+            available_tools_keys = [
+                row[0] for row in r_tl.all() if is_executable_tool(row[0])
+            ]
 
             from src.models.model_profile import ModelProfile
             r_mp = await db.execute(

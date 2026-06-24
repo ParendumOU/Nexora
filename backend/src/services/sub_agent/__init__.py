@@ -121,6 +121,7 @@ async def _run_delegated_tasks(
     nudge_if_idle: bool = False,
     from_resume: bool = False,
     force_recover: bool = False,
+    last_turn_empty: bool = False,
 ) -> None:
     """Find every pending delegated task in this chat turn and launch a sub-agent for each.
 
@@ -244,8 +245,23 @@ async def _run_delegated_tasks(
                 )
                 _unassigned_pending = _ua_r.scalar() or 0
 
-            if _unassigned_pending > 0 or (nudge_if_idle and from_resume):
+            # Nudge only when THIS turn was empty (a contentless resume that must be
+            # pushed to follow through — e.g. after a sub-agent completed or a tool
+            # returned, so the main agent actually relays the result). A substantive
+            # prose reply is treated as the final answer (no nudge → no extra slow
+            # turn); a genuinely stuck turn is still caught by the conversation
+            # watchdog. last_turn_empty is supplied by the caller (which knows the
+            # turn's content); default False so non-resume callers never nudge here.
+            if _unassigned_pending > 0 or (nudge_if_idle and from_resume and last_turn_empty):
                 asyncio.create_task(_nudge_orchestrator(chat_id, org_id, user_id, from_resume=from_resume)).add_done_callback(_on_task_error("nudge_orchestrator"))
+            else:
+                # Truly idle (nothing to dispatch/run, no nudge) → tell the UI to stop
+                # showing "working" immediately instead of waiting on the client guard.
+                try:
+                    from src.core.pubsub import broadcast as _bc
+                    await _bc(chat_id, {"type": "activity_status", "status": "idle"})
+                except Exception:
+                    pass
         return
 
     # Don't launch a batch into a stopped conversation: if this chat or any
@@ -256,9 +272,28 @@ async def _run_delegated_tasks(
         logger.info("[_run_delegated_tasks] chat %s (or ancestor) cancelled — not dispatching %d task(s)", chat_id, len(task_dispatch_info))
         return
 
+    # When the durable run queue is enabled (#219), enqueue each sub-agent run so a
+    # dedicated runner executes it (cross-worker governor, durable across restarts).
+    # Otherwise keep the in-process dispatch (default).
+    from src.services import run_queue
+    _queue_on = run_queue.is_enabled()
+
     for i, (tid, a_id, a_max_c) in enumerate(task_dispatch_info):
         if i > 0:
             await asyncio.sleep(3)
+        if _queue_on:
+            await run_queue.enqueue_run(
+                "subagent",
+                task_id=tid,
+                parent_chat_id=chat_id,
+                org_id=org_id,
+                parent_chat_project_id=parent_chat_project_id,
+                parent_chat_provider_chain_id=parent_chat_provider_chain_id,
+                user_id=user_id,
+                parent_direct_provider_id=parent_direct_provider_id,
+                agent_id=a_id,
+            )
+            continue
         asyncio.create_task(
             _dispatch(
                 task_id=tid,

@@ -4,7 +4,177 @@
   "description": "Unified GitLab API tool. ALL read/write operations exposed through a single `action` argument. Credentials are resolved automatically — never use http_request against api.gitlab.com from agents.",
   "category": "gitlab",
   "group": "gitlab_read",
-  "env_vars": ["GITLAB_TOKEN"],
+  "env_vars": [
+    "GITLAB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "action"
+    },
+    {
+      "name": "project_id",
+      "type": "integer",
+      "description": "project id"
+    },
+    {
+      "name": "group_id",
+      "type": "integer",
+      "description": "group id"
+    },
+    {
+      "name": "path",
+      "type": "string",
+      "description": "path"
+    },
+    {
+      "name": "ref",
+      "type": "string",
+      "description": "ref"
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "description": "branch"
+    },
+    {
+      "name": "source_branch",
+      "type": "string",
+      "description": "source branch"
+    },
+    {
+      "name": "target_branch",
+      "type": "string",
+      "description": "target branch"
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "description": "title"
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "description": "description"
+    },
+    {
+      "name": "body",
+      "type": "string",
+      "description": "body"
+    },
+    {
+      "name": "issue_iid",
+      "type": "integer",
+      "description": "issue iid"
+    },
+    {
+      "name": "labels",
+      "type": "array",
+      "description": "labels"
+    },
+    {
+      "name": "assignee_ids",
+      "type": "array",
+      "description": "assignee ids"
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "description": "state"
+    },
+    {
+      "name": "search",
+      "type": "string",
+      "description": "search"
+    },
+    {
+      "name": "query",
+      "type": "string",
+      "description": "query"
+    },
+    {
+      "name": "term",
+      "type": "string",
+      "description": "term"
+    },
+    {
+      "name": "scope",
+      "type": "string",
+      "description": "scope"
+    },
+    {
+      "name": "order_by",
+      "type": "string",
+      "description": "order by"
+    },
+    {
+      "name": "per_page",
+      "type": "integer",
+      "description": "per page"
+    },
+    {
+      "name": "max_pages",
+      "type": "integer",
+      "description": "max pages"
+    },
+    {
+      "name": "max_chars",
+      "type": "integer",
+      "description": "max chars"
+    },
+    {
+      "name": "pipeline_id",
+      "type": "integer",
+      "description": "pipeline id"
+    },
+    {
+      "name": "job_id",
+      "type": "integer",
+      "description": "job id"
+    },
+    {
+      "name": "variables",
+      "type": "array",
+      "description": "variables"
+    },
+    {
+      "name": "remove_source_branch",
+      "type": "boolean",
+      "description": "remove source branch"
+    },
+    {
+      "name": "visibility",
+      "type": "string",
+      "description": "visibility"
+    },
+    {
+      "name": "archived",
+      "type": "boolean",
+      "description": "archived"
+    },
+    {
+      "name": "owned",
+      "type": "boolean",
+      "description": "owned"
+    },
+    {
+      "name": "include_subgroups",
+      "type": "boolean",
+      "description": "include subgroups"
+    },
+    {
+      "name": "min_access_level",
+      "type": "integer",
+      "description": "min access level"
+    },
+    {
+      "name": "top_level_only",
+      "type": "boolean",
+      "description": "top level only"
+    }
+  ]
 }

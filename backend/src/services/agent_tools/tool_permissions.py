@@ -56,6 +56,24 @@ def _optional_builtins() -> frozenset[str]:
     return _OPTIONAL_BUILTINS_CACHE
 
 
+def is_tool_allowed(name: str, agent_enabled: set[str] | None) -> bool:
+    """Authoritative per-tool gate (GitLab #222).
+
+    - ``agent_enabled is None`` → unrestricted (no tools configured) → allow.
+    - always-allowed tools (platform coordination: task_create/log_entry/…) → allow.
+    - otherwise the tool must be in the resolved enabled set.
+
+    This gates EVERY tool, not just ``platform_executor`` builtins — so an agent
+    scoped to e.g. ``["file_read"]`` can no longer call ``database`` or
+    ``kubernetes`` simply because those happen to be executor.py tools.
+    """
+    if agent_enabled is None:
+        return True
+    if name in _always_allowed():
+        return True
+    return name in agent_enabled
+
+
 async def _get_agent_enabled_tools(agent_id: str | None, chat_id: str) -> set[str] | None:
     """Return enabled optional built-in tool keys, or None if unrestricted (no tools configured)."""
     agent_tools: list = []
@@ -87,8 +105,15 @@ async def _get_agent_enabled_tools(agent_id: str | None, chat_id: str) -> set[st
     from src.services.agent_tools import local_exec as _local_exec
     local_active = _local_exec.get_bridge(chat_id) is not None
     if not combined:
-        return None  # unrestricted — no tools explicitly configured
-    enabled = set(combined)
+        # Default: no explicit tool config → unrestricted (backward-compatible).
+        # Opt-in least-privilege: tools_default_deny makes an unconfigured agent
+        # deny-all — only always-allowed tools (+ its skills / active local tools) pass.
+        from src.core.config import get_settings
+        if not get_settings().tools_default_deny:
+            return None
+        enabled = set()
+    else:
+        enabled = set(combined)
     enabled.update(agent_skills)  # skills expand the allowed set
     if local_active:
         enabled.update(_local_exec.LOCAL_TOOLS)

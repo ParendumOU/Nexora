@@ -128,6 +128,9 @@ def _to_response(p: Provider, available_models: list[str]) -> "ProviderResponse"
         last_error=p.last_error,
         last_error_at=p.last_error_at.isoformat() if p.last_error_at else None,
         last_used_at=p.last_used_at.isoformat() if p.last_used_at else None,
+        state=p.state,
+        cooling_until=p.cooling_until.isoformat() if p.cooling_until else None,
+        consecutive_failures=p.consecutive_failures,
     )
 
 
@@ -161,6 +164,9 @@ class ProviderResponse(BaseModel):
     last_error: str | None = None
     last_error_at: str | None = None
     last_used_at: str | None = None
+    state: str = "healthy"
+    cooling_until: str | None = None
+    consecutive_failures: int = 0
 
     model_config = {"from_attributes": True}
 

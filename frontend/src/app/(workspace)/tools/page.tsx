@@ -15,7 +15,7 @@ import {
   Triangle, Code2, Container, Search, Sparkles, Upload, Link,
   Radio, Layers, Brain, CircleDot, Server, Workflow, FolderKanban,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import toast from "react-hot-toast";
 import * as Dialog from "@radix-ui/react-dialog";
 import { ToolDetailPanel } from "@/components/tools/ToolDetailPanel";
@@ -78,7 +78,7 @@ const getCategoryConfig = (cat: string) =>
 
 function EnvBadge({ name }: { name: string }) {
   const copy = () => {
-    navigator.clipboard.writeText(name);
+    copyToClipboard(name);
     toast.success("Copied");
   };
   return (

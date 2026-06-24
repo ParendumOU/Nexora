@@ -6,5 +6,63 @@
   "group": "git",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": false
+  "always_allowed": false,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "list_branches | get_tree | read_file | write_file | merge | create_branch | …"
+    },
+    {
+      "name": "repo_url",
+      "type": "string",
+      "description": "Repository URL"
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "description": "Branch name"
+    },
+    {
+      "name": "path",
+      "type": "string",
+      "description": "File path within the repo"
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "description": "[write_file] new content"
+    },
+    {
+      "name": "message",
+      "type": "string",
+      "description": "[write_file/merge] commit message"
+    },
+    {
+      "name": "base",
+      "type": "string",
+      "description": "[merge] base branch"
+    },
+    {
+      "name": "head",
+      "type": "string",
+      "description": "[merge] head branch"
+    },
+    {
+      "name": "from_branch",
+      "type": "string",
+      "description": "[create_branch] source branch"
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "description": "filter state"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "Max items"
+    }
+  ]
 }

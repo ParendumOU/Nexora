@@ -2,7 +2,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Loader2, ShieldAlert } from "lucide-react";
+import { Loader2, ShieldAlert, Eye, EyeOff } from "lucide-react";
 import { authApi } from "@/lib/api";
 import { BrandMark } from "@/components/BrandMark";
 import { useAuthStore } from "@/store/auth";
@@ -21,6 +21,7 @@ function RegisterForm() {
   const joinToken = searchParams.get("join") ?? "";
 
   const [form, setForm] = useState({ full_name: "", email: "", password: "", org_name: "", invite_token: inviteToken });
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [inviteBlocked, setInviteBlocked] = useState(false);
 
@@ -118,7 +119,12 @@ function RegisterForm() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Password</label>
-              <Input type="password" placeholder="••••••••" value={form.password} onChange={set("password")} required minLength={8} />
+              <div className="relative">
+                <Input type={showPassword ? "text" : "password"} placeholder="••••••••" value={form.password} onChange={set("password")} required minLength={8} className="pr-10" />
+                <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Organization name <span className="text-muted-foreground/50">(optional)</span></label>

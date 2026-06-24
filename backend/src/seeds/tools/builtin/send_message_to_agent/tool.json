@@ -25,9 +25,41 @@
     },
     "mode": {
       "type": "string",
-      "enum": ["sync", "async"],
+      "enum": [
+        "sync",
+        "async"
+      ],
       "default": "sync",
       "description": "sync: block and wait up to 120s for a reply. async: fire-and-forget, result injected later via orchestrator."
     }
-  }
+  },
+  "args": [
+    {
+      "name": "to_agent_id",
+      "type": "string",
+      "required": true,
+      "description": "to agent id"
+    },
+    {
+      "name": "body",
+      "type": "string",
+      "required": true,
+      "description": "body"
+    },
+    {
+      "name": "subject",
+      "type": "string",
+      "description": "subject"
+    },
+    {
+      "name": "mode",
+      "type": "string",
+      "description": "mode"
+    },
+    {
+      "name": "reply_to_id",
+      "type": "string",
+      "description": "reply to id"
+    }
+  ]
 }

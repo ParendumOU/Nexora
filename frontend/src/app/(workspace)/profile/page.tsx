@@ -5,7 +5,7 @@ import { usersApi, userApiKeysApi, backupApi, totpApi, profileFactsApi } from "@
 import { useAuthStore } from "@/store/auth";
 import { useUIModeStore, UIMode } from "@/store/ui-mode";
 import { useOnboardingStore } from "@/store/onboarding";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import { Save, Eye, EyeOff, Pencil, Plus, Trash2, User, Loader2, GripVertical, Lock, Key, Copy, Check, ShieldAlert, ToggleLeft, ToggleRight, RefreshCw, Download, Upload, Database, Monitor, Layers } from "lucide-react";
 import toast from "react-hot-toast";
 import ReactMarkdown from "react-markdown";
@@ -493,7 +493,7 @@ export default function ProfilePage() {
       setNewKeyValue(data.key);
       setNewKeyName("");
       qc.invalidateQueries({ queryKey: ["api-keys"] });
-      navigator.clipboard.writeText(data.key).then(() =>
+      copyToClipboard(data.key).then(() =>
         toast.success("API key created and copied to clipboard!", { icon: "🔑" })
       ).catch(() =>
         toast.success("API key created — copy it below", { icon: "🔑" })
@@ -512,7 +512,7 @@ export default function ProfilePage() {
     onSuccess: (data) => {
       setNewKeyValue(data.key);
       qc.invalidateQueries({ queryKey: ["api-keys"] });
-      navigator.clipboard.writeText(data.key).then(() =>
+      copyToClipboard(data.key).then(() =>
         toast.success("Key rotated and copied to clipboard!", { icon: "🔄" })
       ).catch(() =>
         toast.success("Key rotated — copy the new value below", { icon: "🔄" })
@@ -522,7 +522,7 @@ export default function ProfilePage() {
   });
 
   function copyKey(key: string) {
-    navigator.clipboard.writeText(key).then(() => { setCopiedKey(true); setTimeout(() => setCopiedKey(false), 2000); });
+    copyToClipboard(key).then(() => { setCopiedKey(true); setTimeout(() => setCopiedKey(false), 2000); });
   }
 
   // Admin state

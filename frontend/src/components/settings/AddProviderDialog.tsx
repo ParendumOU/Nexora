@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Select from "@radix-ui/react-select";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import toast from "react-hot-toast";
 import { Loader2, Zap, ChevronDown, ExternalLink, Copy, Check, HelpCircle } from "lucide-react";
 import { PROVIDER_MODELS } from "@/lib/provider-models";
@@ -17,7 +17,7 @@ type Step = "configure" | "oauth_wait" | "done";
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    navigator.clipboard.writeText(text);
+    copyToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

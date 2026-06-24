@@ -5,5 +5,28 @@
   "category": "agent_bus",
   "is_builtin": true,
   "always_allowed": true,
-  "platform_executor": false
+  "platform_executor": false,
+  "args": [
+    {
+      "name": "body",
+      "type": "string",
+      "required": true,
+      "description": "body"
+    },
+    {
+      "name": "subject",
+      "type": "string",
+      "description": "subject"
+    },
+    {
+      "name": "agent_ids",
+      "type": "array",
+      "description": "agent ids"
+    },
+    {
+      "name": "channel",
+      "type": "string",
+      "description": "channel"
+    }
+  ]
 }

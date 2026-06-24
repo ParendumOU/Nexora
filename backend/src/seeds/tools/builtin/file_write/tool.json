@@ -4,5 +4,29 @@
   "description": "Write or overwrite a file on the agent's working filesystem.",
   "category": "file",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "File path to write"
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "required": true,
+      "description": "Full file content"
+    },
+    {
+      "name": "create_dirs",
+      "type": "boolean",
+      "description": "Create parent dirs"
+    },
+    {
+      "name": "encoding",
+      "type": "string",
+      "description": "Text encoding (default utf-8)"
+    }
+  ]
 }

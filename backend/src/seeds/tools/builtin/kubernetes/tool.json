@@ -3,7 +3,77 @@
   "name": "Kubernetes",
   "description": "Inspect and manage Kubernetes cluster resources: pods, deployments, services, logs, scaling. Requires KUBECONFIG_PATH or in-cluster service account.",
   "category": "infrastructure",
-  "env_vars": ["KUBECONFIG_PATH"],
+  "env_vars": [
+    "KUBECONFIG_PATH"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "get_pods | logs | scale | get_deployments | …"
+    },
+    {
+      "name": "namespace",
+      "type": "string",
+      "description": "Namespace"
+    },
+    {
+      "name": "all_namespaces",
+      "type": "boolean",
+      "description": "Across all namespaces"
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "Resource name"
+    },
+    {
+      "name": "kind",
+      "type": "string",
+      "description": "Resource kind"
+    },
+    {
+      "name": "pod",
+      "type": "string",
+      "description": "[logs] pod name"
+    },
+    {
+      "name": "container",
+      "type": "string",
+      "description": "[logs] container"
+    },
+    {
+      "name": "deployment",
+      "type": "string",
+      "description": "[scale] deployment"
+    },
+    {
+      "name": "replicas",
+      "type": "integer",
+      "description": "[scale] desired replicas"
+    },
+    {
+      "name": "label_selector",
+      "type": "string",
+      "description": "Label selector"
+    },
+    {
+      "name": "tail_lines",
+      "type": "integer",
+      "description": "[logs] tail N lines"
+    },
+    {
+      "name": "previous",
+      "type": "boolean",
+      "description": "[logs] previous container"
+    },
+    {
+      "name": "status_filter",
+      "type": "string",
+      "description": "Status filter"
+    }
+  ]
 }

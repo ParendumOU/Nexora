@@ -2,7 +2,7 @@
 
 `spawn_subagent_task` refuses to create a new sub-agent once the chat's
 ancestry depth reaches `max_subdelegation_depth`. We drive that branch by
-patching `_chat_depth` and `get_settings`, and verify `_chat_depth` itself
+patching `delegation_depth` and `get_settings`, and verify `delegation_depth` itself
 against an in-memory chat ancestry.
 """
 import uuid
@@ -30,21 +30,21 @@ async def session_factory():
     await eng.dispose()
 
 
-# ── _chat_depth ─────────────────────────────────────────────────────────────
+# ── delegation_depth ─────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_chat_depth_root_is_zero(session_factory):
+async def testdelegation_depth_root_is_zero(session_factory):
     root_id = str(uuid.uuid4())
     async with session_factory() as db:
         db.add(Chat(id=root_id, user_id="u1", title="root", parent_chat_id=None))
         await db.commit()
     with patch.object(spawn, "AsyncSessionLocal", session_factory):
-        assert await spawn._chat_depth(root_id) == 0
+        assert await spawn.delegation_depth(root_id) == 0
 
 
 @pytest.mark.asyncio
-async def test_chat_depth_counts_ancestry(session_factory):
+async def testdelegation_depth_counts_ancestry(session_factory):
     ids = [str(uuid.uuid4()) for _ in range(3)]
     async with session_factory() as db:
         db.add(Chat(id=ids[0], user_id="u1", title="root", parent_chat_id=None))
@@ -52,12 +52,12 @@ async def test_chat_depth_counts_ancestry(session_factory):
         db.add(Chat(id=ids[2], user_id="u1", title="grandchild", parent_chat_id=ids[1]))
         await db.commit()
     with patch.object(spawn, "AsyncSessionLocal", session_factory):
-        assert await spawn._chat_depth(ids[2]) == 2
-        assert await spawn._chat_depth(ids[1]) == 1
+        assert await spawn.delegation_depth(ids[2]) == 2
+        assert await spawn.delegation_depth(ids[1]) == 1
 
 
 @pytest.mark.asyncio
-async def test_chat_depth_handles_cycle_safely(session_factory):
+async def testdelegation_depth_handles_cycle_safely(session_factory):
     # A self-referential / cyclic parent must not loop forever.
     a, b = str(uuid.uuid4()), str(uuid.uuid4())
     async with session_factory() as db:
@@ -65,7 +65,7 @@ async def test_chat_depth_handles_cycle_safely(session_factory):
         db.add(Chat(id=b, user_id="u1", title="b", parent_chat_id=a))
         await db.commit()
     with patch.object(spawn, "AsyncSessionLocal", session_factory):
-        depth = await spawn._chat_depth(a)
+        depth = await spawn.delegation_depth(a)
         # Loop terminates via the `seen` set — depth is bounded, not infinite.
         assert isinstance(depth, int)
         assert depth <= 2
@@ -77,7 +77,7 @@ async def test_chat_depth_handles_cycle_safely(session_factory):
 @pytest.mark.asyncio
 async def test_spawn_refused_at_depth_cap():
     chat_id = str(uuid.uuid4())
-    with patch.object(spawn, "_chat_depth", new=AsyncMock(return_value=4)), \
+    with patch.object(spawn, "delegation_depth", new=AsyncMock(return_value=4)), \
             patch("src.core.config.get_settings", return_value=SimpleNamespace(max_subdelegation_depth=4)):
         result = await spawn.spawn_subagent_task(
             {"title": "deep", "task": "do thing"}, chat_id, None, "Agent"
@@ -88,7 +88,7 @@ async def test_spawn_refused_at_depth_cap():
 @pytest.mark.asyncio
 async def test_spawn_refused_when_over_cap():
     chat_id = str(uuid.uuid4())
-    with patch.object(spawn, "_chat_depth", new=AsyncMock(return_value=9)), \
+    with patch.object(spawn, "delegation_depth", new=AsyncMock(return_value=9)), \
             patch("src.core.config.get_settings", return_value=SimpleNamespace(max_subdelegation_depth=4)):
         result = await spawn.spawn_subagent_task({"task": "x"}, chat_id, None, "Agent")
     assert "maximum delegation depth" in result.lower()
@@ -114,7 +114,7 @@ async def test_spawn_allowed_below_cap_dedups(session_factory):
     async def _fake_local():
         yield _FakeSession()
 
-    with patch.object(spawn, "_chat_depth", new=AsyncMock(return_value=0)), \
+    with patch.object(spawn, "delegation_depth", new=AsyncMock(return_value=0)), \
             patch("src.core.config.get_settings", return_value=SimpleNamespace(max_subdelegation_depth=4)), \
             patch.object(spawn, "AsyncSessionLocal", _fake_local), \
             patch("src.services.agent_tools._run_single_tool", new=AsyncMock(return_value=None)):

@@ -34,8 +34,10 @@ _cache: dict[str, list[dict]] = {}
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _read_json(path: Path) -> dict:
+    # utf-8-sig tolerates a leading UTF-8 BOM (some editors add one) — without it
+    # those manifests silently failed to load and the tool/skill vanished.
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception as exc:
         logger.warning(f"[loader] failed to read {path}: {exc}")
         return {}
@@ -43,7 +45,7 @@ def _read_json(path: Path) -> dict:
 
 def _read_text(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8-sig")
     except Exception:
         return ""
 
@@ -130,13 +132,18 @@ def get_prompt(name: str) -> str:
 
 
 def render_prompt(name: str, **kwargs: str) -> str:
-    """Load a prompt template and substitute $variable placeholders with kwargs."""
+    """Load a prompt template and substitute $variable placeholders with kwargs.
+
+    Uses ``string.Template.safe_substitute`` so substitution is word-boundary aware
+    (``$ref`` no longer clobbers ``$ref_name``), unknown placeholders are left
+    intact instead of corrupted, and stray ``$`` in prose (shell snippets, prices)
+    is preserved (GitLab #230).
+    """
+    from string import Template
     text = get_prompt(name)
     if not text:
         return ""
-    for key, value in kwargs.items():
-        text = text.replace(f"${key}", value)
-    return text
+    return Template(text).safe_substitute(**kwargs)
 
 
 def _scan_providers() -> list[dict]:

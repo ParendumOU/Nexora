@@ -27,6 +27,29 @@ def _channel(chat_id: str) -> str:
     return f"{_CH_PREFIX}{chat_id}"
 
 
+def _put_drop_oldest(q: asyncio.Queue, event: dict) -> None:
+    """Enqueue without ever blocking the single Redis listener.
+
+    A slow/stuck consumer (e.g. a mobile client on a bad network) must not back up
+    the shared listener or grow memory without bound (GitLab #225). When the queue
+    is full we drop the OLDEST event and enqueue the newest — for a token stream the
+    latest frames are the ones that matter.
+    """
+    try:
+        q.put_nowait(event)
+        return
+    except asyncio.QueueFull:
+        pass
+    try:
+        q.get_nowait()  # drop oldest
+    except asyncio.QueueEmpty:
+        pass
+    try:
+        q.put_nowait(event)
+    except asyncio.QueueFull:
+        pass
+
+
 async def _start_redis_listener() -> None:
     global _redis_listener_task, _listener_ready
     if _listener_ready is None:
@@ -64,7 +87,7 @@ async def _redis_listener_loop() -> None:
             async with _lock:
                 queues = list(_listeners.get(chat_id, set()))
             for q in queues:
-                await q.put(event)
+                _put_drop_oldest(q, event)
     except asyncio.CancelledError:
         pass
     except Exception as exc:
@@ -82,7 +105,9 @@ async def _redis_listener_loop() -> None:
 
 
 async def subscribe(chat_id: str) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
+    from src.core.config import get_settings
+    maxsize = get_settings().pubsub_queue_maxsize or 0
+    q: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
     async with _lock:
         _listeners.setdefault(chat_id, set()).add(q)
     await _start_redis_listener()

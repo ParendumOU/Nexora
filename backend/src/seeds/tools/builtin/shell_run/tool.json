@@ -5,5 +5,13 @@
   "category": "code",
   "env_vars": [],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "command",
+      "type": "string",
+      "required": true,
+      "description": "Shell command to execute"
+    }
+  ]
 }

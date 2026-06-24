@@ -26,6 +26,13 @@ class Agent(Base):
     max_subagents: Mapped[int] = mapped_column(Integer, default=5)
     max_concurrency: Mapped[int] = mapped_column(Integer, default=2)
     model_pref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Optional capability binding: when set (and the turn has no explicit per-message
+    # account/chain pick and no chat/project chain), provider resolution routes through
+    # this ModelProfile — decoupling "which model" from the agent definition. See
+    # services/turn_engine.resolve_providers.
+    model_profile_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("model_profiles.id", ondelete="SET NULL"), nullable=True
+    )
     temperature: Mapped[float] = mapped_column(Float, default=0.3)
     max_tokens: Mapped[int] = mapped_column(Integer, default=8192)
     flow_config: Mapped[dict] = mapped_column(JSON, default=dict)   # React Flow positions

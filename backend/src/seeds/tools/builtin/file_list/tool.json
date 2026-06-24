@@ -4,5 +4,22 @@
   "description": "List files and directories at a given path on the agent's working filesystem.",
   "category": "file",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Directory (default: cwd)"
+    },
+    {
+      "name": "pattern",
+      "type": "string",
+      "description": "Glob pattern"
+    },
+    {
+      "name": "recursive",
+      "type": "boolean",
+      "description": "Recurse into subdirs"
+    }
+  ]
 }

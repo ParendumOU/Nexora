@@ -71,6 +71,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const wasConnectedRef = useRef(false);
   const wsRetryAttemptRef = useRef(0);
   const activeSubAgentsRef = useRef(0);
+  // Stale-activity guard: timestamp of the last WS event + a mirror of isStreaming,
+  // so a turn that ends without a clean stream_end (e.g. a weak model that never
+  // emits <final/>, or a dropped completion event) can't hang "Agent is writing…"
+  // forever — see the watchdog effect below.
+  const lastWsActivityRef = useRef<number>(Date.now());
+  const isStreamingRef = useRef(false);
   const userClosedActivitiesRef = useRef(false);
   const uiStateLoadedRef = useRef(false);
   type RightPanel = "tasks" | "logs" | "files" | "attachments" | "usage" | "notes" | "plan" | "webhook" | "graph" | null;
@@ -327,6 +333,24 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { streamingContentRef.current = streamingContent; }, [streamingContent]);
+  useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
+
+  // Stale-activity watchdog: if the UI shows "working" but no WS event has arrived
+  // for 3 min, the turn almost certainly ended without a clean stream_end (weak model
+  // that never emitted <final/>, or a missed sub_agent_done). Force-clear the indicator
+  // so it can never hang for an hour. Real activity (chunks/status/sub-agent events)
+  // refreshes lastWsActivityRef, so a genuinely-busy turn is never cut off.
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (isStreamingRef.current && Date.now() - lastWsActivityRef.current > 180000) {
+        setIsStreaming(false);
+        setAgentStatus(null);
+        activeSubAgentsRef.current = 0;
+        setStreamingContent((c) => (c && c.trim() ? c : null));
+      }
+    }, 20000);
+    return () => clearInterval(iv);
+  }, []);
 
   // Restore per-user per-chat UI state from localStorage
   useEffect(() => {
@@ -552,6 +576,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      lastWsActivityRef.current = Date.now();  // feed the stale-activity watchdog
 
       if (data.type === "error") {
         setIsStreaming(false);
@@ -583,9 +608,31 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           }
           return;
         }
-        toast.error(data.message);
+        // Turn-failure errors (no providers, chain exhausted, mid-stream crash) are
+        // persisted server-side as an excluded assistant message and carry its id.
+        // Append the SAME bubble live so the conversation looks identical whether you
+        // watch in real time or reload the page (the reloaded view loads it from DB).
+        if (data.message_id) {
+          setMessages((msgs) => {
+            if (msgs.some((m) => m.id === data.message_id)) return msgs;
+            return [...msgs, {
+              id: data.message_id as string,
+              role: "assistant" as const,
+              content: data.message as string,
+              metadata_: { error: true },
+              excluded: true,
+              created_at: (data.created_at as string) ?? new Date().toISOString(),
+            }];
+          });
+        } else {
+          toast.error(data.message);
+        }
       } else if (data.type === "busy") {
         toast.error(data.message || "Sub-agent is still working — please wait.");
+      } else if (data.type === "tool_parse_error") {
+        // The agent emitted a malformed tool-call. Recoverable (it will be nudged to
+        // retry), but surface it so the user isn't left wondering why nothing happened.
+        toast(data.message || "Agent produced a malformed tool call — retrying.", { icon: "⚠️" });
       } else if (data.type === "connected") {
         if (data.participants) setOnlineUserIds(new Set((data.participants as { id: string }[]).map((p) => p.id)));
       } else if (data.type === "user_joined") {
@@ -644,8 +691,13 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         }
         // Separate setStreamingContent and setMessages — nesting setState inside a
         // setState updater is a React anti-pattern that can silently drop updates in
-        // concurrent mode. Backend always sends content in stream_end so use it directly.
-        const finalContent = (data.content as string | undefined) || streamingContentRef.current || "";
+        // concurrent mode. Backend always sends content in stream_end, and it is
+        // AUTHORITATIVE: it equals the saved message (fences/file blobs stripped). Use
+        // `??` (not `||`) so an intentionally-empty turn ("" — a pure tool-call / file
+        // delivery whose raw stream was just JSON/CSS) does NOT fall back to the raw
+        // streamed buffer. That fallback made the live view show fence/code garbage that
+        // vanished on refresh (live ≠ saved). Now live snaps to exactly what's persisted.
+        const finalContent = (data.content as string | undefined) ?? streamingContentRef.current ?? "";
         setStreamingContent(null);
         if (finalContent.trim()) {
           setMessages((msgs) => {
@@ -671,6 +723,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         setTasks((prev) => prev.filter((t) => t.id !== data.task_id));
       } else if (data.type === "log_entry") {
         setLiveLogs((prev) => [...prev.slice(-499), data.log as LogEntry]);
+      } else if (data.type === "file_created") {
+        qc.invalidateQueries({ queryKey: ["chat-files", chatId] });
+        const fname = (data.file && data.file.name) || "file";
+        toast.success(`File attached: ${fname}`, { icon: "📎" });
       } else if (data.type === "activity_status") {
         if (data.status === "idle") {
           if (activeSubAgentsRef.current === 0) {
@@ -833,7 +889,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       toast.error(wsRetryAttemptRef.current > 0 ? "Reconnecting… try again in a moment." : "Not connected. Please refresh.");
       return;
     }
-    const clientMsgId = crypto.randomUUID();
+    const clientMsgId = crypto.randomUUID?.() ?? 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
     setMessages((msgs) => [...msgs, { id: clientMsgId, role: "user", content, user_id: currentUser?.id ?? null, user_name: currentUser?.full_name ?? null, created_at: new Date().toISOString() }]);
     wsRef.current.send(JSON.stringify({
       type: "message",
@@ -1392,12 +1448,15 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 : null
             );
             return effectiveStatus ? (
+              // Branded activity strip — now also carries live fallback-chain status
+              // (which provider/model is being tried, failovers, retries) so the user
+              // can see what the agent is doing instead of staring at an empty bubble.
               <div className="flex items-center gap-2 px-4 py-1.5 border-t border-border bg-background/60 shrink-0">
                 <Zap className={cn(
                   "w-3 h-3 shrink-0",
                   effectiveStatus.tool ? "text-primary animate-pulse" : "text-muted-foreground animate-pulse",
                 )} />
-                <span className="text-xs text-muted-foreground">{effectiveStatus.label}</span>
+                <span className="text-xs text-muted-foreground truncate">{effectiveStatus.label}</span>
               </div>
             ) : null;
           })()}

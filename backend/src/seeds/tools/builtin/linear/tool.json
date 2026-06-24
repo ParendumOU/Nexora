@@ -3,7 +3,67 @@
   "name": "Linear",
   "description": "Manage issues in Linear — list, search, create, update issues, add comments, and list teams and projects. Requires a Linear personal API key.",
   "category": "integration",
-  "env_vars": ["LINEAR_API_KEY"],
+  "env_vars": [
+    "LINEAR_API_KEY"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "action"
+    },
+    {
+      "name": "team_id",
+      "type": "string",
+      "description": "team id"
+    },
+    {
+      "name": "issue_id",
+      "type": "string",
+      "description": "issue id"
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "description": "title"
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "description": "description"
+    },
+    {
+      "name": "body",
+      "type": "string",
+      "description": "body"
+    },
+    {
+      "name": "assignee_id",
+      "type": "string",
+      "description": "assignee id"
+    },
+    {
+      "name": "state_id",
+      "type": "string",
+      "description": "state id"
+    },
+    {
+      "name": "priority",
+      "type": "string",
+      "description": "priority"
+    },
+    {
+      "name": "query",
+      "type": "string",
+      "description": "query"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "limit"
+    }
+  ]
 }

@@ -3,7 +3,79 @@
   "name": "Jira",
   "description": "Manage Jira issues — search with JQL, create, update, comment, and get sprint info. Supports Jira Cloud (email + API token) and Jira Server/Data Center (PAT).",
   "category": "integration",
-  "env_vars": ["JIRA_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
+  "env_vars": [
+    "JIRA_URL",
+    "JIRA_EMAIL",
+    "JIRA_API_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "create | update | comment | list | transition | …"
+    },
+    {
+      "name": "project_key",
+      "type": "string",
+      "description": "[create] project key"
+    },
+    {
+      "name": "summary",
+      "type": "string",
+      "description": "[create] issue summary"
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "description": "Issue description"
+    },
+    {
+      "name": "issue_type",
+      "type": "string",
+      "description": "[create] issue type"
+    },
+    {
+      "name": "issue_key",
+      "type": "string",
+      "description": "[update/comment/transition] issue key"
+    },
+    {
+      "name": "body",
+      "type": "string",
+      "description": "[comment] comment body"
+    },
+    {
+      "name": "jql",
+      "type": "string",
+      "description": "[list] JQL query"
+    },
+    {
+      "name": "transition_name",
+      "type": "string",
+      "description": "[transition] target state"
+    },
+    {
+      "name": "assignee_account_id",
+      "type": "string",
+      "description": "Assignee account id"
+    },
+    {
+      "name": "priority",
+      "type": "string",
+      "description": "Priority"
+    },
+    {
+      "name": "board_id",
+      "type": "string",
+      "description": "Board id"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "Max results"
+    }
+  ]
 }

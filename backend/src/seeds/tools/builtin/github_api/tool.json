@@ -4,7 +4,162 @@
   "description": "Unified GitHub API tool. ALL read/write operations exposed through a single `action` argument. Credentials are resolved automatically — never use http_request against api.github.com from agents.",
   "category": "github",
   "group": "github_read",
-  "env_vars": ["GITHUB_TOKEN"],
+  "env_vars": [
+    "GITHUB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "action"
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "description": "repo"
+    },
+    {
+      "name": "org",
+      "type": "string",
+      "description": "org"
+    },
+    {
+      "name": "owner",
+      "type": "string",
+      "description": "owner"
+    },
+    {
+      "name": "path",
+      "type": "string",
+      "description": "path"
+    },
+    {
+      "name": "ref",
+      "type": "string",
+      "description": "ref"
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "description": "branch"
+    },
+    {
+      "name": "base",
+      "type": "string",
+      "description": "base"
+    },
+    {
+      "name": "head",
+      "type": "string",
+      "description": "head"
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "description": "title"
+    },
+    {
+      "name": "body",
+      "type": "string",
+      "description": "body"
+    },
+    {
+      "name": "issue_number",
+      "type": "integer",
+      "description": "issue number"
+    },
+    {
+      "name": "labels",
+      "type": "array",
+      "description": "labels"
+    },
+    {
+      "name": "assignees",
+      "type": "array",
+      "description": "assignees"
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "description": "state"
+    },
+    {
+      "name": "draft",
+      "type": "boolean",
+      "description": "draft"
+    },
+    {
+      "name": "workflow_id",
+      "type": "integer",
+      "description": "workflow id"
+    },
+    {
+      "name": "inputs",
+      "type": "array",
+      "description": "inputs"
+    },
+    {
+      "name": "q",
+      "type": "string",
+      "description": "q"
+    },
+    {
+      "name": "scope",
+      "type": "string",
+      "description": "scope"
+    },
+    {
+      "name": "sort",
+      "type": "string",
+      "description": "sort"
+    },
+    {
+      "name": "order",
+      "type": "string",
+      "description": "order"
+    },
+    {
+      "name": "per_page",
+      "type": "integer",
+      "description": "per page"
+    },
+    {
+      "name": "max_pages",
+      "type": "integer",
+      "description": "max pages"
+    },
+    {
+      "name": "visibility",
+      "type": "string",
+      "description": "visibility"
+    },
+    {
+      "name": "affiliation",
+      "type": "string",
+      "description": "affiliation"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "description": "type"
+    },
+    {
+      "name": "protected",
+      "type": "boolean",
+      "description": "protected"
+    },
+    {
+      "name": "message",
+      "type": "string",
+      "description": "message"
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "description": "content"
+    }
+  ]
 }

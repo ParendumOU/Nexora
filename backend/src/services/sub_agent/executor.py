@@ -8,10 +8,11 @@ from sqlalchemy import select
 from src.core.database import AsyncSessionLocal
 from src.models.chat import Chat, Message
 from src.models.agent import Agent
-from src.providers.router import stream_response, AllProvidersExhausted, _METADATA_PREFIX
+from src.providers.router import AllProvidersExhausted
 from src.services.agent_context import get_chain_providers, get_platform_context, get_agent_system_prompt
 from src.services.agent_tools import _execute_agent_tools, _task_to_dict, _fail_task, _bubble_complete_parent
 from src.services.sub_agent.interrupt import _handle_interrupt
+from src.services.turn_engine import consume_provider_stream
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +290,14 @@ async def _execute_sub_agent_task(
             providers = await get_chain_providers(task_chain_id or parent_chat_provider_chain_id, org_id)
     elif task_chain_id:
         providers = await get_chain_providers(task_chain_id, org_id)
+    elif getattr(agent, "model_profile_id", None):
+        # Agent's own capability binding (#215): no task-level profile/chain → route
+        # through the agent's bound profile, falling back to the parent chain if it
+        # resolves to nothing.
+        from src.services.model_resolver import resolve_providers_for_profile
+        providers = await resolve_providers_for_profile(agent.model_profile_id, org_id)
+        if not providers:
+            providers = await get_chain_providers(parent_chat_provider_chain_id, org_id)
     else:
         providers = await get_chain_providers(parent_chat_provider_chain_id, org_id)
 
@@ -308,7 +317,12 @@ async def _execute_sub_agent_task(
         await _fail_task(task_id, parent_chat_id, agent.name, "No providers available for sub-agent", sub_chat_id)
         return
 
-    can_delegate = depth < _max_delegation_depth()
+    # Gate on the shared ancestry-based depth (#228) so this matches the CLI spawn
+    # path exactly. (`depth` threaded into this fn is ancestry-1 and stays only for
+    # logging.) A sub-chat at ancestry == cap may not create further children.
+    from src.services.sub_agent.spawn import delegation_depth as _delegation_depth
+    _anc_depth = await _delegation_depth(sub_chat_id)
+    can_delegate = _anc_depth < _max_delegation_depth()
     platform_ctx = await get_platform_context(
         org_id, parent_chat_project_id, sub_chat_id,
         suppress_delegation_protocol=True,  # sub-agents use sub_agent_*_rules; skip 900-token orchestrator protocol
@@ -340,7 +354,7 @@ async def _execute_sub_agent_task(
     if can_delegate:
         task_instructions += render_prompt(
             "sub_agent_delegation_rules",
-            current_depth=str(depth + 1),
+            current_depth=str(_anc_depth),
             max_depth=str(_max_delegation_depth()),
         )
 
@@ -390,43 +404,41 @@ async def _execute_sub_agent_task(
             from src.services.chat_cancel import is_cancelled as _sa_is_cancelled
             await _sa_buf_clear(sub_chat_id)
             await _broadcast(sub_chat_id, {"type": "stream_start"})
+            await _broadcast(parent_chat_id, {"type": "stream_start"})
             _max_provider_attempts = 3
-            _sa_chunk_count = 0
             _cancelled_mid_stream = False
+
+            async def _sa_on_chunk(chunk: str):
+                await _sa_buf_append(sub_chat_id, chunk)
+                await _broadcast(sub_chat_id, {"type": "chunk", "content": chunk})
+                await _broadcast(sub_chat_id, {
+                    "type": "sub_agent_chunk",
+                    "task_id": task_id,
+                    "agent_name": agent_name,
+                    "content": chunk,
+                })
+
+            async def _sa_cancel_check():
+                return await _sa_is_cancelled(sub_chat_id) or await _sa_is_cancelled(parent_chat_id)
+
             for _attempt in range(_max_provider_attempts):
                 try:
-                    async for chunk in stream_response(
+                    _sa_outcome = await consume_provider_stream(
                         providers, messages,
+                        on_chunk=_sa_on_chunk,
+                        cancel_check=_sa_cancel_check,
                         chat_id=sub_chat_id,
                         agent_id=agent_id,
                         agent_name=agent_name,
                         org_id=org_id,
-                    ):
-                        if chunk.startswith(_METADATA_PREFIX):
-                            try:
-                                if msg_metadata is None:
-                                    msg_metadata = {}
-                                msg_metadata.update(json.loads(chunk[len(_METADATA_PREFIX):]))
-                            except Exception:
-                                pass
-                            continue
-                        full_response += chunk
-                        await _sa_buf_append(sub_chat_id, chunk)
-                        await _broadcast(sub_chat_id, {"type": "chunk", "content": chunk})
-                        await _broadcast(sub_chat_id, {
-                            "type": "sub_agent_chunk",
-                            "task_id": task_id,
-                            "agent_name": agent_name,
-                            "content": chunk,
-                        })
-                        _sa_chunk_count += 1
-                        if _sa_chunk_count % 8 == 0:
-                            if await _sa_is_cancelled(sub_chat_id) or await _sa_is_cancelled(parent_chat_id):
-                                _cancelled_mid_stream = True
-                                logger.info(f"[sub_agent] cancel flag detected mid-stream task {task_id} — aborting")
-                                break
-                    if _cancelled_mid_stream:
-                        break
+                        temperature=agent.temperature,
+                        max_tokens=agent.max_tokens,
+                    )
+                    full_response = _sa_outcome.text
+                    msg_metadata = _sa_outcome.metadata or None
+                    if _sa_outcome.cancelled:
+                        _cancelled_mid_stream = True
+                        logger.info(f"[sub_agent] cancel flag detected mid-stream task {task_id} — aborting")
                     break
                 except AllProvidersExhausted as exc:
                     if _attempt < _max_provider_attempts - 1:
@@ -473,6 +485,7 @@ async def _execute_sub_agent_task(
             if _cancelled_mid_stream:
                 await _sa_buf_clear(sub_chat_id)
                 await _broadcast(sub_chat_id, {"type": "stream_end", "cancelled": True, "content": ""})
+                await _broadcast(parent_chat_id, {"type": "stream_end", "cancelled": True, "content": ""})
                 # _fail_task is called in finally / outer guard; just exit the iter loop.
                 return
 
@@ -511,6 +524,7 @@ async def _execute_sub_agent_task(
                 "message_id": msg_id,
                 "metadata": msg_metadata,
             })
+            await _broadcast(parent_chat_id, {"type": "stream_end", "content": "", "message_id": msg_id})
 
             messages.append({"role": "assistant", "content": clean_response})
             # Sliding window: keep system[0] + task[1] + last 8 messages to cap context growth

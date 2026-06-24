@@ -3,7 +3,72 @@
   "name": "Discord",
   "description": "Send messages, read channel history, create threads, and list channels in Discord servers. Requires DISCORD_BOT_TOKEN.",
   "category": "integration",
-  "env_vars": ["DISCORD_BOT_TOKEN"],
+  "env_vars": [
+    "DISCORD_BOT_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "action"
+    },
+    {
+      "name": "channel_id",
+      "type": "string",
+      "description": "channel id"
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "description": "content"
+    },
+    {
+      "name": "guild_id",
+      "type": "string",
+      "description": "guild id"
+    },
+    {
+      "name": "thread_id",
+      "type": "string",
+      "description": "thread id"
+    },
+    {
+      "name": "message_id",
+      "type": "string",
+      "description": "message id"
+    },
+    {
+      "name": "message_reference",
+      "type": "string",
+      "description": "message reference"
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "name"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "limit"
+    },
+    {
+      "name": "before",
+      "type": "string",
+      "description": "before"
+    },
+    {
+      "name": "after",
+      "type": "string",
+      "description": "after"
+    },
+    {
+      "name": "auto_archive_duration",
+      "type": "integer",
+      "description": "auto archive duration"
+    }
+  ]
 }

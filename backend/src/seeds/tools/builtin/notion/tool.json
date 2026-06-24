@@ -3,7 +3,67 @@
   "name": "Notion",
   "description": "Read and write Notion pages and databases — search, read page content, create/update pages, query databases, and append blocks. Requires a Notion integration token.",
   "category": "integration",
-  "env_vars": ["NOTION_TOKEN"],
+  "env_vars": [
+    "NOTION_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "action"
+    },
+    {
+      "name": "database_id",
+      "type": "string",
+      "description": "database id"
+    },
+    {
+      "name": "page_id",
+      "type": "string",
+      "description": "page id"
+    },
+    {
+      "name": "parent_id",
+      "type": "string",
+      "description": "parent id"
+    },
+    {
+      "name": "parent_type",
+      "type": "string",
+      "description": "parent type"
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "description": "title"
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "description": "content"
+    },
+    {
+      "name": "query",
+      "type": "string",
+      "description": "query"
+    },
+    {
+      "name": "filter",
+      "type": "array",
+      "description": "filter"
+    },
+    {
+      "name": "sorts",
+      "type": "array",
+      "description": "sorts"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "limit"
+    }
+  ]
 }

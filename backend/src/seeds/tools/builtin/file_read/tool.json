@@ -4,5 +4,23 @@
   "description": "Read the contents of a file from the agent's working filesystem.",
   "category": "file",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "File path to read"
+    },
+    {
+      "name": "offset",
+      "type": "integer",
+      "description": "Start line"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "Max lines"
+    }
+  ]
 }

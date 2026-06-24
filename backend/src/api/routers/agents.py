@@ -47,6 +47,7 @@ def _build_snapshot(agent: Agent) -> dict:
         "mcps": agent.mcps or [],
         "env_vars": agent.env_vars or {},
         "model_pref": agent.model_pref,
+        "model_profile_id": agent.model_profile_id,
         "temperature": agent.temperature,
         "max_tokens": agent.max_tokens,
         "max_subagents": agent.max_subagents,
@@ -73,6 +74,25 @@ async def _create_version(agent: Agent, user_id: str, db: AsyncSession) -> Agent
     return version
 
 
+async def _validate_model_profile(profile_id: str | None, org_id: str, db: AsyncSession) -> str | None:
+    """Ensure a bound model profile exists and belongs to this org.
+
+    Returns the id when valid (or None when unset); raises 404 for a missing or
+    cross-org profile so an agent can't be bound to another tenant's profile.
+    """
+    if not profile_id:
+        return None
+    from src.models.model_profile import ModelProfile
+    r = await db.execute(
+        select(ModelProfile.id).where(
+            ModelProfile.id == profile_id, ModelProfile.org_id == org_id
+        )
+    )
+    if not r.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="model_profile_id not found in this organization")
+    return profile_id
+
+
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class AgentCreate(BaseModel):
@@ -84,6 +104,7 @@ class AgentCreate(BaseModel):
     skills: list[str] = []
     tools: list[str] = []
     model_pref: str | None = Field(None, max_length=255)
+    model_profile_id: str | None = Field(None, max_length=36)
     temperature: float = Field(0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(8192, ge=1, le=200000)
     flow_config: dict = {}
@@ -101,6 +122,7 @@ class AgentUpdate(BaseModel):
     skills: list[str] | None = None
     tools: list[str] | None = None
     model_pref: str | None = Field(None, max_length=255)
+    model_profile_id: str | None = Field(None, max_length=36)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(None, ge=1, le=200000)
     flow_config: dict | None = None
@@ -121,6 +143,7 @@ class AgentResponse(BaseModel):
     skills: list = []
     tools: list = []
     model_pref: str | None = None
+    model_profile_id: str | None = None
     temperature: float = 0.3
     flow_config: dict = {}
     is_active: bool = True
@@ -335,6 +358,7 @@ async def create_agent(
         skills=req.skills,
         tools=req.tools,
         model_pref=req.model_pref,
+        model_profile_id=await _validate_model_profile(req.model_profile_id, org_id, db),
         temperature=req.temperature,
         max_tokens=req.max_tokens,
         flow_config=req.flow_config,
@@ -376,7 +400,13 @@ async def update_agent(
     await require_org_role(current_user, org_id, OrgRole.member, db)
     agent = await _get_agent(agent_id, org_id, db)
 
-    for field, value in req.model_dump(exclude_unset=True).items():
+    _updates = req.model_dump(exclude_unset=True)
+    if "model_profile_id" in _updates:
+        # Validate org ownership (raises 404 for a missing/cross-org profile); None clears it.
+        _updates["model_profile_id"] = await _validate_model_profile(
+            _updates["model_profile_id"], org_id, db
+        )
+    for field, value in _updates.items():
         setattr(agent, field, value)
 
     # Snapshot the new state as a new version
@@ -525,8 +555,9 @@ async def revert_agent_to_version(
     # Restore all config fields from the snapshot
     config_fields = [
         "name", "agent_type", "description", "soul", "system_prompt",
-        "skills", "tools", "mcps", "env_vars", "model_pref", "temperature",
-        "max_tokens", "max_subagents", "max_concurrency", "flow_config", "is_active",
+        "skills", "tools", "mcps", "env_vars", "model_pref", "model_profile_id",
+        "temperature", "max_tokens", "max_subagents", "max_concurrency",
+        "flow_config", "is_active",
     ]
     for field in config_fields:
         if field in snap:

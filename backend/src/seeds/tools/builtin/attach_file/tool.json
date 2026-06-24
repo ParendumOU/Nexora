@@ -1,0 +1,9 @@
+{
+  "key": "attach_file",
+  "name": "Attach File",
+  "description": "Attach a file you created to the conversation so the user can download it with one click from the Files panel. Fields: path* (path to the file you wrote), name (optional display filename).",
+  "category": "file",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

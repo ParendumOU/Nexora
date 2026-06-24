@@ -3,7 +3,27 @@
   "name": "Database Query",
   "description": "Run read-only SQL queries against configured databases. Supports SELECT, DESCRIBE, SHOW, EXPLAIN. Supports PostgreSQL, MySQL, and SQLite.",
   "category": "data",
-  "env_vars": ["DB_TOOL_DSN"],
+  "env_vars": [
+    "DB_TOOL_DSN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": "Read-only SQL query"
+    },
+    {
+      "name": "db",
+      "type": "string",
+      "description": "Named DB connection"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "Max rows"
+    }
+  ]
 }

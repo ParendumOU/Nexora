@@ -26,26 +26,56 @@ from src.models.chat import Chat
 logger = logging.getLogger(__name__)
 
 
-async def _chat_depth(chat_id: str) -> int:
-    """Nesting depth of a chat = number of parent_chat_id hops to a root chat.
+def _count_hops(chat_id: str, parent_of, *, max_hops: int = 100) -> int:
+    """Cycle-safe count of parent hops from ``chat_id`` to a root.
 
-    Root (top-level) chat = 0, its sub-chat = 1, etc. Used to cap spawn nesting
-    for CLI providers whose spawn path doesn't thread the executor `depth` param.
+    Pure (parent_of: key -> parent|None) so it's unit-testable and shared by both
+    the DB walk below and tests. Root = 0, its sub-chat = 1, etc.
     """
     depth = 0
     seen: set[str] = set()
-    cur: str | None = chat_id
+    cur = chat_id
+    while cur and cur not in seen and depth < max_hops:
+        seen.add(cur)
+        parent = parent_of(cur)
+        if not parent:
+            break
+        depth += 1
+        cur = parent
+    return depth
+
+
+async def delegation_depth(chat_id: str) -> int:
+    """Sub-delegation nesting depth of a chat = parent_chat_id hops to its root.
+
+    THE single source of truth for delegation-depth capping (GitLab #228): both
+    the CLI spawn path here and the sub-agent executor gate on this same value, so
+    they can no longer disagree (the executor previously gated on a threaded
+    counter that was off by one from this ancestry depth). Root (top-level) chat
+    = 0, its sub-chat = 1, etc.
+    """
     async with AsyncSessionLocal() as db:
+        parents: dict[str, str | None] = {}
+
+        async def _load(cid: str) -> str | None:
+            if cid not in parents:
+                parents[cid] = (await db.execute(
+                    select(Chat.parent_chat_id).where(Chat.id == cid)
+                )).scalar_one_or_none()
+            return parents[cid]
+
+        # Walk async (can't use _count_hops directly — parent_of is async here).
+        depth = 0
+        seen: set[str] = set()
+        cur: str | None = chat_id
         while cur and cur not in seen and depth < 100:
             seen.add(cur)
-            parent = (await db.execute(
-                select(Chat.parent_chat_id).where(Chat.id == cur)
-            )).scalar_one_or_none()
+            parent = await _load(cur)
             if not parent:
                 break
             depth += 1
             cur = parent
-    return depth
+        return depth
 
 
 async def already_spawned_this_turn(chat_id: str) -> bool:
@@ -97,7 +127,7 @@ async def spawn_subagent_task(
     # spawn path can't see the executor's `depth`, so derive it from chat
     # ancestry and refuse once we hit the configured cap.
     cap = get_settings().max_subdelegation_depth
-    depth = await _chat_depth(chat_id)
+    depth = await delegation_depth(chat_id)
     if depth >= cap:
         logger.info(f"[spawn_subagent] depth {depth} >= cap {cap} for chat {chat_id} — refusing")
         return (

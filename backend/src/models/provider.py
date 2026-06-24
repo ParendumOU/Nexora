@@ -27,6 +27,13 @@ class Provider(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Per-account failover health (GitLab #216): durable state complementing the fast
+    # Redis cooldown gate. state ∈ {healthy, cooling, exhausted}; cooling_until is the
+    # durable skip-until (survives Redis flush/restart); consecutive_failures drives the
+    # circuit (non-rate errors past the threshold mark the account exhausted).
+    state: Mapped[str] = mapped_column(String(20), default="healthy", server_default="healthy", nullable=False)
+    cooling_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     org: Mapped["Organization"] = relationship("Organization", back_populates="providers")  # noqa: F821

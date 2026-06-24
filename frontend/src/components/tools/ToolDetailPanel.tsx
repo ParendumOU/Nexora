@@ -18,7 +18,7 @@ import {
   Globe, Monitor, FolderArchive, GitBranch, Github,
   Triangle, Code2, Container, Sparkles, Wrench,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, copyToClipboard } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -150,7 +150,7 @@ function NewFileDialog({ onConfirm, onCancel }: { onConfirm: (p: string) => void
 function EnvVarCard({ name }: { name: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    navigator.clipboard.writeText(name);
+    copyToClipboard(name);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

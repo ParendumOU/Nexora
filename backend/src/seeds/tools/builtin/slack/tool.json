@@ -3,7 +3,62 @@
   "name": "Slack",
   "description": "Send and read Slack messages, manage channels, and look up users. Requires SLACK_BOT_TOKEN.",
   "category": "integration",
-  "env_vars": ["SLACK_BOT_TOKEN"],
+  "env_vars": [
+    "SLACK_BOT_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "post | read | user_lookup | channel ops"
+    },
+    {
+      "name": "channel",
+      "type": "string",
+      "description": "Channel id/name"
+    },
+    {
+      "name": "text",
+      "type": "string",
+      "description": "[post] message text"
+    },
+    {
+      "name": "thread_ts",
+      "type": "string",
+      "description": "[post] reply thread timestamp"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "[read] max messages"
+    },
+    {
+      "name": "oldest",
+      "type": "string",
+      "description": "[read] oldest ts"
+    },
+    {
+      "name": "latest",
+      "type": "string",
+      "description": "[read] latest ts"
+    },
+    {
+      "name": "user",
+      "type": "string",
+      "description": "user id"
+    },
+    {
+      "name": "email",
+      "type": "string",
+      "description": "[user_lookup] email"
+    },
+    {
+      "name": "types",
+      "type": "string",
+      "description": "channel types filter"
+    }
+  ]
 }

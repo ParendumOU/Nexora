@@ -3,6 +3,7 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Eye, EyeOff, Shuffle, Copy, Check } from "lucide-react";
 import { authApi } from "@/lib/api";
+import { copyToClipboard } from "@/lib/utils";
 import { BrandMark } from "@/components/BrandMark";
 import { useAuthStore } from "@/store/auth";
 import { Button } from "@/components/ui/button";
@@ -49,7 +50,7 @@ export default function SetupPage() {
     setForm((f) => ({ ...f, password: pwd }));
     setShowPwd(true);
     try {
-      await navigator.clipboard.writeText(pwd);
+      await copyToClipboard(pwd);
       setCopied(true);
       toast.success("Password copied to clipboard!", { icon: "🔐", duration: 3000 });
       setTimeout(() => setCopied(false), 2500);

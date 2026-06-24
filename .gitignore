@@ -68,6 +68,11 @@ coverage/
 backend/uploads/
 
 __pycache__
+
+# Internal docs — local-only, never pushed (e.g. architecture reviews). Not stripped
+# by CI like CLAUDE.md, so keep out of git to avoid leaking to public GitHub.
+docs/
+
 # Custom seeds — deployment-specific, kept local, never pushed (builtins only sync)
 backend/src/seeds/skills/custom/*
 !backend/src/seeds/skills/custom/.gitkeep

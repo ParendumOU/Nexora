@@ -29,7 +29,11 @@ function ChainsTab({
   onDeleteChain,
   onToggleExpanded,
 }: ChainsTabProps) {
-  const filteredChains = chains.filter((c) => c.steps.length >= 2);
+  // Show every saved chain. A single-step chain is valid — it pins one provider/model
+  // with no fallback. Previously this required >= 2 steps, so a 1-provider chain saved
+  // (201 OK, "successfully saved") but was filtered out of the list → looked like it
+  // vanished. Only drop chains with zero steps (nothing to show).
+  const filteredChains = chains.filter((c) => c.steps.length >= 1);
 
   return (
     <>

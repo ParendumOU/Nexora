@@ -18,26 +18,61 @@ from src.models.chat_file import ChatFile
 from src.models.org import OrgMember
 from src.models.project import Project
 from src.models.agent import Agent
-from src.providers.router import stream_response, AllProvidersExhausted, _METADATA_PREFIX
+from src.providers.router import AllProvidersExhausted
 from src.services.agent_context import (
     authenticate_ws,
-    get_chain_providers,
     get_live_chat,
     get_platform_context,
     get_agent_system_prompt,
-    get_effective_chain_id,
-    get_direct_provider,
     MODE_PREFIXES,
 )
-from src.services.agent_tools import _execute_agent_tools
 from src.services.sub_agent import _run_delegated_tasks
 from src.services.orchestrator import _resume_with_tool_results
+from src.services.turn_engine import (
+    resolve_providers,
+    consume_provider_stream,
+    run_tools_and_finalize,
+    load_agent_gen_params,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Presence tracking: chat_id -> {user_id: {id, name}}
-_presence: dict[str, dict[str, dict]] = {}
+# Presence tracking (GitLab #224): a Redis hash per chat (field=user_id,
+# value=json{id,name}) so participant lists are correct across multiple workers
+# (the old module-level dict was per-process). A TTL refresh expires entries left
+# by a crashed worker.
+_PRESENCE_TTL = 3600
+
+
+def _presence_key(chat_id: str) -> str:
+    return f"presence:{chat_id}"
+
+
+async def _presence_add(chat_id: str, user) -> None:
+    from src.core.redis import get_redis
+    r = get_redis()
+    await r.hset(_presence_key(chat_id), user.id, json.dumps({"id": user.id, "name": user.full_name}))
+    await r.expire(_presence_key(chat_id), _PRESENCE_TTL)
+
+
+async def _presence_remove(chat_id: str, user_id: str) -> None:
+    from src.core.redis import get_redis
+    await get_redis().hdel(_presence_key(chat_id), user_id)
+
+
+async def _presence_list(chat_id: str) -> list[dict]:
+    from src.core.redis import get_redis
+    raw = await get_redis().hgetall(_presence_key(chat_id))
+    out: list[dict] = []
+    for v in (raw or {}).values():
+        if isinstance(v, bytes):
+            v = v.decode()
+        try:
+            out.append(json.loads(v))
+        except Exception:
+            pass
+    return out
 
 _TEXT_CONTENT_TYPES = ("text/", "application/json", "application/xml",
                        "application/yaml", "application/x-yaml", "application/javascript")
@@ -222,51 +257,97 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
         await websocket.close(code=4004)
         return
 
-    _presence.setdefault(chat_id, {})[user.id] = {"id": user.id, "name": user.full_name}
+    await _presence_add(chat_id, user)
     try:
         await websocket.send_json({
             "type": "connected",
             "chat_id": chat_id,
-            "participants": list(_presence[chat_id].values()),
+            "participants": await _presence_list(chat_id),
         })
     except (WebSocketDisconnect, Exception):
-        _presence.get(chat_id, {}).pop(user.id, None)
+        await _presence_remove(chat_id, user.id)
         return
     await pubsub.broadcast(chat_id, {
         "type": "user_joined",
         "user": {"id": user.id, "name": user.full_name},
-        "participants": list(_presence[chat_id].values()),
+        "participants": await _presence_list(chat_id),
     })
 
     conn_id = str(uuid.uuid4())
     task_queue = await pubsub.subscribe(chat_id)
 
-    # If agents are already working when this client connects, immediately send
-    # stream_start so the "Agent is writing…" indicator appears without waiting
-    # for the next pubsub event. For sub-chats the running Task lives on the
-    # parent chat with sub_chat_id pointing here, so we match both columns.
-    async with AsyncSessionLocal() as _db:
-        from src.models.task import Task as _Task
-        _active = await _db.execute(
-            select(_Task).where(
-                or_(_Task.chat_id == chat_id, _Task.sub_chat_id == chat_id),
-                _Task.status.in_(["in_progress", "queued"]),
-            ).limit(1)
-        )
-        if _active.scalar_one_or_none():
+    async def _emit_stream_failure(message: str, ws_alive: bool = True) -> None:
+        """Surface a turn failure on EVERY client and leave a persistent trace.
+
+        A streamed reply can fail three ways (no providers configured, every
+        provider in the chain exhausted/empty, or an unexpected error). Each used
+        to send `error`/`stream_end` only to the originating socket and persist
+        nothing — so other open tabs kept the "Agent is writing…" indicator
+        forever, and on reload the chat showed only the user message with no hint
+        anything went wrong. This persists an excluded assistant error message
+        (visible on reload, skipped from LLM history) and fans the `error` +
+        `stream_end` frames out to all clients via pubsub.
+        """
+        try:
+            from src.core.stream_buffer import clear as _buf_clear_fail
+            await _buf_clear_fail(chat_id)
+        except Exception:
+            pass
+        _err_id = str(uuid.uuid4())
+        _err_ts: str | None = None
+        try:
+            async with AsyncSessionLocal() as _edb:
+                _err_msg = Message(
+                    id=_err_id,
+                    chat_id=chat_id,
+                    role="assistant",
+                    content=message,
+                    excluded=True,
+                    metadata_={"error": True},
+                )
+                _edb.add(_err_msg)
+                await _edb.commit()
+                _err_ts = _err_msg.created_at.isoformat() if _err_msg.created_at else None
+        except Exception:
+            logger.warning(f"[ws] failed to persist error message for {chat_id}", exc_info=True)
+        # Carry the persisted message id/timestamp so every client can render the
+        # SAME error bubble live that a page reload would load from the DB (parity),
+        # and dedupe it by id.
+        _err_frame = {"type": "error", "message": message, "message_id": _err_id, "created_at": _err_ts}
+        if ws_alive:
+            try:
+                await websocket.send_json(_err_frame)
+                await websocket.send_json({"type": "stream_end"})
+            except Exception:
+                pass
+        # Reach the other tabs/clients on this chat (forwarder skips _origin==conn_id).
+        try:
+            await pubsub.broadcast(chat_id, {**_err_frame, "_origin": conn_id})
+            await pubsub.broadcast(chat_id, {"type": "stream_end", "_origin": conn_id})
+        except Exception:
+            pass
+
+    # If a reply is genuinely mid-stream for THIS chat when the client connects,
+    # immediately send stream_start + replay the buffered partial so the indicator
+    # appears without waiting for the next pubsub event.
+    #
+    # Gate strictly on buffered partial content (the live stream writes to the
+    # buffer and clears it on stream_end/failure). Do NOT trigger merely because a
+    # Task references this chat: a parent chat whose sub-agent is working — or any
+    # chat left with a stuck/abandoned in_progress task — has no buffer here, and
+    # emitting stream_start there left a perpetual empty "Agent is writing…" cursor
+    # on every reload (the indicator never cleared because no stream_end was coming).
+    try:
+        from src.core.stream_buffer import get_partial
+        partial = await get_partial(chat_id)
+        if partial:
             try:
                 await websocket.send_json({"type": "stream_start"})
+                await websocket.send_json({"type": "chunk", "content": partial})
             except Exception:
                 pass
-            # Replay any buffered chunk content from an in-progress stream so the
-            # client doesn't sit blank until stream_end.
-            try:
-                from src.core.stream_buffer import get_partial
-                partial = await get_partial(chat_id)
-                if partial:
-                    await websocket.send_json({"type": "chunk", "content": partial})
-            except Exception:
-                pass
+    except Exception:
+        pass
 
     org_queue: asyncio.Queue | None = None
     org_id_for_queue: str | None = None
@@ -397,6 +478,14 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                         pass
                     continue
 
+                # Fresh user message → reset the anti-spin breaker so the cap is
+                # per-request, not cumulative across the whole conversation.
+                try:
+                    from src.services.conversation_watchdog import reset_spin_counter as _reset_spin
+                    await _reset_spin(chat_id)
+                except Exception:
+                    pass
+
                 async with AsyncSessionLocal() as db:
                     # Idempotency: if client sends the same client_message_id twice
                     # (reconnect retry), reuse the existing message row.
@@ -492,8 +581,13 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                             _step_task_id = _t.id
                             _step_parent_chat_id = live_chat.parent_chat_id
 
-                if not enable_agent:
-                    continue
+                # Note: enable_agent=False is NOT short-circuited here. The user toggled
+                # "agent off" to get a plain LLM reply (no agent persona, no tools, no
+                # orchestration) — they still expect an answer. The agent-only system
+                # prompt/tools are already gated by `enable_agent` above; the agent-only
+                # post-processing (tool execution, proposals, resume, delegated-task nudge)
+                # is gated by `enable_agent` below. Previously this `continue` left the
+                # chat silent (message saved, no response, no signal).
 
                 # An explicit per-message account/chain pick (the settings button in
                 # the message field) should stick as the chat default — otherwise it
@@ -507,14 +601,10 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                             await _pdb.commit()
                     live_chat.provider_chain_id = chain_override
 
-                direct = await get_direct_provider(live_chat) if not chain_override else []
-                effective_chain_id = chain_override or await get_effective_chain_id(live_chat)
-                chain = await get_chain_providers(effective_chain_id, org_id)
-                if direct:
-                    direct_ids = {p.id for p, _ in direct}
-                    providers = direct + [(p, m) for p, m in chain if p.id not in direct_ids]
-                else:
-                    providers = chain
+                providers, effective_chain_id = await resolve_providers(
+                    live_chat, org_id, chain_override=chain_override,
+                    agent_id=agent_id if enable_agent else None,
+                )
 
                 agent_name: str | None = None
                 if agent_id and enable_agent:
@@ -571,61 +661,66 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 msg_metadata: dict = {}
 
                 if not providers:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "No providers configured. Please add a provider in Settings."
-                    })
-                    await websocket.send_json({"type": "stream_end"})
+                    await _emit_stream_failure(
+                        "No providers configured. Please add a provider in Settings."
+                    )
                     continue
 
                 provider_used = providers[0][0].name if providers else None
 
-                ws_alive = True
                 from src.services.chat_cancel import is_cancelled as _is_cancelled
-                _cancel_check_every = 8
-                _chunk_count = 0
+                # ws_alive lives in a holder so the chunk callback can flip it when the
+                # socket drops (stops consuming provider tokens) while staying readable here.
+                _alive = {"v": True}
+
+                async def _on_status(label: str):
+                    _frame = {"type": "activity_status", "status": "running", "label": label}
+                    if _alive["v"]:
+                        try:
+                            await websocket.send_json(_frame)
+                        except Exception:
+                            pass
+                    await pubsub.broadcast(chat_id, {**_frame, "_origin": conn_id})
+
+                async def _on_chunk(chunk: str):
+                    await _buf_append(chat_id, chunk)
+                    # Fan-out to other clients in the same chat (other tabs, other users).
+                    # _origin filter prevents the originating socket from double-receiving via pubsub.
+                    await pubsub.broadcast(chat_id, {
+                        "type": "chunk", "content": chunk, "_origin": conn_id,
+                    })
+                    if _alive["v"]:
+                        try:
+                            await websocket.send_json({"type": "chunk", "content": chunk})
+                        except Exception:
+                            _alive["v"] = False
+                            return False  # stop consuming provider tokens once client is gone
+
+                _gen_params = await load_agent_gen_params(agent_id if enable_agent else None)
                 try:
-                    async for chunk in stream_response(
+                    _outcome = await consume_provider_stream(
                         providers, messages,
+                        on_chunk=_on_chunk,
+                        on_status=_on_status,
+                        cancel_check=lambda: _is_cancelled(chat_id),
+                        status_events=True,
                         chat_id=chat_id,
                         agent_id=agent_id,
                         agent_name=agent_name,
                         model_override=model_override,
                         org_id=user.active_org_id,
                         user_id=user.id,
-                    ):
-                        if chunk.startswith(_METADATA_PREFIX):
-                            try:
-                                msg_metadata.update(json.loads(chunk[len(_METADATA_PREFIX):]))
-                            except Exception:
-                                pass
-                            continue
-                        full_response += chunk
-                        await _buf_append(chat_id, chunk)
-                        # Fan-out to other clients in the same chat (other tabs, other users).
-                        # _origin filter prevents the originating socket from double-receiving via pubsub.
-                        await pubsub.broadcast(chat_id, {
-                            "type": "chunk", "content": chunk, "_origin": conn_id,
-                        })
-                        if ws_alive:
-                            try:
-                                await websocket.send_json({"type": "chunk", "content": chunk})
-                            except Exception:
-                                ws_alive = False
-                                break  # stop consuming provider tokens once client is gone
-                        _chunk_count += 1
-                        if _chunk_count % _cancel_check_every == 0 and await _is_cancelled(chat_id):
-                            logger.info(f"[ws] cancel flag detected mid-stream for {chat_id} — aborting")
-                            break
+                        mode=mode,
+                        **_gen_params,
+                    )
                 except AllProvidersExhausted as e:
-                    await _buf_clear(chat_id)
-                    if ws_alive:
-                        try:
-                            await websocket.send_json({"type": "error", "message": str(e)})
-                            await websocket.send_json({"type": "stream_end"})
-                        except Exception:
-                            pass
+                    await _emit_stream_failure(str(e), ws_alive=_alive["v"])
                     continue
+                full_response = _outcome.text
+                msg_metadata = _outcome.metadata
+                ws_alive = _alive["v"]
+                if _outcome.cancelled:
+                    logger.info(f"[ws] cancel flag detected mid-stream for {chat_id} — aborting")
 
                 # Use actual provider account name from streaming metadata if available
                 provider_used = msg_metadata.get("account_name") or provider_used
@@ -644,42 +739,41 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                     db.add(assistant_msg)
                     await db.commit()
 
-                clean_response, tool_results, calls_made, had_fence, _parse_err = await _execute_agent_tools(
-                    full_response, chat_id, agent_id, agent_name,
-                    websocket if ws_alive else None,
-                    task_id=_step_task_id,
-                    parent_chat_id=_step_parent_chat_id,
-                    message_id=msg_id,
-                )
-                if org_id:
-                    from src.services.proposal_parser import process_proposals, strip_proposals
-                    await process_proposals(clean_response, chat_id, agent_id, agent_name, org_id)
-                    clean_response = strip_proposals(clean_response)
-                if _parse_err and ws_alive:
-                    try:
-                        await websocket.send_json({
-                            "type": "tool_parse_error",
-                            "message": _parse_err,
-                        })
-                    except Exception:
-                        pass
-
-                if not had_fence and not tool_results:
-                    from src.services.conversation_watchdog import detect_stuck_turn as _dst
-                    if _dst(clean_response):
-                        clean_response = clean_response.rstrip() + "\n<final/>"
-
-                new_meta = dict(msg_metadata or {})
-                if calls_made:
-                    new_meta["tool_call_count"] = len(calls_made)
-                    new_meta["tool_calls_detail"] = calls_made
-                async with AsyncSessionLocal() as db:
-                    await db.execute(
-                        update(Message)
-                        .where(Message.id == msg_id)
-                        .values(content=clean_response, metadata_=new_meta or None)
+                if enable_agent:
+                    _tr = await run_tools_and_finalize(
+                        full_response, chat_id, agent_id, agent_name, msg_metadata,
+                        websocket=(websocket if ws_alive else None),
+                        task_id=_step_task_id,
+                        parent_chat_id=_step_parent_chat_id,
+                        message_id=msg_id,
+                        run_proposals=True, org_id=org_id, append_final_if_stuck=True,
+                        record_parse_err_in_meta=False,
                     )
-                    await db.commit()
+                    clean_response = _tr.clean_response
+                    tool_results = _tr.tool_results
+                    calls_made = _tr.calls_made
+                    had_fence = _tr.had_fence
+                    new_meta = _tr.save_meta
+                    if _tr.parse_err and ws_alive:
+                        try:
+                            await websocket.send_json({
+                                "type": "tool_parse_error",
+                                "message": _tr.parse_err,
+                            })
+                        except Exception:
+                            pass
+                    async with AsyncSessionLocal() as db:
+                        await db.execute(
+                            update(Message)
+                            .where(Message.id == msg_id)
+                            .values(content=clean_response, metadata_=new_meta or None)
+                        )
+                        await db.commit()
+                else:
+                    # Agent disabled: plain LLM reply already streamed + persisted (full_response).
+                    # No tool execution, proposals, or orchestration.
+                    clean_response = full_response
+                    tool_results = []
 
                 if live_chat and live_chat.project_id and org_id and clean_response.strip():
                     from src.services.telegram.sync import post_to_project_topic as _tg_post
@@ -736,7 +830,9 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
 
                 # Suppress nudge when tool_results exist — _resume_with_tool_results already
                 # continues the chain; firing nudge simultaneously causes duplicate responses.
-                asyncio.create_task(_run_delegated_tasks(chat_id, org_id, user.id, nudge_if_idle=not had_fence and not tool_results))
+                # Also skip entirely when the agent is disabled (plain-chat turn).
+                if enable_agent:
+                    asyncio.create_task(_run_delegated_tasks(chat_id, org_id, user.id, nudge_if_idle=not had_fence and not tool_results, last_turn_empty=not clean_response.strip()))
 
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -753,11 +849,11 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
         )):
             logger.info(f"WebSocket disconnected (stale): chat={chat_id} user={user.id}")
         else:
-            logger.error(f"WebSocket error: {e}")
-            try:
-                await websocket.send_json({"type": "error", "message": str(e)})
-            except Exception:
-                pass
+            logger.error(f"WebSocket error: {e}", exc_info=True)
+            # Mid-turn crash: clear the "Agent is writing…" indicator on every client
+            # (not just this socket) and leave a persistent trace, so other tabs don't
+            # hang and a reload shows the failure instead of a silent dead chat.
+            await _emit_stream_failure(f"The agent hit an unexpected error: {e}")
     finally:
         reader_task.cancel()
         if local_bridge["b"] is not None:
@@ -768,14 +864,11 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
             org_forwarder.cancel()
         if org_queue and org_id_for_queue:
             await pubsub.unsubscribe(f"org:{org_id_for_queue}:chats", org_queue)
-        if chat_id in _presence and user.id in _presence[chat_id]:
-            del _presence[chat_id][user.id]
-            if not _presence[chat_id]:
-                del _presence[chat_id]
+        await _presence_remove(chat_id, user.id)
         await pubsub.broadcast(chat_id, {
             "type": "user_left",
             "user_id": user.id,
-            "participants": list(_presence.get(chat_id, {}).values()),
+            "participants": await _presence_list(chat_id),
         })
 
 
@@ -856,23 +949,81 @@ async def recover_stuck_tasks() -> None:
             logger.info(f"[recover] cleared {len(stale_keys)} stale org-slot counter(s)")
 
         from src.core.config import get_settings as _get_settings
+        _max_retries = _get_settings().max_task_retries
         async with AsyncSessionLocal() as db:
             stale_cutoff = datetime.now(timezone.utc) - timedelta(
                 minutes=_get_settings().heartbeat_timeout_minutes
             )
-            result = await db.execute(
-                update(Task)
-                .where(
+            # Find stale in-flight tasks individually so each can be salvaged or
+            # retired — a blind bulk reset-to-pending re-dispatched them forever.
+            # A weak model that never emits the <final/> marker (e.g. a fallback
+            # provider) would leave its task in_progress every cycle, so the recover
+            # job kept re-running it: burning tokens, discarding the sub-chat's real
+            # output (sub_chat_id was nulled), and pinning the chat on "Working…".
+            stale_r = await db.execute(
+                select(Task).where(
                     Task.status.in_(["in_progress", "queued"]),
                     (Task.worker_heartbeat_at.is_(None) | (Task.worker_heartbeat_at < stale_cutoff)),
                 )
-                .values(status="pending", sub_chat_id=None, worker_id=None, worker_heartbeat_at=None)
             )
+            stale_tasks = [
+                t for t in stale_r.scalars().all()
+                if not (t.agent_overrides or {}).get("cli_native")
+            ]
+            reset_count = 0
+            _finished: list[tuple[str, str]] = []  # (task_id, parent_id) to broadcast after commit
+            for t in stale_tasks:
+                # 1. Salvage: the sub-agent already produced a final answer but the
+                #    task was never marked done — complete it instead of re-running.
+                if t.sub_chat_id:
+                    last_r = await db.execute(
+                        select(Message)
+                        .where(Message.chat_id == t.sub_chat_id, Message.role == "assistant")
+                        .order_by(Message.created_at.desc())
+                        .limit(1)
+                    )
+                    last_msg = last_r.scalar_one_or_none()
+                    if last_msg and (last_msg.content or "").strip():
+                        t.status = "completed"
+                        t.output = last_msg.content[:500]
+                        t.completed_at = datetime.now(timezone.utc)
+                        logger.info(f"[recover] task {t.id} has sub-chat output — marking completed")
+                        _finished.append((t.id, t.parent_id))
+                        continue
+                # 2. Give up: re-dispatched too many times — mark failed so the chat
+                #    stops showing perpetual activity instead of looping indefinitely.
+                if (t.retry_count or 0) >= _max_retries:
+                    t.status = "failed"
+                    t.last_error = f"Abandoned after {t.retry_count} recovery attempts (no completion signal)."
+                    t.completed_at = datetime.now(timezone.utc)
+                    logger.warning(f"[recover] task {t.id} exceeded {_max_retries} retries — marking failed")
+                    _finished.append((t.id, t.parent_id))
+                    continue
+                # 3. Retry: reset to pending for re-dispatch, counting the attempt.
+                t.retry_count = (t.retry_count or 0) + 1
+                t.status = "pending"
+                t.sub_chat_id = None
+                t.worker_id = None
+                t.worker_heartbeat_at = None
+                reset_count += 1
             await db.commit()
-            reset_count = result.rowcount
             if reset_count:
                 logger.info(f"[recover] reset {reset_count} stuck task(s) to pending")
 
+        # Broadcast salvaged/failed task state so open clients update without a reload,
+        # and bubble completion up to any waiting parent task.
+        if _finished:
+            from src.services.agent_tools import _task_to_dict, _bubble_complete_parent
+            async with AsyncSessionLocal() as _bdb:
+                for _tid, _pid in _finished:
+                    _tr = await _bdb.execute(select(Task).where(Task.id == _tid))
+                    _t = _tr.scalar_one_or_none()
+                    if _t:
+                        await pubsub.broadcast(_t.chat_id, {"type": "task_updated", "task": _task_to_dict(_t)})
+                    if _pid:
+                        asyncio.create_task(_bubble_complete_parent(_pid))
+
+        async with AsyncSessionLocal() as db:
             # Stale pending cutoff: tasks pending for > 2× heartbeat timeout are truly orphaned
             stale_pending_cutoff = datetime.now(timezone.utc) - timedelta(
                 minutes=_get_settings().heartbeat_timeout_minutes * 2
