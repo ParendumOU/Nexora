@@ -244,15 +244,22 @@ async def _run_delegated_tasks(
                     )
                 )
                 _unassigned_pending = _ua_r.scalar() or 0
+                # A turn that PROMISED a next action ("ahora voy a leerlo…") without a
+                # tool fence must be nudged to actually act — not treated as done.
+                _last_asst = (await _ua_db.execute(
+                    select(Message.content).where(
+                        Message.chat_id == chat_id, Message.role == "assistant",
+                        Message.excluded.isnot(True),
+                    ).order_by(Message.created_at.desc()).limit(1)
+                )).scalar_one_or_none()
+            from src.services.turn_completion import looks_like_promise
+            _is_promise = looks_like_promise(_last_asst or "")
 
-            # Nudge only when THIS turn was empty (a contentless resume that must be
-            # pushed to follow through — e.g. after a sub-agent completed or a tool
-            # returned, so the main agent actually relays the result). A substantive
-            # prose reply is treated as the final answer (no nudge → no extra slow
-            # turn); a genuinely stuck turn is still caught by the conversation
-            # watchdog. last_turn_empty is supplied by the caller (which knows the
-            # turn's content); default False so non-resume callers never nudge here.
-            if _unassigned_pending > 0 or (nudge_if_idle and from_resume and last_turn_empty):
+            # Nudge when THIS turn was empty (a contentless resume to push through) OR
+            # it merely announced a next step (a hallucinated promise). A substantive
+            # final answer is left alone (no nudge → no extra slow turn). last_turn_empty
+            # is supplied by the caller; default False so non-resume callers don't nudge.
+            if _unassigned_pending > 0 or (nudge_if_idle and from_resume and (last_turn_empty or _is_promise)):
                 asyncio.create_task(_nudge_orchestrator(chat_id, org_id, user_id, from_resume=from_resume)).add_done_callback(_on_task_error("nudge_orchestrator"))
             else:
                 # Truly idle (nothing to dispatch/run, no nudge) → tell the UI to stop

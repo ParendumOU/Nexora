@@ -1,0 +1,9 @@
+{
+  "key": "milestone_add",
+  "name": "Milestone Add",
+  "description": "Add a milestone to a Goal. Fields: goal_id*, title*, description, success_criteria, position.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

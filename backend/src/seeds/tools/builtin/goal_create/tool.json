@@ -1,0 +1,9 @@
+{
+  "key": "goal_create",
+  "name": "Goal Create",
+  "description": "Create a durable Goal (objective pursued over time) with optional milestones. Fields: title*, description, success_criteria, priority (int), parent_goal_id, owner_agent_id, milestones (list of {title, description?, success_criteria?}).",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

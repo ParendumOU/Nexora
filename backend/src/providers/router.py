@@ -791,6 +791,7 @@ async def stream_response(
             _max_continues = _settings.max_truncation_continuations
             _max_empty_retries = _settings.max_empty_retries
             content_yielded = False
+            _usage_tokens = 0  # budget tally (#235) — accumulated from usage metadata
             # Retry-on-empty: flaky weak models (e.g. OpenCode Go fallback when Claude
             # OAuth is down) intermittently stream ZERO content — one such empty turn
             # used to kill the whole chat. Retry the SAME provider a few times. Safe
@@ -813,6 +814,8 @@ async def stream_response(
                                 _m = json.loads(chunk[len(_METADATA_PREFIX):])
                                 if _m.get("finish_reason"):
                                     finish_reason = _m["finish_reason"]
+                                _u = _m.get("usage") or {}
+                                _usage_tokens += int(_u.get("input_tokens", 0) or 0) + int(_u.get("output_tokens", 0) or 0)
                             except Exception:
                                 pass
                             # Metadata (usage/finish_reason) trails content in every stream
@@ -862,6 +865,12 @@ async def stream_response(
                 yield _metadata_event({"account_name": provider.name})
                 _fire_metering(kwargs.get("org_id"))
                 record_provider_success(provider.id)
+                # Budget tally (#235): record this turn's tokens for the org.
+                try:
+                    from src.services.budget import record_usage as _rec_budget
+                    await _rec_budget(kwargs.get("org_id"), _usage_tokens)
+                except Exception:
+                    pass
                 return
             logger.warning(f"Provider {provider.name} returned an empty response, trying next")
             _s = _status(f"{provider.name} returned empty — trying next provider")

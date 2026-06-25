@@ -32,6 +32,7 @@ from .memory_note import MemoryNote, MemoryLink
 from .device_token import DeviceToken
 from .backup_job import BackupJob
 from .env_var import EnvVar
+from .goal import Goal, Milestone
 
 __all__ = [
     "User", "UserProfileFact", "Organization", "OrgMember", "OrgInvite", "SignupInvite",
@@ -52,4 +53,5 @@ __all__ = [
     "DeviceToken",
     "BackupJob",
     "EnvVar",
+    "Goal", "Milestone",
 ]

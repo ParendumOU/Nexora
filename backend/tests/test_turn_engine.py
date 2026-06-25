@@ -189,7 +189,8 @@ async def test_finalize_no_append_when_flag_off(monkeypatch):
 
 
 async def test_finalize_meta_records_calls_and_parse_err(monkeypatch):
-    calls = [{"tool": "bash", "args": {}}]
+    # real calls carry "name"; a billable tool (bash) + a coordination one (task_create)
+    calls = [{"name": "bash", "args": {}}, {"name": "task_create", "args": {}}]
     _patch_tools(monkeypatch, clean="done", results=[], calls=calls,
                  had_fence=True, parse_err="bad json")
     res = await te.run_tools_and_finalize(
@@ -197,9 +198,22 @@ async def test_finalize_meta_records_calls_and_parse_err(monkeypatch):
         record_parse_err_in_meta=True,
     )
     assert res.save_meta["account_name"] == "acct"
+    # count = billable only (task_create excluded); detail = full list (for the card)
     assert res.save_meta["tool_call_count"] == 1
     assert res.save_meta["tool_calls_detail"] == calls
     assert res.save_meta["tool_parse_error"] == "bad json"
+
+
+def test_billable_call_count_excludes_coordination():
+    from src.services.agent_tools import billable_call_count
+    calls = [
+        {"name": "log_entry"}, {"name": "task_create"}, {"name": "task_update"},
+        {"name": "goal_create"}, {"name": "milestone_status"},
+        {"name": "shell_run"}, {"name": "slack"},
+    ]
+    # only shell_run + slack are billable
+    assert billable_call_count(calls) == 2
+    assert billable_call_count([]) == 0
 
 
 async def test_finalize_parse_err_suppressed_when_flag_off(monkeypatch):

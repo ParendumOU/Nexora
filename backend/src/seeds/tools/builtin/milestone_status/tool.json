@@ -1,0 +1,9 @@
+{
+  "key": "milestone_status",
+  "name": "Milestone Status",
+  "description": "Set a milestone status. Fields: milestone_id*, status* (pending|in_progress|done|failed|skipped). Rolls up to goal progress; goal auto-completes when all milestones are done.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

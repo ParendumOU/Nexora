@@ -3,6 +3,52 @@
 All notable changes to Nexora core. Newest first; one `## <version>` heading per release.
 The release CI extracts the section matching the pushed tag as the GitHub Release notes.
 
+## 1.3.0
+
+The **Autonomy Layer**: agents can now pursue durable objectives, verify their own
+work, and self-direct — plus a redesigned reasoning UI. Everything that changes
+behaviour is behind a flag (default off), so upgrades are safe.
+
+### Autonomy
+- **Durable goals** (migration 061 — `goals` + `milestones`; `tasks` gain
+  optional goal/milestone links). A `Goal` is decomposed into ordered `Milestone`s;
+  goal progress and auto-completion roll up from milestone status. REST API at
+  `/api/goals` (CRUD + milestones) and agent tools `goal_create`, `goal_update`,
+  `goal_read`, `milestone_add`, `milestone_status` so an agent can plan and track
+  objectives across chats. Status synonyms (e.g. "completed" → done) accepted.
+- **Acceptance-criteria verification** (`TASK_VERIFICATION_ENABLED`, default off): a
+  task carrying explicit acceptance criteria (or inheriting a milestone's
+  success_criteria) is judged by an LLM critic before it is marked done; on failure
+  the feedback is bounced back into the sub-agent loop (bounded retries) instead of
+  declaring success.
+- **Proactive goal tick** (`AUTONOMY_TICK_ENABLED`, default off): a periodic,
+  budget-aware sweep that recomputes goal progress and decides the next actionable
+  milestone per active goal.
+- **Deterministic turn completion**: a turn is terminal when it issues no tool calls
+  (the `<final/>` marker is now just how that's persisted). A turn that merely
+  *announces* a next action ("I'll read it now…") without acting is detected as a
+  hallucinated promise and nudged to actually act, instead of stopping.
+
+### Governance (`#235`)
+- **Tool risk tiers** — every tool is classified read / write / external / exec, and
+  an operator can hard-deny a tier (`DENY_EXEC_TOOLS`, `DENY_EXTERNAL_TOOLS`).
+- **Per-org token budget** (`ORG_TOKEN_BUDGET`, 0 = unlimited): a rolling-window
+  token tally that gates autonomous spending (never hard-blocks an interactive chat).
+
+### Reasoning UI
+- The chat now renders model reasoning as a collapsible **"Thought · N steps"** panel
+  outside the answer bubble (like the agent-actions card): live "Thinking…" → folded
+  "Thought for Ns" when done, per-thought folding (only the latest stays open while
+  live), auto-scroll, and tool-call JSON shown as compact chips.
+- The "Agent · N actions" card now persists across a page refresh and auto-collapses
+  when it finishes.
+
+### Notes
+- Idempotent goals migration (tolerates the startup `create_all`). Run
+  `alembic upgrade head` after upgrading.
+- Try the autonomy stack by enabling, in order: `NATIVE_TOOLS_ENABLED` → acceptance
+  criteria + `TASK_VERIFICATION_ENABLED` → `AUTONOMY_TICK_ENABLED` (+ `ORG_TOKEN_BUDGET`).
+
 ## 1.2.0
 
 Large orchestration, provider, and reasoning pass. Backward-compatible — new

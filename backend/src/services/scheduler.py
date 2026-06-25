@@ -111,6 +111,24 @@ def schedule_conversation_watchdog(interval_minutes: int = 2) -> None:
     if s.get_job("conversation_watchdog"):
         return
     s.add_job(_job, IntervalTrigger(minutes=interval_minutes), id="conversation_watchdog", replace_existing=True)
+
+
+def schedule_autonomy_tick(interval_minutes: int = 5) -> None:
+    """Register the proactive autonomy tick (GitLab #234). Only call when enabled."""
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    async def _job():
+        from src.services.autonomy import autonomy_tick
+        try:
+            await autonomy_tick()
+        except Exception as exc:
+            logger.error(f"[scheduler] autonomy_tick failed: {exc}")
+
+    s = get_scheduler()
+    if s.get_job("autonomy_tick"):
+        return
+    s.add_job(_job, IntervalTrigger(minutes=interval_minutes), id="autonomy_tick", replace_existing=True)
+    logger.info(f"[scheduler] autonomy_tick registered every {interval_minutes}m")
     logger.info(f"[scheduler] conversation_watchdog registered every {interval_minutes}m")
 
 

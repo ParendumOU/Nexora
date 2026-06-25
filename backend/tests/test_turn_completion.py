@@ -1,0 +1,60 @@
+"""Deterministic turn completion (GitLab #213)."""
+from src.services.turn_completion import (
+    is_turn_complete, has_final_marker, finalize_marker, FINAL_MARKER, looks_like_promise,
+)
+
+
+def test_complete_iff_no_tool_calls():
+    assert is_turn_complete(had_tool_calls=False) is True
+    assert is_turn_complete(had_tool_calls=True) is False
+
+
+def test_has_final_marker_variants():
+    assert has_final_marker("done <final/>")
+    assert has_final_marker("<final></final>")
+    assert has_final_marker('{"final": true}')
+    assert not has_final_marker("just an answer")
+    assert not has_final_marker("")
+
+
+def test_finalize_appends_when_terminal_and_unmarked():
+    out = finalize_marker("Here is the answer.", had_tool_calls=False)
+    assert out.endswith(FINAL_MARKER)
+    assert out.startswith("Here is the answer.")
+
+
+def test_finalize_noop_when_tool_calls():
+    body = "calling a tool"
+    assert finalize_marker(body, had_tool_calls=True) == body
+
+
+def test_finalize_noop_when_already_marked():
+    body = "done <final/>"
+    assert finalize_marker(body, had_tool_calls=False) == body
+
+
+def test_finalize_empty_turn_gets_marker():
+    # an empty terminal turn still gets marked so the watchdog leaves it alone
+    out = finalize_marker("", had_tool_calls=False)
+    assert FINAL_MARKER in out
+
+
+def test_promise_detected_es_en():
+    assert looks_like_promise("Entendido. Ahora voy a leerlo para mostrarte el progreso.")
+    assert looks_like_promise("Let me read it now to get the milestone IDs.")
+    assert looks_like_promise("I'll delegate that to the sub-agent.")
+    assert looks_like_promise("Déjame consultarlo.")
+    assert looks_like_promise("A continuación voy a crear la tarea.")
+
+
+def test_not_promise_for_final_answers():
+    assert not looks_like_promise("Las 4 cards ya están disponibles en tu panel de Archivos.")
+    assert not looks_like_promise("Ahora puedes descargarlas desde Files.")  # 'ahora puedes' ≠ intent
+    assert not looks_like_promise("El objetivo tiene 3 milestones, 33% completado.")
+    assert not looks_like_promise("")
+
+
+def test_promise_is_not_sealed_final():
+    # a promise turn must stay unmarked so it gets nudged to act
+    out = finalize_marker("Ahora voy a leerlo.", had_tool_calls=False)
+    assert FINAL_MARKER not in out

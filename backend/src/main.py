@@ -24,6 +24,7 @@ from src.api.routers import cli_hooks as cli_hooks_router
 from src.api.routers import oauth as oauth_router
 from src.api.routers import device as device_router
 from src.api.routers import platform_backup as platform_backup_router
+from src.api.routers import goals as goals_router
 from src.integrations import github, gitlab
 
 logging.basicConfig(level=logging.INFO)
@@ -130,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(oauth_router.router, prefix=prefix)
     app.include_router(device_router.router, prefix=prefix)
     app.include_router(platform_backup_router.router, prefix=prefix)
+    app.include_router(goals_router.router, prefix=prefix)
 
     # WebSocket
     app.include_router(ws_router.router)

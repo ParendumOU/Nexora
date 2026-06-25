@@ -266,14 +266,25 @@ async def run_tools_and_finalize(
         await process_proposals(clean_response, chat_id, agent_id, agent_name, org_id)
         clean_response = strip_proposals(clean_response)
 
-    if append_final_if_stuck and not had_fence and not tool_results:
-        from src.services.conversation_watchdog import detect_stuck_turn
-        if detect_stuck_turn(clean_response):
-            clean_response = clean_response.rstrip() + "\n<final/>"
+    # Deterministic turn completion (#213): a turn with no tool calls is terminal —
+    # persist the <final/> marker so the watchdog leaves it alone. Centralized in
+    # turn_completion (no-op when the turn called tools or is already marked).
+    if append_final_if_stuck:
+        from src.services.turn_completion import finalize_marker
+        # A parse error means the turn ATTEMPTED a tool call → not terminal (it gets
+        # retried/nudged); don't mark it final.
+        clean_response = finalize_marker(
+            clean_response,
+            had_tool_calls=(had_fence or bool(tool_results) or bool(parse_err)),
+        )
 
     save_meta = dict(base_metadata or {})
     if calls_made:
-        save_meta["tool_call_count"] = len(calls_made)
+        # tool_calls_detail = full list (drives the "Agent · N actions" card on
+        # refresh); tool_call_count = billable subset (excludes log_entry/task_*/goal_*)
+        # for the usage metric.
+        from src.services.agent_tools import billable_call_count
+        save_meta["tool_call_count"] = billable_call_count(calls_made)
         save_meta["tool_calls_detail"] = calls_made
     if parse_err and record_parse_err_in_meta:
         save_meta["tool_parse_error"] = parse_err

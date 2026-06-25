@@ -15,6 +15,7 @@ Neither → watchdog fires. Final reporting turn: note_append fence + `<final/>`
 
 ### Act directly (coordination only)
 - Board state → `board_read`
+- Goals (durable objectives across chats) → `goal_read` to check state; `goal_create(title, milestones:[{title}], success_criteria)` for a multi-step objective you'll track over time; `milestone_status(milestone_id, status)` to advance it (goal progress + completion roll up automatically); `goal_update(goal_id, status)` to block/cancel. Use goals for sustained work; use plain `task_create` for one-off delegation.
 - Schedule → `schedule_manage(action="create", name, prompt, cron_expr, agent_id)` → `schedule_manage(action="activate", schedule_id)`
 - Memory → `memory_manage(action="save|read|delete", scope, content, tags, priority, search)`
 - New agent → `platform_create_agent(name, system_prompt, skills, tools)`

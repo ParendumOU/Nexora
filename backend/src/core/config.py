@@ -82,6 +82,33 @@ class Settings(BaseSettings):
     workspace_base: str = "/workspaces"
     sandbox_image: str = "python:3.12-slim"
 
+    # Proactive autonomy tick (GitLab #234, Autonomy epic #238). A periodic sweep that
+    # advances active goals (picks the next pending milestone, recomputes progress).
+    # OFF by default. It does NOT autonomously spawn agents yet — that step is gated
+    # on governance budgets (#235) — so when enabled it only maintains goal state.
+    autonomy_tick_enabled: bool = False
+    autonomy_tick_interval_minutes: int = 5
+    autonomy_tick_max_goals: int = 20        # safety cap on goals processed per tick
+
+    # Governance: tool risk policy (GitLab #235, Autonomy epic #238). Each tool is
+    # classified into a risk tier (read | write | external | exec); these flags let an
+    # operator hard-deny a whole tier (e.g. for an unattended/autonomous deployment).
+    # Default off → every tier allowed (existing behaviour). Always-allowed coordination
+    # tools (task_create, log_entry, goal_*, …) are never gated by risk.
+    deny_exec_tools: bool = False        # block exec tier (shell_run, code_*, docker_*)
+    deny_external_tools: bool = False    # block external tier (slack, jira, http_request, s3, k8s, …)
+    # Per-org token budget over a rolling window (#235). 0 = unlimited (default, no
+    # tracking/enforcement). When > 0, LLM usage is tallied in Redis and over_budget()
+    # gates the proactive autonomy dispatch (interactive chat is never hard-blocked).
+    org_token_budget: int = 0
+    budget_window_hours: int = 24
+
+    # Task verification / acceptance-criteria loop (GitLab #233, Autonomy epic #238).
+    # OFF by default + only runs when a task/milestone has explicit acceptance
+    # criteria, so existing behaviour is unchanged until enabled.
+    task_verification_enabled: bool = False
+    max_verification_retries: int = 2        # times a failing sub-agent turn is bounced back with feedback
+
     # Concurrency — sub-agent execution limits
     max_concurrent_agents: int = 2           # global cap per worker process
     max_concurrent_agents_per_org: int = 4   # cross-worker cap per org (Redis-coordinated)

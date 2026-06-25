@@ -69,6 +69,16 @@ class Task(Base):
         String(36), nullable=True
     )
 
+    # Autonomy layer (#232): optional link to the goal/milestone this task advances.
+    # Nullable — most tasks are still ad-hoc; goal-driven tasks set these so milestone
+    # completion can roll up to goal progress.
+    goal_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("goals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    milestone_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("milestones.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # Per-task capability overrides set by the parent orchestrator at creation time.
     # Merged on top of the assigned agent's base config during execution only —
     # never persisted to the agent record itself.

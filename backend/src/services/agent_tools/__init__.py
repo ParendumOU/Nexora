@@ -418,6 +418,16 @@ async def _execute_agent_tools(
             logger.info(f"[tools] {name!r} arg validation: {_arg_err}")
             tool_results.append({"tool": name, "error": _arg_err})
             continue
+        # Governance risk policy (#235): an operator can hard-deny a whole risk tier
+        # (exec / external) for an unattended deployment. Always-allowed coordination
+        # tools are exempt. Default config denies nothing → inert.
+        if name not in _always_allowed():
+            from src.core.config import get_settings as _gs_risk
+            from src.services.agent_tools.risk import tool_denied_by_policy, tool_risk_tier
+            if tool_denied_by_policy(name, _gs_risk()):
+                logger.warning(f"[tools] {name!r} blocked by risk policy (tier={tool_risk_tier(name)})")
+                tool_results.append({"tool": name, "error": f"Tool '{name}' ({tool_risk_tier(name)} tier) is blocked by the organization's risk policy."})
+                continue
         label = _label_map.get(name)
 
         if not label:
@@ -570,12 +580,33 @@ async def _execute_agent_tools(
                 })
 
     await _ws_status(websocket, "idle", pub_chat_id=_status_pub)
-    _STATS_HIDDEN = {"log_entry"}
+    # FULL list of executed tool calls (name+args). This drives the "Agent · N
+    # actions" card reconstruction on refresh, so it must include log_entry +
+    # task_*/goal_* — usage stats apply their own filter via billable_call_count().
     counted = [
         {"name": c.get("name", ""), "args": c.get("args", {})}
         for c in tool_calls
-        if c.get("name") and c["name"] not in _STATS_HIDDEN and not c["name"].startswith("task_")
+        if c.get("name")
     ]
     # Prepend any inline ```file: deliveries (handled before the tool_calls fence) so the
     # resume sees them alongside the JSON tool results.
     return clean_text, _file_deliveries + tool_results, counted, True, None
+
+
+# Coordination tools that should NOT count toward the user-facing "tool calls" usage
+# metric (they're orchestration bookkeeping, not work the user pays attention to).
+_STATS_HIDDEN_PREFIXES = ("task_", "goal_", "milestone_")
+_STATS_HIDDEN_NAMES = {"log_entry"}
+
+
+def billable_call_count(calls: list[dict]) -> int:
+    """Count tool calls for usage stats, excluding coordination bookkeeping
+    (log_entry, task_*/goal_*/milestone_*). The action-card list keeps everything;
+    only the numeric metric is filtered."""
+    n = 0
+    for c in calls or []:
+        name = c.get("name", "")
+        if not name or name in _STATS_HIDDEN_NAMES or name.startswith(_STATS_HIDDEN_PREFIXES):
+            continue
+        n += 1
+    return n

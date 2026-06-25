@@ -114,6 +114,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   };
   const [agentActionGroups, setAgentActionGroups] = useState<AgentActionGroup[]>([]);
   const [collapsedActionGroups, setCollapsedActionGroups] = useState<Set<string>>(new Set());
+  // Groups we've already auto-collapsed on completion, so a user re-expand sticks.
+  const autoCollapsedActionsRef = useRef<Set<string>>(new Set());
 
   type SubAgentStep = {
     stepId: string;
@@ -462,6 +464,22 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       return next;
     });
   }, [history]);
+
+  // Auto-collapse an action card once all its steps finish (mirrors the thinking
+  // panel + sub-agent activity). Once per group, so a manual re-expand persists.
+  useEffect(() => {
+    const finished = agentActionGroups.filter(
+      (g) => g.steps.length > 0
+        && g.steps.every((s) => s.status !== "running")
+        && !autoCollapsedActionsRef.current.has(g.groupId)
+    );
+    if (finished.length === 0) return;
+    setCollapsedActionGroups((prev) => {
+      const next = new Set(prev);
+      finished.forEach((g) => { next.add(g.groupId); autoCollapsedActionsRef.current.add(g.groupId); });
+      return next;
+    });
+  }, [agentActionGroups]);
 
   // Send fork-pending message once BOTH history is loaded AND WS is connected
   useEffect(() => {
@@ -1274,7 +1292,13 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 )}
                 {messages
                   .filter((msg) => {
-                    if (!msg.content || !msg.content.trim().length) return false;
+                    // A delegating turn (e.g. log_entry + task_create) has empty visible
+                    // content but carries an anchored action group ("Agent · N actions").
+                    // Keep it so that card survives a page refresh — dropping it orphaned
+                    // the reconstructed group and the actions vanished on reload.
+                    if (!msg.content || !msg.content.trim().length) {
+                      if (!agentActionGroups.some((g) => g.messageId === msg.id)) return false;
+                    }
                     // Hide system-injected messages (tool results, nudge prompts). These are
                     // always excluded=true, role="user", with no user_id and a metadata.kind.
                     // A user-excluded message (the eye toggle) must STAY visible — dimmed via

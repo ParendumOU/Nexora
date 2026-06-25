@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { User, Bot, Copy, Check, ChevronDown, ChevronRight, Pencil, X, SendHorizonal, EyeOff, Eye, Briefcase, AlertTriangle, CornerDownRight } from "lucide-react";
+import { User, Bot, Copy, Check, ChevronDown, ChevronRight, Pencil, X, SendHorizonal, EyeOff, Eye, Briefcase, AlertTriangle, CornerDownRight, Brain } from "lucide-react";
 import { cn, copyToClipboard } from "@/lib/utils";
 
 interface UsageMeta {
@@ -334,21 +334,34 @@ function ThinkingBlock({ blocks, live }: { blocks: string[]; live?: boolean }) {
 
   const label = live ? "Thinking…" : (elapsed != null ? `Thought for ${elapsed}s` : "Thought");
 
+  // Same panel chrome as the "Agent · N actions" card: rounded-xl bordered box,
+  // header (collapse + status dot + "Thought · N steps" + live label), body list.
   return (
-    <div className="mb-2">
-      <button
-        onClick={() => setManual(!expanded)}
-        className="flex items-center gap-1.5 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors italic"
-      >
-        <ChevronDown className={cn("w-3 h-3 transition-transform shrink-0", expanded && "rotate-180")} />
-        {label}
-        {thoughts.length > 1 && <span className="opacity-60 not-italic"> · {thoughts.length} steps</span>}
-      </button>
+    <div className="my-2 rounded-xl border border-border bg-muted/30 text-xs overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-inherit">
+        <button
+          onClick={() => setManual(!expanded)}
+          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={expanded ? "Collapse reasoning" : "Expand reasoning"}
+        >
+          {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+        </button>
+        <Brain className={cn("w-3.5 h-3.5 shrink-0", live ? "text-primary" : "text-muted-foreground")} />
+        <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", live ? "bg-primary animate-pulse" : "bg-green-400")} />
+        <span className="font-medium text-foreground">Thought</span>
+        {thoughts.length > 1 && (
+          <>
+            <span className="text-muted-foreground">·</span>
+            <span className="text-muted-foreground">{thoughts.length} steps</span>
+          </>
+        )}
+        <span className="text-muted-foreground text-xs ml-auto">{label}</span>
+      </div>
       {expanded && (
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="mt-2 pl-3 border-l-2 border-border/40 text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-0.5"
+          className="px-3 py-2 space-y-1 bg-muted/20 text-[11px] leading-relaxed max-h-72 overflow-y-auto"
         >
           {thoughts.map((t, i) => (
             // While live, only the LATEST thought stays open; past ones fold to a
@@ -571,6 +584,12 @@ export function ChatMessage({
         </div>
         )}
 
+        {/* Reasoning panel — OUTSIDE the answer bubble (like the "Agent · N actions"
+            card), so thinking reads as its own collapsible block, not bubble text. */}
+        {!isMyMessage && thinkingBlocks.length > 0 && (
+          <ThinkingBlock blocks={thinkingBlocks} live={!!isStreaming && !strippedContent} />
+        )}
+
         {/* Bubble or edit textarea */}
         {isMyMessage && isEditing ? (
           <div className="max-w-[85%] w-full space-y-2">
@@ -601,7 +620,7 @@ export function ChatMessage({
               </button>
             </div>
           </div>
-        ) : !strippedContent && !isStreaming && thinkingBlocks.length === 0 ? null : (
+        ) : (!strippedContent && !isToolResult) ? null : (
           <div
             className={cn(
               "max-w-[85%] rounded-xl px-4 py-3 text-sm",
@@ -610,9 +629,6 @@ export function ChatMessage({
                 : "bg-card border border-border rounded-tl-sm prose-chat"
             )}
           >
-            {thinkingBlocks.length > 0 && (
-              <ThinkingBlock blocks={thinkingBlocks} live={!!isStreaming && !strippedContent} />
-            )}
             {isToolResult ? (
               <ToolResultDisplay content={strippedContent} />
             ) : isUser && !isAgent ? (

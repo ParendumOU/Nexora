@@ -1,0 +1,1 @@
+`goal_create` title* — create a durable objective (survives across chats). Optional `milestones:[{title}]`, `success_criteria`, `priority`. Use for multi-step objectives you track over time; returns `goal_id`.

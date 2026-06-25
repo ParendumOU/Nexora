@@ -16,6 +16,16 @@ async def startup_scheduler():
     schedule_recover_stuck_tasks()
     schedule_conversation_watchdog()
 
+    # Proactive autonomy tick (#234) — opt-in.
+    try:
+        from src.core.config import get_settings
+        _s = get_settings()
+        if _s.autonomy_tick_enabled:
+            from src.services.scheduler import schedule_autonomy_tick
+            schedule_autonomy_tick(_s.autonomy_tick_interval_minutes)
+    except Exception as exc:
+        logger.warning(f"[startup] autonomy tick registration failed (non-fatal): {exc}")
+
     try:
         from src.models.schedule import Schedule as ScheduleModel
         from src.services.scheduler import schedule_job

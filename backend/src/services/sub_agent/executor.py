@@ -372,6 +372,7 @@ async def _execute_sub_agent_task(
     _total_in_tok = 0
     _total_out_tok = 0
     _nudge_count = 0
+    _verify_attempts = 0  # acceptance-criteria bounces (#233)
 
     from src.services.interrupt_store import is_interrupted, clear_interrupt, get_reassign_target
 
@@ -504,7 +505,8 @@ async def _execute_sub_agent_task(
             if clean_response.strip():
                 save_meta = dict(msg_metadata or {})
                 if calls_made:
-                    save_meta["tool_call_count"] = len(calls_made)
+                    from src.services.agent_tools import billable_call_count
+                    save_meta["tool_call_count"] = billable_call_count(calls_made)
                     save_meta["tool_calls_detail"] = calls_made
                 _provider_used = (msg_metadata or {}).get("account_name") or (providers[0][0].name if providers else None)
                 async with AsyncSessionLocal() as db:
@@ -683,6 +685,45 @@ async def _execute_sub_agent_task(
             # that answered in prose + <final/> (duplicate / empty bubbles).
             import re as _re_final
             if _re_final.search(r"<\s*final\s*/?\s*>", final_response or "", _re_final.IGNORECASE):
+                # Acceptance-criteria gate (#233): if this task carries explicit
+                # criteria, verify the output before completing. On failure (with
+                # retries left) bounce the feedback back into the loop instead of
+                # declaring done. Flag-gated + only when criteria exist → inert by
+                # default. Fails OPEN (verify errors pass through).
+                from src.core.config import get_settings as _gs_v
+                _vs = _gs_v()
+                if _vs.task_verification_enabled and _verify_attempts < _vs.max_verification_retries:
+                    from src.services.verification import resolve_acceptance_criteria, verify_against_criteria
+                    async with AsyncSessionLocal() as _vdb:
+                        _ms_id = (await _vdb.execute(
+                            select(Task.milestone_id).where(Task.id == task_id)
+                        )).scalar_one_or_none()
+                    _crit = await resolve_acceptance_criteria(task_overrides, _ms_id)
+                    if _crit:
+                        _verdict = await verify_against_criteria(
+                            _crit, final_response, providers,
+                            chat_id=sub_chat_id, agent_id=agent_id, agent_name=agent_name, org_id=org_id,
+                        )
+                        if not _verdict["passed"]:
+                            _verify_attempts += 1
+                            _fb = (
+                                "Your result did NOT meet the acceptance criteria. "
+                                f"{_verdict['feedback']}\n\nAcceptance criteria:\n{_crit}\n\n"
+                                "Fix the issue and produce the corrected result, then end with <final/>."
+                            )
+                            async with AsyncSessionLocal() as _vdb2:
+                                _vdb2.add(Message(
+                                    id=str(uuid.uuid4()), chat_id=sub_chat_id,
+                                    role="user", content=_fb, excluded=True,
+                                    metadata_={"kind": "verification_feedback"},
+                                ))
+                                await _vdb2.commit()
+                            messages.append({"role": "user", "content": _fb})
+                            logger.info(
+                                f"[sub_agent] {agent_name} iter {_iter+1}: acceptance FAIL "
+                                f"(attempt {_verify_attempts}) — bouncing feedback"
+                            )
+                            continue
                 logger.info(f"[sub_agent] {agent_name} iter {_iter+1}: <final/> seen — completing")
                 break
 

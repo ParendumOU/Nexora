@@ -154,6 +154,7 @@ _INLINE_TOOLS: frozenset[str] = frozenset({
     "task_create", "task_update", "task_delete", "spawn_subagent",
     "plan_create", "plan_step_complete", "plan_complete",
     "board_read", "log_entry", "attach_file",
+    "goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read",
 })
 
 
@@ -1060,6 +1061,167 @@ async def _run_single_tool(
             await db.commit()
         await broadcast(chat_id, {"type": "plan_completed", "plan_id": plan_id})
         return {"tool": "plan_complete", "data": {"plan_id": plan_id, "status": "completed"}}
+
+    elif name in ("goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read"):
+        # Autonomy layer (#232): durable objectives the agent can read + advance.
+        from src.models.goal import Goal, Milestone
+        from src.models.agent import Agent as _Agent
+        from src.services.goals import recompute_goal_progress, set_milestone_status as _set_ms
+
+        async def _agent_org(db) -> str | None:
+            # Resolve the org from any available source — not just the agent (a chat
+            # may run without a bound agent, or the agent may predate org wiring):
+            # agent.org_id → chat/ancestor project's org → chat owner's active org.
+            if agent_id:
+                o = (await db.execute(select(_Agent.org_id).where(_Agent.id == agent_id))).scalar_one_or_none()
+                if o:
+                    return o
+            from src.models.chat import Chat as _Chat
+            from src.models.project import Project as _Project
+            from src.models.user import User as _User
+            cur = chat_id
+            seen: set[str] = set()
+            while cur and cur not in seen:
+                seen.add(cur)
+                c = (await db.execute(select(_Chat).where(_Chat.id == cur))).scalar_one_or_none()
+                if not c:
+                    break
+                if c.project_id:
+                    po = (await db.execute(select(_Project.org_id).where(_Project.id == c.project_id))).scalar_one_or_none()
+                    if po:
+                        return po
+                if c.user_id:
+                    uo = (await db.execute(select(_User.active_org_id).where(_User.id == c.user_id))).scalar_one_or_none()
+                    if uo:
+                        return uo
+                cur = c.parent_chat_id
+            return None
+
+        if name == "goal_create":
+            title = (args.get("title") or "").strip()
+            if not title:
+                return {"tool": name, "error": "title is required"}
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+                if not org_id:
+                    return {"tool": name, "error": "no org context for goal_create"}
+                goal = Goal(
+                    id=str(uuid.uuid4()), org_id=org_id, title=title,
+                    description=args.get("description"),
+                    success_criteria=args.get("success_criteria"),
+                    parent_goal_id=args.get("parent_goal_id"),
+                    owner_agent_id=args.get("owner_agent_id") or agent_id,
+                    priority=int(args.get("priority") or 0),
+                )
+                db.add(goal)
+                await db.flush()
+                ms_in = args.get("milestones") or []
+                for i, m in enumerate(ms_in):
+                    if isinstance(m, str):
+                        m = {"title": m}
+                    db.add(Milestone(
+                        id=str(uuid.uuid4()), goal_id=goal.id, position=i,
+                        title=(m.get("title") or f"Milestone {i+1}"),
+                        description=m.get("description"),
+                        success_criteria=m.get("success_criteria"),
+                    ))
+                await db.commit()
+                gid = goal.id
+                await recompute_goal_progress(db, gid)
+            await broadcast(chat_id, {"type": "goal_created", "goal_id": gid, "title": title})
+            return {"tool": name, "data": {"goal_id": gid, "title": title, "milestones": len(ms_in)}}
+
+        if name == "goal_update":
+            gid = args.get("goal_id")
+            if not gid:
+                return {"tool": name, "error": "goal_id is required"}
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+                g = (await db.execute(select(Goal).where(Goal.id == gid))).scalar_one_or_none()
+                if not g or (org_id and g.org_id != org_id):
+                    return {"tool": name, "error": f"goal {gid} not found"}
+                for f in ("title", "description", "success_criteria", "status"):
+                    if args.get(f) is not None:
+                        setattr(g, f, args[f])
+                if args.get("priority") is not None:
+                    g.priority = int(args["priority"])
+                await db.commit()
+            await broadcast(chat_id, {"type": "goal_updated", "goal_id": gid})
+            return {"tool": name, "data": {"goal_id": gid, "updated": True}}
+
+        if name == "milestone_add":
+            gid = args.get("goal_id")
+            title = (args.get("title") or "").strip()
+            if not gid or not title:
+                return {"tool": name, "error": "goal_id and title are required"}
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+                g = (await db.execute(select(Goal).where(Goal.id == gid))).scalar_one_or_none()
+                if not g or (org_id and g.org_id != org_id):
+                    return {"tool": name, "error": f"goal {gid} not found"}
+                _pos = (await db.execute(select(func.count(Milestone.id)).where(Milestone.goal_id == gid))).scalar() or 0
+                m = Milestone(
+                    id=str(uuid.uuid4()), goal_id=gid, position=int(args.get("position") or _pos),
+                    title=title, description=args.get("description"),
+                    success_criteria=args.get("success_criteria"),
+                )
+                db.add(m)
+                await db.commit()
+                mid = m.id
+                await recompute_goal_progress(db, gid)
+            await broadcast(chat_id, {"type": "goal_updated", "goal_id": gid})
+            return {"tool": name, "data": {"milestone_id": mid, "goal_id": gid}}
+
+        if name == "milestone_status":
+            mid = args.get("milestone_id")
+            status = (args.get("status") or "").strip().lower().replace(" ", "_")
+            # Accept common synonyms the model reaches for (e.g. "completed") so it
+            # doesn't fail + waste a retry turn.
+            _status_alias = {
+                "completed": "done", "complete": "done", "completado": "done", "completada": "done",
+                "hecho": "done", "finished": "done", "in-progress": "in_progress",
+                "inprogress": "in_progress", "en_progreso": "in_progress", "doing": "in_progress",
+                "todo": "pending", "pendiente": "pending", "blocked": "failed", "skip": "skipped",
+            }
+            status = _status_alias.get(status, status)
+            if not mid or status not in ("pending", "in_progress", "done", "failed", "skipped"):
+                return {"tool": name, "error": "milestone_id and a valid status are required (pending|in_progress|done|failed|skipped)"}
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+                m = (await db.execute(select(Milestone).where(Milestone.id == mid))).scalar_one_or_none()
+                if not m:
+                    return {"tool": name, "error": f"milestone {mid} not found"}
+                g = (await db.execute(select(Goal).where(Goal.id == m.goal_id))).scalar_one_or_none()
+                if org_id and (not g or g.org_id != org_id):
+                    return {"tool": name, "error": f"milestone {mid} not found"}
+                m = await _set_ms(db, mid, status)
+                gid = m.goal_id
+            await broadcast(chat_id, {"type": "goal_updated", "goal_id": gid})
+            return {"tool": name, "data": {"milestone_id": mid, "status": status}}
+
+        if name == "goal_read":
+            gid = args.get("goal_id")
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+                if not org_id:
+                    return {"tool": name, "error": "no org context"}
+                if gid:
+                    g = (await db.execute(select(Goal).where(Goal.id == gid, Goal.org_id == org_id))).scalar_one_or_none()
+                    if not g:
+                        return {"tool": name, "error": f"goal {gid} not found"}
+                    ms = (await db.execute(select(Milestone).where(Milestone.goal_id == gid).order_by(Milestone.position))).scalars().all()
+                    return {"tool": name, "data": {
+                        "id": g.id, "title": g.title, "status": g.status, "progress": g.progress,
+                        "success_criteria": g.success_criteria,
+                        "milestones": [{"id": m.id, "title": m.title, "status": m.status} for m in ms],
+                    }}
+                rows = (await db.execute(
+                    select(Goal).where(Goal.org_id == org_id, Goal.status.in_(["active", "blocked"]))
+                    .order_by(Goal.priority.desc()).limit(50)
+                )).scalars().all()
+                return {"tool": name, "data": {"goals": [
+                    {"id": g.id, "title": g.title, "status": g.status, "progress": g.progress} for g in rows
+                ]}}
 
     elif name == "board_read":
         project_id = args.get("project_id")

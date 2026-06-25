@@ -1,0 +1,9 @@
+{
+  "key": "goal_read",
+  "name": "Goal Read",
+  "description": "Read goals. With goal_id: that goal + its milestones. Without: active/blocked goals for the org. Use to check objective state before acting.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}
