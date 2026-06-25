@@ -4,7 +4,41 @@
   "description": "List issues for a GitHub repository with optional filtering by state and labels.",
   "category": "github",
   "group": "github_read",
-  "env_vars": ["GITHUB_TOKEN"],
+  "env_vars": [
+    "GITHUB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "owner",
+      "type": "string",
+      "required": true,
+      "description": "Repo owner."
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "required": true,
+      "description": "Repo name."
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "required": false,
+      "description": "open | closed | all (default open)."
+    },
+    {
+      "name": "labels",
+      "type": "array",
+      "required": false,
+      "description": "Filter by label names."
+    },
+    {
+      "name": "per_page",
+      "type": "integer",
+      "required": false,
+      "description": "Results per page (default 30, max 100)."
+    }
+  ]
 }

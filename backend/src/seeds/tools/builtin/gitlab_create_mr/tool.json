@@ -4,7 +4,47 @@
   "description": "Create a new merge request in a GitLab project.",
   "category": "gitlab",
   "group": "gitlab_write",
-  "env_vars": ["GITLAB_TOKEN"],
+  "env_vars": [
+    "GITLAB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": true,
+      "description": "Project ID or path."
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": "MR title."
+    },
+    {
+      "name": "source_branch",
+      "type": "string",
+      "required": true,
+      "description": "Source branch."
+    },
+    {
+      "name": "target_branch",
+      "type": "string",
+      "required": true,
+      "description": "Target branch."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "MR description (Markdown)."
+    },
+    {
+      "name": "draft",
+      "type": "boolean",
+      "required": false,
+      "description": "Create as draft MR (default false)."
+    }
+  ]
 }

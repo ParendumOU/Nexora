@@ -4,5 +4,25 @@
   "description": "Extract a ZIP archive to a target directory.",
   "category": "file",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "source",
+      "type": "string",
+      "required": true,
+      "description": "Path to the ZIP file."
+    },
+    {
+      "name": "destination",
+      "type": "string",
+      "required": true,
+      "description": "Dir to extract into."
+    },
+    {
+      "name": "overwrite",
+      "type": "boolean",
+      "required": false,
+      "description": "Overwrite existing files (default false)."
+    }
+  ]
 }

@@ -4,5 +4,31 @@
   "description": "Run a command in a Docker container or start a new container.",
   "category": "docker",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "container",
+      "type": "string",
+      "required": true,
+      "description": "Container name/ID to exec into (use image for a new container)."
+    },
+    {
+      "name": "command",
+      "type": "string",
+      "required": true,
+      "description": "Command to execute."
+    },
+    {
+      "name": "image",
+      "type": "string",
+      "required": false,
+      "description": "Image to run if starting a new container."
+    },
+    {
+      "name": "env",
+      "type": "object",
+      "required": false,
+      "description": "Environment variables."
+    }
+  ]
 }

@@ -465,6 +465,10 @@ export function ChatMessage({
     .replace(/^\*\*[\w_]+\*\*:[ \t]*$/gm, "")
     // Remove orphaned backtick-only lines left after fence stripping
     .replace(/^```\s*$/gm, "")
+    // Collapse any code fence whose body is empty/whitespace (any or no language) —
+    // e.g. residue left after a tool_calls fence is stripped — so it never renders as
+    // a hollow <code></code> bubble.
+    .replace(/```[^\n`]*\n?[ \t]*\n?\s*```/g, "")
     .trim();
   // Live: an as-yet-unclosed <think>/<thinking> (closing tag not streamed yet).
   // THINKING_RE only matches closed blocks, so while streaming we surface the

@@ -5,5 +5,55 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "subject",
+      "type": "string",
+      "required": true,
+      "description": "What the outcome is about."
+    },
+    {
+      "name": "kind",
+      "type": "string",
+      "required": false,
+      "description": "outcome | decision | observation (default outcome)."
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": false,
+      "description": "info | success | failure | partial (default info)."
+    },
+    {
+      "name": "detail",
+      "type": "string",
+      "required": false,
+      "description": "Free-text detail."
+    },
+    {
+      "name": "metric_name",
+      "type": "string",
+      "required": false,
+      "description": "Optional KPI name."
+    },
+    {
+      "name": "metric_value",
+      "type": "number",
+      "required": false,
+      "description": "Optional KPI value."
+    },
+    {
+      "name": "ref_type",
+      "type": "string",
+      "required": false,
+      "description": "Linked entity type (goal, task, ...)."
+    },
+    {
+      "name": "ref_id",
+      "type": "string",
+      "required": false,
+      "description": "Linked entity id."
+    }
+  ]
 }

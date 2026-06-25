@@ -4,7 +4,35 @@
   "description": "Read the content of a file from a GitHub repository at a specific ref.",
   "category": "github",
   "group": "github_read",
-  "env_vars": ["GITHUB_TOKEN"],
+  "env_vars": [
+    "GITHUB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "owner",
+      "type": "string",
+      "required": true,
+      "description": "Repo owner."
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "required": true,
+      "description": "Repo name."
+    },
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "File path within repo."
+    },
+    {
+      "name": "ref",
+      "type": "string",
+      "required": false,
+      "description": "Branch, tag, or commit SHA (default branch)."
+    }
+  ]
 }

@@ -4,5 +4,19 @@
   "description": "Execute a Node.js code snippet in a sandboxed environment and return stdout, stderr, and exit code.",
   "category": "code",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "code",
+      "type": "string",
+      "required": true,
+      "description": "JavaScript/Node.js code to execute."
+    },
+    {
+      "name": "timeout",
+      "type": "integer",
+      "required": false,
+      "description": "Timeout in seconds (default 30)."
+    }
+  ]
 }

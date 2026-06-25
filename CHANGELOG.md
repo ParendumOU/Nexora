@@ -10,6 +10,21 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.8.0
+
+- Knowledge base and agent memory search now use a real vector index (pgvector) for faster, more accurate semantic results, with an automatic fallback when the extension is not available.
+- Agents can delegate to a sub-agent and receive its answer reliably: peer messaging resolves the right organization in every context, replies no longer fail, and a completed task automatically answers the waiting agent.
+- New built-in KB Researcher agent: a read-only research specialist you can delegate knowledge base and web lookups to without giving the caller direct knowledge base access.
+- A safety guard stops weaker models from looping the same tool forever and forces them to deliver the answer.
+- Provider-native function calling is available for the built-in tools (opt-in), with argument schemas for almost all of them.
+- Optional system-prompt caching reuses the static part of the prompt across turns to cut token cost (opt-in, Anthropic).
+- WebSocket connections now carry the auth token off the URL (via subprotocol or header) so it no longer appears in server or proxy logs.
+- Sub-agent delegation can wait on an event instead of polling the database (opt-in), and independent read-only tools in a turn can run in parallel (opt-in).
+- Cancelling a turn now takes effect within about a second, even during a long tool call.
+- Local tool execution and presence now work correctly across multiple backend workers.
+- Chat cleanups: no more empty assistant bubbles or duplicate replies on weaker models, the activity card no longer blinks or jumps and now sits above the answer, failed tools stay marked failed after reload, a sub-chat no longer lists itself, and the live view now matches exactly what a refresh shows.
+- All feature, autonomy, and tool-governance flags are documented in .env.example.
+
 ## 1.7.0
 
 - Structured audit log for sensitive actions (member changes, invites, backup export/import/migrate) with a superuser and org-admin viewer.

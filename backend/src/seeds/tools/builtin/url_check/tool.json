@@ -4,5 +4,19 @@
   "description": "Check whether a URL is reachable and return its HTTP status code and response time.",
   "category": "web",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": "URL to check."
+    },
+    {
+      "name": "timeout",
+      "type": "integer",
+      "required": false,
+      "description": "Seconds (default 10)."
+    }
+  ]
 }

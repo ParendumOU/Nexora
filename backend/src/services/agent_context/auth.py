@@ -7,9 +7,50 @@ from src.core.database import AsyncSessionLocal
 from src.core.security import decode_token
 from src.models.user import User
 
+# Subprotocol scheme used to carry the auth token off the URL (GitLab #159).
+# Browsers can't set WS headers but can offer subprotocols, so clients send
+# `new WebSocket(url, [WS_AUTH_SUBPROTOCOL, token])`. The server reads the token
+# from the offered subprotocols and echoes back ONLY the scheme on accept.
+WS_AUTH_SUBPROTOCOL = "nexora-bearer"
+
+
+def extract_ws_token(websocket: WebSocket) -> str | None:
+    """Resolve the auth token from (in priority order): the auth subprotocol, an
+    Authorization: Bearer header, then the legacy ?token= query param.
+
+    The query param is retained for backward compatibility with un-migrated clients
+    but is discouraged — it leaks into server/proxy access logs (#159). The
+    subprotocol path keeps the token out of the URL entirely."""
+    # 1. Subprotocol: [scheme, token, ...] — starlette parses Sec-WebSocket-Protocol.
+    subprotocols = list(websocket.scope.get("subprotocols", []) or [])
+    if WS_AUTH_SUBPROTOCOL in subprotocols:
+        idx = subprotocols.index(WS_AUTH_SUBPROTOCOL)
+        if idx + 1 < len(subprotocols):
+            tok = subprotocols[idx + 1].strip()
+            if tok:
+                return tok
+    # 2. Authorization header (native WS clients — CLI/mobile can set this).
+    auth = websocket.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        tok = auth[7:].strip()
+        if tok:
+            return tok
+    # 3. Legacy query param.
+    tok = websocket.query_params.get("token")
+    return tok or None
+
+
+def ws_accept_subprotocol(websocket: WebSocket) -> str | None:
+    """If the client offered the auth subprotocol, the server MUST echo it on accept
+    (RFC 6455) — return it so the caller passes it to websocket.accept(). Returns the
+    scheme only, never the token."""
+    if WS_AUTH_SUBPROTOCOL in (websocket.scope.get("subprotocols", []) or []):
+        return WS_AUTH_SUBPROTOCOL
+    return None
+
 
 async def authenticate_ws(websocket: WebSocket) -> User | None:
-    token = websocket.query_params.get("token")
+    token = extract_ws_token(websocket)
     if not token:
         return None
 

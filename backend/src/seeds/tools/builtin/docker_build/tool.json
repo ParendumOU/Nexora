@@ -4,5 +4,37 @@
   "description": "Build a Docker image from a Dockerfile.",
   "category": "docker",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "context",
+      "type": "string",
+      "required": true,
+      "description": "Build context path."
+    },
+    {
+      "name": "dockerfile",
+      "type": "string",
+      "required": false,
+      "description": "Path to Dockerfile (default Dockerfile in context)."
+    },
+    {
+      "name": "tag",
+      "type": "string",
+      "required": false,
+      "description": "Image tag (e.g. myapp:latest)."
+    },
+    {
+      "name": "build_args",
+      "type": "object",
+      "required": false,
+      "description": "Build arguments."
+    },
+    {
+      "name": "target",
+      "type": "string",
+      "required": false,
+      "description": "Multi-stage build target."
+    }
+  ]
 }

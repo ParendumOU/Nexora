@@ -4,5 +4,31 @@
   "description": "Pull latest changes from a remote Git repository.",
   "category": "git",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "Path to git repo."
+    },
+    {
+      "name": "remote",
+      "type": "string",
+      "required": false,
+      "description": "Remote name (default origin)."
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "required": false,
+      "description": "Branch to pull (default current)."
+    },
+    {
+      "name": "rebase",
+      "type": "boolean",
+      "required": false,
+      "description": "Rebase instead of merge (default false)."
+    }
+  ]
 }

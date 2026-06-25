@@ -166,16 +166,29 @@ async def stream_claude(provider: Provider, messages: list[dict], **kw) -> Async
 
     try:
         client = anthropic.AsyncAnthropic(api_key=token)
-        system_prompt = kw.get("system_prompt")
-        system_param = (
-            [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
-            if system_prompt else None
-        )
+        if kw.get("prompt_cache"):
+            # #220: layered cache. Pull system out of a role=system message (the
+            # main chat / sub-agent paths pass it that way) or the kwarg, split it
+            # at the cache breakpoint, and cache the stable prefix. The system
+            # message is removed from the array (Anthropic wants system top-level).
+            from src.providers.prompt_cache import split_system_for_cache
+            _sys_parts = [m["content"] for m in messages
+                          if m.get("role") == "system" and isinstance(m.get("content"), str)]
+            _msgs_for_call = [m for m in messages if m.get("role") != "system"]
+            system_text = kw.get("system_prompt") or ("\n\n".join(_sys_parts) if _sys_parts else None)
+            system_param = split_system_for_cache(system_text) if system_text else None
+        else:
+            system_prompt = kw.get("system_prompt")
+            system_param = (
+                [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+                if system_prompt else None
+            )
+            _msgs_for_call = messages
         final_msg = None
         _claude_kw: dict = dict(
             model=model,
             max_tokens=kw.get("max_tokens", 8192),
-            messages=_to_anthropic_messages(messages),
+            messages=_to_anthropic_messages(_msgs_for_call),
             system=system_param,
         )
         _t = _temp(kw)
@@ -792,6 +805,21 @@ async def stream_response(
             _max_empty_retries = _settings.max_empty_retries
             content_yielded = False
             _usage_tokens = 0  # budget tally (#235) — accumulated from usage metadata
+            # #220: prompt-cache breakpoint handling. Only the Anthropic adapter keeps
+            # the sentinel (and splits the system block on it for cache_control);
+            # every other provider has it stripped so it can never leak into a prompt.
+            # No-op when the flag is off (the sentinel is never emitted).
+            # Only the Anthropic API-key path supports cache_control blocks; the
+            # OAuth/CLI claude path renders a plain prompt and can't cache, so it is
+            # treated like any other provider (sentinel stripped).
+            if (_settings.prompt_cache_enabled and effective.provider_type == "claude"
+                    and effective.auth_type != "oauth"):
+                _pmsgs = messages
+                _call_kwargs = {**kwargs, "prompt_cache": True}
+            else:
+                from src.providers.prompt_cache import strip_sentinel_messages as _strip_pc
+                _pmsgs = _strip_pc(messages)
+                _call_kwargs = kwargs
             # Retry-on-empty: flaky weak models (e.g. OpenCode Go fallback when Claude
             # OAuth is down) intermittently stream ZERO content — one such empty turn
             # used to kill the whole chat. Retry the SAME provider a few times. Safe
@@ -802,13 +830,13 @@ async def stream_response(
                 # re-call with the partial + a "continue where you left off" instruction so
                 # the user gets the full response (and the watchdog doesn't mark a truncated
                 # turn as <final/>). Capped to avoid runaway loops.
-                cont_messages = list(messages)
+                cont_messages = list(_pmsgs)
                 partial_acc = ""
                 continues = 0
                 while True:
                     finish_reason = None
                     turn_text = ""
-                    async for chunk in stream_fn(effective, cont_messages, **kwargs):
+                    async for chunk in stream_fn(effective, cont_messages, **_call_kwargs):
                         if chunk.startswith(_METADATA_PREFIX):
                             try:
                                 _m = json.loads(chunk[len(_METADATA_PREFIX):])
@@ -840,7 +868,7 @@ async def stream_response(
                             _cont_instr = _get_prompt("continue_truncated").strip()
                         except Exception:
                             _cont_instr = "Continue exactly where you left off without repeating anything."
-                        cont_messages = list(messages) + [
+                        cont_messages = list(_pmsgs) + [
                             {"role": "assistant", "content": partial_acc},
                             {"role": "user", "content": _cont_instr},
                         ]

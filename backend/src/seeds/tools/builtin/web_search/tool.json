@@ -4,5 +4,19 @@
   "description": "Search the web and return a list of relevant results with titles, URLs, and snippets.",
   "category": "web",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": "Search query."
+    },
+    {
+      "name": "num_results",
+      "type": "integer",
+      "required": false,
+      "description": "Results count (default 10, max 20)."
+    }
+  ]
 }

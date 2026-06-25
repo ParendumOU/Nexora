@@ -28,10 +28,30 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
     reply_to_id = args.get("reply_to_id")
     mode = args.get("mode", "sync")
 
+    if not body:
+        return {"error": "body is required"}
+
+    # Reply path FIRST: a reply only targets a message (reply_to_id), not an agent, so
+    # it must not require to_agent_id / recipient validation. (The original sender may
+    # be the conversation's default assistant, which has no addressable agent id.)
+    if reply_to_id:
+        async with AsyncSessionLocal() as db:
+            original = (await db.execute(select(AgentMessage).where(AgentMessage.id == reply_to_id))).scalar_one_or_none()
+            if not original:
+                return {"error": f"Original message '{reply_to_id}' not found"}
+            if original.status in ("pending", "delivered"):
+                original.status = "replied"
+                original.reply_body = body
+                original.replied_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.info(f"[send_message_to_agent] replied to message {reply_to_id}")
+                return {"data": {"status": "reply_sent", "original_message_id": reply_to_id}}
+            return {"error": f"Message '{reply_to_id}' already in state '{original.status}'"}
+
     if not to_agent_id:
         return {"error": "to_agent_id is required"}
-    if not subject or not body:
-        return {"error": "subject and body are required"}
+    if not subject:
+        return {"error": "subject is required"}
 
     async with AsyncSessionLocal() as db:
         from_agent = None
@@ -56,38 +76,41 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
         parent_chat_provider_chain_id = parent_chat.provider_chain_id
         user_id = parent_chat.user_id
 
+        # Resolve the conversation's org robustly so the cross-org guard doesn't trip on
+        # a sender agent that has no org-scoped row (builtin/seed agent → org_id None,
+        # which made the recipient look "different org"). Order: sender agent → parent
+        # chat's agent → project → the human owner's active org / first membership.
         if not org_id and parent_chat.agent_id:
-            r_orch = await db.execute(select(Agent).where(Agent.id == parent_chat.agent_id))
-            orch = r_orch.scalar_one_or_none()
-            if orch:
+            orch = (await db.execute(select(Agent).where(Agent.id == parent_chat.agent_id))).scalar_one_or_none()
+            if orch and orch.org_id:
                 org_id = orch.org_id
+        if not org_id and parent_chat_project_id:
+            from src.models.project import Project
+            po = (await db.execute(select(Project.org_id).where(Project.id == parent_chat_project_id))).scalar_one_or_none()
+            if po:
+                org_id = po
+        if not org_id and user_id:
+            from src.models.user import User
+            from src.models.org import OrgMember
+            u = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            if u and u.active_org_id:
+                org_id = u.active_org_id
+            else:
+                m = (await db.execute(select(OrgMember).where(OrgMember.user_id == user_id).limit(1))).scalar_one_or_none()
+                if m:
+                    org_id = m.org_id
 
         # Validate recipient
         r4 = await db.execute(select(Agent).where(Agent.id == to_agent_id))
         to_agent = r4.scalar_one_or_none()
         if not to_agent:
             return {"error": f"Agent '{to_agent_id}' not found"}
-        if to_agent.org_id != org_id:
+        if org_id and to_agent.org_id != org_id:
             return {"error": "Cannot message agent from a different org"}
         if not to_agent.is_active:
             return {"error": f"Agent '{to_agent.name}' is not active"}
         if to_agent_id == agent_id:
             return {"error": "Cannot send a message to yourself"}
-
-        # Handle reply: update original message and unblock the sender
-        if reply_to_id:
-            r5 = await db.execute(select(AgentMessage).where(AgentMessage.id == reply_to_id))
-            original = r5.scalar_one_or_none()
-            if not original:
-                return {"error": f"Original message '{reply_to_id}' not found"}
-            if original.status in ("pending", "delivered"):
-                original.status = "replied"
-                original.reply_body = body
-                original.replied_at = datetime.now(timezone.utc)
-                await db.commit()
-                logger.info(f"[send_message_to_agent] replied to message {reply_to_id}")
-                return {"data": {"status": "reply_sent", "original_message_id": reply_to_id}}
-            return {"error": f"Message '{reply_to_id}' already in state '{original.status}'"}
 
     # Deadlock detection via Redis escalation chain
     from src.core.redis import get_redis
@@ -109,9 +132,12 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
     task_id_for_msg: str | None = None
 
     async with AsyncSessionLocal() as db:
+        # from_agent_id must be a real Agent row or NULL — never "" (FK violation).
+        # A chat's default assistant has no agent row → None ("from the conversation").
+        from_agent_id_val = from_agent.id if from_agent else None
         msg = AgentMessage(
             id=msg_id,
-            from_agent_id=agent_id or "",
+            from_agent_id=from_agent_id_val,
             to_agent_id=to_agent_id,
             chat_id=parent_chat_id,
             subject=subject,
@@ -134,8 +160,9 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
                 f"**Message ID:** {msg_id}\n\n"
                 f"{body}\n\n"
                 "---\n"
-                f"Reply using `send_message_to_agent` with `reply_to_id: \"{msg_id}\"` "
-                f"and `to_agent_id: \"{agent_id or ''}\"`"
+                f"When done, reply with `send_message_to_agent` using `reply_to_id: \"{msg_id}\"` "
+                "and your answer in `body` (a reply targets the message — you do NOT need "
+                "`to_agent_id`)."
             ),
             assigned_agent_id=to_agent_id,
             status="pending",

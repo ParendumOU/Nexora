@@ -5,5 +5,49 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": "Goal title."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "What the goal is."
+    },
+    {
+      "name": "success_criteria",
+      "type": "string",
+      "required": false,
+      "description": "What 'achieved' means."
+    },
+    {
+      "name": "parent_goal_id",
+      "type": "string",
+      "required": false,
+      "description": "Parent goal id for a sub-goal."
+    },
+    {
+      "name": "owner_agent_id",
+      "type": "string",
+      "required": false,
+      "description": "Agent accountable for the goal."
+    },
+    {
+      "name": "priority",
+      "type": "integer",
+      "required": false,
+      "description": "Numeric priority (higher first)."
+    },
+    {
+      "name": "milestones",
+      "type": "array",
+      "required": false,
+      "description": "Optional initial milestones."
+    }
+  ]
 }

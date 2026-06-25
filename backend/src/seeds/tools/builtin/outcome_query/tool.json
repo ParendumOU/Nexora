@@ -5,5 +5,37 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "kind",
+      "type": "string",
+      "required": false,
+      "description": "Filter by kind."
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": false,
+      "description": "Filter by status."
+    },
+    {
+      "name": "subject",
+      "type": "string",
+      "required": false,
+      "description": "Substring match on subject."
+    },
+    {
+      "name": "ref_id",
+      "type": "string",
+      "required": false,
+      "description": "Filter by linked entity id."
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "required": false,
+      "description": "Max rows (default 50)."
+    }
+  ]
 }

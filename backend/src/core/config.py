@@ -130,6 +130,12 @@ class Settings(BaseSettings):
     # are XADD'd to a Redis Stream and executed by dedicated `runner` workers, with
     # a cross-worker concurrency governor and event-driven sub-agent resume.
     run_queue_enabled: bool = False
+    # Event-driven sub-agent delegation (GitLab #218). When true, a delegating
+    # parent waits on a Redis pub/sub child-done signal (waking promptly, ~no DB
+    # load) instead of polling Postgres once per second for up to 300s. Default off
+    # keeps the existing 1s busy-poll. The semaphore-bypass for children + the slot
+    # the parent holds while waiting are unchanged (slot release is the runner phase).
+    event_driven_delegation: bool = False
     run_queue_stream: str = "nexora:runs"
     run_queue_group: str = "runners"
     runner_concurrency: int = 4              # concurrent runs per runner worker
@@ -151,6 +157,22 @@ class Settings(BaseSettings):
     # pipeline (parser, executor, frontend) is unchanged. Tools without a declared
     # schema stay on the text-fence path.
     native_tools_enabled: bool = False
+
+    # Prompt caching (GitLab #220). When true, the platform-context builder inserts
+    # a cache breakpoint after the large static tool/intro block, and the Anthropic
+    # adapter marks that stable prefix with cache_control: ephemeral so it is reused
+    # across tool-resume turns instead of re-billed every iteration. Default off →
+    # byte-identical prompt + no cache_control split (current behavior). The
+    # breakpoint sentinel is stripped from every non-caching provider so it can
+    # never leak into a prompt.
+    prompt_cache_enabled: bool = False
+
+    # Parallel read-tier tool execution (GitLab #229). When true, side-effect-free
+    # read-tier tool calls in a single turn (file_read, board_read, knowledge_search,
+    # github/gitlab read, …) are computed concurrently up-front and consumed by the
+    # normal sequential loop, cutting latency on read-heavy turns. Events, ordering,
+    # and gating are unchanged. Default off → fully sequential as before.
+    parallel_tool_calls_enabled: bool = False
 
     # Tool permissions (GitLab #222)
     tools_default_deny: bool = False         # when true, an agent with NO configured tools is

@@ -4,5 +4,37 @@
   "description": "Show the diff of changes in a local Git repository (staged, unstaged, or between commits).",
   "category": "git",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "Path to git repo."
+    },
+    {
+      "name": "staged",
+      "type": "boolean",
+      "required": false,
+      "description": "Staged changes only (default false)."
+    },
+    {
+      "name": "from_ref",
+      "type": "string",
+      "required": false,
+      "description": "Base commit/branch for comparison."
+    },
+    {
+      "name": "to_ref",
+      "type": "string",
+      "required": false,
+      "description": "Target commit/branch for comparison."
+    },
+    {
+      "name": "file",
+      "type": "string",
+      "required": false,
+      "description": "Limit diff to a specific file."
+    }
+  ]
 }

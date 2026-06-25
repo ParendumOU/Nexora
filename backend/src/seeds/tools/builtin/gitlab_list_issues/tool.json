@@ -4,7 +4,35 @@
   "description": "List issues for a GitLab project with optional state and label filtering.",
   "category": "gitlab",
   "group": "gitlab_read",
-  "env_vars": ["GITLAB_TOKEN"],
+  "env_vars": [
+    "GITLAB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": true,
+      "description": "Project ID or path."
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "required": false,
+      "description": "opened | closed | all (default opened)."
+    },
+    {
+      "name": "labels",
+      "type": "array",
+      "required": false,
+      "description": "Filter by label names."
+    },
+    {
+      "name": "per_page",
+      "type": "integer",
+      "required": false,
+      "description": "Results per page (default 20, max 100)."
+    }
+  ]
 }

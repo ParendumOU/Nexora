@@ -5,5 +5,37 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "task_id",
+      "type": "string",
+      "required": true,
+      "description": "The task to update."
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": false,
+      "description": "pending | in_progress | completed | failed | cancelled."
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "required": false,
+      "description": "New title."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "New description."
+    },
+    {
+      "name": "priority",
+      "type": "string",
+      "required": false,
+      "description": "low | medium | high | critical."
+    }
+  ]
 }

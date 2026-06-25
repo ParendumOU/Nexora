@@ -5,5 +5,19 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "goal_id",
+      "type": "string",
+      "required": false,
+      "description": "The goal to delete."
+    },
+    {
+      "name": "only_if_no_milestones",
+      "type": "boolean",
+      "required": false,
+      "description": "Only delete when the goal has no milestones."
+    }
+  ]
 }

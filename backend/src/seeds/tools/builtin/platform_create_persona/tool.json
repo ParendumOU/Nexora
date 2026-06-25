@@ -6,5 +6,61 @@
   "group": "platform_create",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "key",
+      "type": "string",
+      "required": true,
+      "description": "Unique persona identifier (snake_case)."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Human-readable persona name."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "Role description."
+    },
+    {
+      "name": "soul",
+      "type": "object",
+      "required": false,
+      "description": "Default personality fields."
+    },
+    {
+      "name": "skills",
+      "type": "array",
+      "required": false,
+      "description": "Default skill keys."
+    },
+    {
+      "name": "tools",
+      "type": "array",
+      "required": false,
+      "description": "Default tool keys."
+    },
+    {
+      "name": "system_prompt",
+      "type": "string",
+      "required": false,
+      "description": "Base system prompt for the role."
+    },
+    {
+      "name": "temperature",
+      "type": "number",
+      "required": false,
+      "description": "Default LLM temperature 0.0-1.0."
+    },
+    {
+      "name": "agent_type",
+      "type": "string",
+      "required": false,
+      "description": "Default agent type identifier."
+    }
+  ]
 }

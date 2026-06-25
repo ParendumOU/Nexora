@@ -10,19 +10,29 @@ from src.core.pubsub import broadcast
 
 
 async def _resolve_org(agent_id, chat_id) -> str | None:
+    """agent → chat-agent → chat project → chat user's active org. The user fallback
+    matters when the chat runs on a builtin/seed agent with no org-scoped DB row."""
+    from src.models.project import Project
+    from src.models.user import User
     async with AsyncSessionLocal() as db:
         if agent_id:
-            r = await db.execute(select(Agent).where(Agent.id == agent_id))
-            ag = r.scalar_one_or_none()
-            if ag:
+            ag = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+            if ag and ag.org_id:
                 return ag.org_id
-        r2 = await db.execute(select(Chat).where(Chat.id == chat_id))
-        chat_rec = r2.scalar_one_or_none()
-        if chat_rec and chat_rec.agent_id:
-            r3 = await db.execute(select(Agent).where(Agent.id == chat_rec.agent_id))
-            ag2 = r3.scalar_one_or_none()
-            if ag2:
-                return ag2.org_id
+        chat_rec = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
+        if chat_rec:
+            if chat_rec.agent_id:
+                ag2 = (await db.execute(select(Agent).where(Agent.id == chat_rec.agent_id))).scalar_one_or_none()
+                if ag2 and ag2.org_id:
+                    return ag2.org_id
+            if chat_rec.project_id:
+                po = (await db.execute(select(Project.org_id).where(Project.id == chat_rec.project_id))).scalar_one_or_none()
+                if po:
+                    return po
+            if chat_rec.user_id:
+                uo = (await db.execute(select(User.active_org_id).where(User.id == chat_rec.user_id))).scalar_one_or_none()
+                if uo:
+                    return uo
     return None
 
 

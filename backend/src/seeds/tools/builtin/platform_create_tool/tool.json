@@ -6,5 +6,55 @@
   "group": "platform_create",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "key",
+      "type": "string",
+      "required": true,
+      "description": "Unique tool identifier (snake_case)."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Human-readable tool name."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "What the tool does and when to use it."
+    },
+    {
+      "name": "category",
+      "type": "string",
+      "required": false,
+      "description": "Grouping category (e.g. platform, git, web)."
+    },
+    {
+      "name": "tool_md",
+      "type": "string",
+      "required": false,
+      "description": "TOOL.md usage docs injected when enabled."
+    },
+    {
+      "name": "executor",
+      "type": "string",
+      "required": false,
+      "description": "Python executor code (executor.py)."
+    },
+    {
+      "name": "env_vars",
+      "type": "array",
+      "required": false,
+      "description": "Required env var names."
+    },
+    {
+      "name": "always_allowed",
+      "type": "boolean",
+      "required": false,
+      "description": "Skip the approval gate (default false)."
+    }
+  ]
 }

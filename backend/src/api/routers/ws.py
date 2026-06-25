@@ -21,6 +21,7 @@ from src.models.agent import Agent
 from src.providers.router import AllProvidersExhausted
 from src.services.agent_context import (
     authenticate_ws,
+    ws_accept_subprotocol,
     get_live_chat,
     get_platform_context,
     get_agent_system_prompt,
@@ -230,7 +231,8 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
         await websocket.close(code=4029)
         return
 
-    await websocket.accept()
+    # Echo the auth subprotocol if the client offered it (#159) — required by RFC 6455.
+    await websocket.accept(subprotocol=ws_accept_subprotocol(websocket))
 
     user = await authenticate_ws(websocket)
     if not user:
@@ -421,8 +423,10 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 return
             dt = d.get("type")
             if dt == "tool_exec_result":
-                # CLI returned a local tool result → resolve the awaiting future.
-                _local_exec.resolve(chat_id, d.get("request_id", ""), d.get("result") or {})
+                # CLI returned a local tool result → resolve the awaiting future
+                # (cross-worker safe: routes via pub/sub when the Future is on
+                # another worker, #224).
+                await _local_exec.resolve(chat_id, d.get("request_id", ""), d.get("result") or {})
             elif dt == "pong":
                 continue
             else:
@@ -472,7 +476,7 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 # socket sends). Stays registered for the connection so detached resume tasks
                 # can also proxy; torn down in finally.
                 if data.get("local_exec") and _local_exec.get_bridge(chat_id) is None:
-                    local_bridge["b"] = _local_exec.register(
+                    local_bridge["b"] = await _local_exec.register(
                         chat_id, lambda ev: pubsub.broadcast(chat_id, ev)
                     )
 
@@ -789,18 +793,110 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                             })
                         except Exception:
                             pass
-                    async with AsyncSessionLocal() as db:
-                        await db.execute(
-                            update(Message)
-                            .where(Message.id == msg_id)
-                            .values(content=clean_response, metadata_=new_meta or None)
-                        )
-                        await db.commit()
+                    new_meta = _tr.save_meta
                 else:
                     # Agent disabled: plain LLM reply already streamed + persisted (full_response).
                     # No tool execution, proposals, or orchestration.
                     clean_response = full_response
                     tool_results = []
+                    calls_made = []
+                    new_meta = msg_metadata
+
+                # Degenerate terminal turn: the model emitted only the <final/> marker (or
+                # pure scaffolding) with no user-visible prose and made no tool calls — a
+                # weak model (e.g. gpt-4o-mini) complying with the injected "end your turn
+                # with <final/>" protocol but skipping the actual answer. The frontend
+                # strips the marker, leaving a blank bubble that flashes and vanishes. This
+                # happens with OR without an agent (the platform context carries the
+                # protocol either way), so guard both paths. Re-generate ONCE with an
+                # explicit directive to answer in prose.
+                from src.services.turn_completion import visible_text as _visible_text
+                if (
+                    not _outcome.cancelled
+                    and not await _is_cancelled(chat_id)
+                    and not calls_made
+                    and not tool_results
+                    and not _visible_text(clean_response)
+                ):
+                    logger.warning(
+                        f"[ws] {chat_id}: terminal turn had no visible content "
+                        f"(marker-only) — regenerating with a direct-answer nudge"
+                    )
+                    _retry_msgs = list(messages) + [
+                        {"role": "assistant", "content": full_response or "<final/>"},
+                        {"role": "user", "content": (
+                            "Your last turn produced no visible answer (only the "
+                            "<final/> marker). Answer the user's message directly in "
+                            "plain prose now. Write the full response, THEN put "
+                            "<final/> on its own final line. Do not emit <final/> alone."
+                        )},
+                    ]
+                    await _buf_clear(chat_id)
+                    try:
+                        _retry = await consume_provider_stream(
+                            providers, _retry_msgs,
+                            on_chunk=_on_chunk,
+                            on_status=_on_status,
+                            cancel_check=lambda: _is_cancelled(chat_id),
+                            status_events=True,
+                            chat_id=chat_id,
+                            agent_id=agent_id,
+                            agent_name=agent_name,
+                            model_override=model_override,
+                            org_id=user.active_org_id,
+                            user_id=user.id,
+                            mode=mode,
+                            **_gen_params,
+                        )
+                        if enable_agent:
+                            _retry_tr = await run_tools_and_finalize(
+                                _retry.text, chat_id, agent_id, agent_name, _retry.metadata,
+                                websocket=(websocket if _alive["v"] else None),
+                                task_id=_step_task_id,
+                                parent_chat_id=_step_parent_chat_id,
+                                message_id=msg_id,
+                                run_proposals=True, org_id=org_id,
+                                append_final_if_stuck=True,
+                                record_parse_err_in_meta=False,
+                            )
+                            _retry_clean = _retry_tr.clean_response
+                            _retry_meta = _retry_tr.save_meta
+                            _retry_results = _retry_tr.tool_results
+                            _retry_calls = _retry_tr.calls_made
+                            _retry_fence = _retry_tr.had_fence
+                        else:
+                            _retry_clean = _retry.text
+                            _retry_meta = _retry.metadata
+                            _retry_results, _retry_calls, _retry_fence = [], [], False
+                        # Keep the retry only if it actually produced visible prose;
+                        # otherwise fall through with the original (better an empty
+                        # bubble than a second wasted call looping).
+                        if _visible_text(_retry_clean):
+                            clean_response = _retry_clean
+                            tool_results = _retry_results
+                            calls_made = _retry_calls
+                            had_fence = _retry_fence
+                            new_meta = _retry_meta
+                            msg_metadata = _retry.metadata or msg_metadata
+                            provider_used = (_retry.metadata or {}).get("account_name") or provider_used
+                    except AllProvidersExhausted:
+                        pass
+
+                # Never persist a blank prose bubble: if nothing user-visible survives
+                # scaffolding-stripping (bare <final/>, empty code fence, tool-call
+                # residue), blank the content so the frontend renders no empty bubble.
+                # Tool/agent activity cards still render from `new_meta` (tool_calls_detail),
+                # so a tool-only turn keeps its timeline without a hollow text bubble.
+                if not _visible_text(clean_response):
+                    clean_response = ""
+
+                async with AsyncSessionLocal() as db:
+                    await db.execute(
+                        update(Message)
+                        .where(Message.id == msg_id)
+                        .values(content=clean_response, provider_used=provider_used, metadata_=new_meta or None)
+                    )
+                    await db.commit()
 
                 if live_chat and live_chat.project_id and org_id and clean_response.strip():
                     from src.services.telegram.sync import post_to_project_topic as _tg_post
@@ -811,7 +907,12 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 _end_frame = {
                     "type": "stream_end",
                     "message_id": msg_id,
-                    "metadata": msg_metadata,
+                    # Send the PERSISTED metadata (new_meta carries tool_calls_detail), not
+                    # the pre-tool streaming metadata — so a tool-only turn whose prose was
+                    # blanked still tells the client it had tool calls, letting it keep the
+                    # (empty) anchor message so the action card renders in place instead of
+                    # orphaning to the bottom.
+                    "metadata": new_meta or msg_metadata,
                     "content": clean_response,
                     "created_at": _ts,
                 }
@@ -924,7 +1025,8 @@ async def user_socket(websocket: WebSocket) -> None:
         await websocket.close(code=4029)
         return
 
-    await websocket.accept()
+    # Echo the auth subprotocol if offered (#159).
+    await websocket.accept(subprotocol=ws_accept_subprotocol(websocket))
     user = await authenticate_ws(websocket)
     if not user:
         await websocket.close(code=4401)

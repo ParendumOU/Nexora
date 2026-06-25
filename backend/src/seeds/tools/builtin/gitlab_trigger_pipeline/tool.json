@@ -4,7 +4,29 @@
   "description": "Trigger a CI/CD pipeline in a GitLab project.",
   "category": "gitlab",
   "group": "gitlab_write",
-  "env_vars": ["GITLAB_TOKEN"],
+  "env_vars": [
+    "GITLAB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": true,
+      "description": "Project ID or path."
+    },
+    {
+      "name": "ref",
+      "type": "string",
+      "required": true,
+      "description": "Branch or tag to run the pipeline on."
+    },
+    {
+      "name": "variables",
+      "type": "object",
+      "required": false,
+      "description": "Key-value pipeline variables."
+    }
+  ]
 }

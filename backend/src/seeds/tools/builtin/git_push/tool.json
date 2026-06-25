@@ -4,5 +4,31 @@
   "description": "Push commits from a local Git repository to a remote.",
   "category": "git",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "Path to git repo."
+    },
+    {
+      "name": "remote",
+      "type": "string",
+      "required": false,
+      "description": "Remote name (default origin)."
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "required": false,
+      "description": "Branch to push (default current)."
+    },
+    {
+      "name": "force",
+      "type": "boolean",
+      "required": false,
+      "description": "Force push (dangerous, default false)."
+    }
+  ]
 }

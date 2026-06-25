@@ -4,5 +4,25 @@
   "description": "Fetch and extract text content from a public web page. Returns clean readable text stripped of HTML.",
   "category": "web",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": "URL to scrape."
+    },
+    {
+      "name": "selector",
+      "type": "string",
+      "required": false,
+      "description": "CSS selector to extract a specific element."
+    },
+    {
+      "name": "timeout",
+      "type": "integer",
+      "required": false,
+      "description": "Seconds (default 15)."
+    }
+  ]
 }

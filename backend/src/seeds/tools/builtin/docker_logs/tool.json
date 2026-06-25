@@ -4,5 +4,31 @@
   "description": "Fetch recent logs from a Docker container.",
   "category": "docker",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "container",
+      "type": "string",
+      "required": true,
+      "description": "Container name/ID."
+    },
+    {
+      "name": "tail",
+      "type": "integer",
+      "required": false,
+      "description": "Lines from end (default 100)."
+    },
+    {
+      "name": "since",
+      "type": "string",
+      "required": false,
+      "description": "Logs since timestamp/duration (e.g. 10m)."
+    },
+    {
+      "name": "timestamps",
+      "type": "boolean",
+      "required": false,
+      "description": "Include timestamps (default false)."
+    }
+  ]
 }

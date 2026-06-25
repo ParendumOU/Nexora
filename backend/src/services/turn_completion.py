@@ -61,6 +61,35 @@ def has_final_marker(content: str) -> bool:
     return bool(content) and bool(_FINAL_RE.search(content))
 
 
+# Scaffolding that is stripped from a turn before deciding whether it carries any
+# user-visible prose: the <final/> marker, thinking/scratchpad blocks, tool-call
+# fences (text + XML), and <proposal> blocks. Mirrors the frontend strip in
+# components/chat/message.tsx so "visible to the user" means the same on both ends.
+_SCAFFOLD_RES = [
+    _FINAL_RE,
+    re.compile(r"<\s*(?:think|thinking|analysis_thought|internal_thought|scratchpad)\s*>[\s\S]*?<\s*/\s*(?:think|thinking|analysis_thought|internal_thought|scratchpad)\s*>", re.IGNORECASE),
+    re.compile(r"<\s*proposal\s*>[\s\S]*?<\s*/\s*proposal\s*>", re.IGNORECASE),
+    re.compile(r"```[ \t]*(?:tool_calls|tools)[ \t]*\n[\s\S]*?```", re.IGNORECASE),
+    re.compile(r"<tool_calls>[\s\S]*?</tool_calls>", re.IGNORECASE),
+    # Empty / whitespace-only code fences left behind after a tool-call fence is
+    # stripped — these render as a blank <code></code> bubble. Not visible content.
+    re.compile(r"```[^\n`]*\n?\s*```", re.IGNORECASE),
+]
+
+
+def visible_text(content: str) -> str:
+    """Return the user-visible prose of a turn — content with the <final/> marker,
+    thinking blocks, tool-call fences and proposals stripped. Empty result means the
+    turn delivered nothing the user can read (e.g. a weak model that answered with a
+    bare `<final/>` and no prose). Pure."""
+    if not content:
+        return ""
+    s = content
+    for rx in _SCAFFOLD_RES:
+        s = rx.sub("", s)
+    return s.strip()
+
+
 def is_turn_complete(*, had_tool_calls: bool) -> bool:
     """Terminal decision: a turn is complete iff it issued no tool calls.
 

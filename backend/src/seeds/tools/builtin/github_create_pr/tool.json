@@ -4,7 +4,53 @@
   "description": "Create a new pull request in a GitHub repository.",
   "category": "github",
   "group": "github_write",
-  "env_vars": ["GITHUB_TOKEN"],
+  "env_vars": [
+    "GITHUB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "owner",
+      "type": "string",
+      "required": true,
+      "description": "Repo owner."
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "required": true,
+      "description": "Repo name."
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": "PR title."
+    },
+    {
+      "name": "head",
+      "type": "string",
+      "required": true,
+      "description": "Head branch (source)."
+    },
+    {
+      "name": "base",
+      "type": "string",
+      "required": true,
+      "description": "Base branch (target)."
+    },
+    {
+      "name": "body",
+      "type": "string",
+      "required": false,
+      "description": "PR description (Markdown)."
+    },
+    {
+      "name": "draft",
+      "type": "boolean",
+      "required": false,
+      "description": "Create as draft PR (default false)."
+    }
+  ]
 }

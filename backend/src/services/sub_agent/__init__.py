@@ -252,8 +252,12 @@ async def _run_delegated_tasks(
                         Message.excluded.isnot(True),
                     ).order_by(Message.created_at.desc()).limit(1)
                 )).scalar_one_or_none()
-            from src.services.turn_completion import looks_like_promise
-            _is_promise = looks_like_promise(_last_asst or "")
+            from src.services.turn_completion import looks_like_promise, has_final_marker
+            # A turn that explicitly closed with <final/> is terminal — never treat it as
+            # a pending promise, even if its prose trips the promise heuristic (e.g. a
+            # final answer ending "...just let me know" matches `let me`). Without this
+            # gate such a turn is wrongly nudged and the orchestrator answers twice.
+            _is_promise = looks_like_promise(_last_asst or "") and not has_final_marker(_last_asst or "")
 
             # Nudge when:
             #  - a hallucinated PROMISE ("le paso el encargo…", "I'll delegate…") with no

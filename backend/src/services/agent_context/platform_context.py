@@ -349,6 +349,13 @@ async def get_platform_context(
         lean.extend(get_prompt("platform_tools_footer").splitlines())
         lean.append("")
 
+        # #220: cache breakpoint — everything above (tool docs) is stable across
+        # this sub-agent's resume turns; below is volatile. Gated by the flag.
+        from src.core.config import get_settings as _gs_cache
+        if _gs_cache().prompt_cache_enabled:
+            from src.providers.prompt_cache import CACHE_SENTINEL
+            lean.append(CACHE_SENTINEL)
+
         # Thread memories — inject for sub-agents so they can read/write shared findings
         if thread_memories:
             lean.append("## Thread Memory (shared across all agents in this conversation)")
@@ -406,6 +413,15 @@ async def get_platform_context(
     lines.append("")
     lines.extend(get_prompt("platform_tools_footer").splitlines())
     lines.append("")
+
+    # #220: cache breakpoint. The intro + tool docs above are the large static
+    # block (identical across tool-resume turns of the same chat+agent); the
+    # project/memory/task/plan sections below change per turn. A cache-capable
+    # provider caches the prefix; others strip the sentinel. Flag-gated.
+    from src.core.config import get_settings as _gs_cache
+    if _gs_cache().prompt_cache_enabled:
+        from src.providers.prompt_cache import CACHE_SENTINEL
+        lines.append(CACHE_SENTINEL)
 
     for _proj in current_projects:
         _cred = project_credentials.get(_proj.id)

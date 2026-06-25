@@ -4,5 +4,31 @@
   "description": "Extract text, attributes, or HTML from elements on a rendered web page.",
   "category": "browser",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "session_id",
+      "type": "string",
+      "required": true,
+      "description": "Active browser session id."
+    },
+    {
+      "name": "selector",
+      "type": "string",
+      "required": true,
+      "description": "CSS selector to extract from."
+    },
+    {
+      "name": "attribute",
+      "type": "string",
+      "required": false,
+      "description": "HTML attribute to extract (omit for text)."
+    },
+    {
+      "name": "all",
+      "type": "boolean",
+      "required": false,
+      "description": "Extract all matches (default false)."
+    }
+  ]
 }

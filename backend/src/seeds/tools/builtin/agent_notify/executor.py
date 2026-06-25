@@ -128,12 +128,13 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
     ).strip()
 
     async with AsyncSessionLocal() as db:
-        r = await db.execute(select(Agent).where(Agent.id == agent_id))
-        from_agent = r.scalar_one_or_none()
-        if not from_agent:
-            return {"error": f"Sender agent {agent_id} not found"}
-        org_id = from_agent.org_id
-        from_name = from_agent.name or agent_name or agent_id
+        r = await db.execute(select(Agent).where(Agent.id == agent_id)) if agent_id else None
+        from_agent = r.scalar_one_or_none() if r is not None else None
+        from src.services.org_resolve import resolve_chat_org
+        org_id = await resolve_chat_org(db, chat_id, agent_id)
+        if not org_id:
+            return {"error": "Could not resolve org for this chat"}
+        from_name = (from_agent.name if from_agent else None) or agent_name or "Agent"
 
         # Resolve parent chat
         r2 = await db.execute(select(Chat).where(Chat.id == chat_id))
@@ -181,7 +182,7 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
             if recipient.id == agent_id:
                 continue
             result = await _dispatch_message(
-                from_agent_id=agent_id, from_name=from_name,
+                from_agent_id=(from_agent.id if from_agent else None), from_name=from_name,
                 to_agent=recipient, subject=subject, body=body,
                 parent_chat_id=parent_chat_id, org_id=org_id,
                 user_id=user_id, project_id=project_id,

@@ -5,5 +5,67 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "title",
+      "type": "string",
+      "required": false,
+      "description": "Task title (defaults to 'Untitled')."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "What the task should accomplish."
+    },
+    {
+      "name": "assigned_agent_id",
+      "type": "string",
+      "required": false,
+      "description": "Agent id to delegate to (omit to keep in this chat)."
+    },
+    {
+      "name": "agent_persona",
+      "type": "string",
+      "required": false,
+      "description": "Persona key to spawn a sub-agent with, instead of an explicit agent id."
+    },
+    {
+      "name": "priority",
+      "type": "string",
+      "required": false,
+      "description": "low | medium | high | critical (default medium)."
+    },
+    {
+      "name": "blocked_by",
+      "type": "array",
+      "required": false,
+      "description": "Task ids that must finish first."
+    },
+    {
+      "name": "checklist",
+      "type": "array",
+      "required": false,
+      "description": "Optional checklist items."
+    },
+    {
+      "name": "parent_id",
+      "type": "string",
+      "required": false,
+      "description": "Parent task id for a subtask."
+    },
+    {
+      "name": "position",
+      "type": "integer",
+      "required": false,
+      "description": "Ordering position on the board."
+    },
+    {
+      "name": "model_profile_id",
+      "type": "string",
+      "required": false,
+      "description": "Model profile to run the assigned agent with."
+    }
+  ]
 }

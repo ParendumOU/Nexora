@@ -4,5 +4,31 @@
   "description": "Fill an input field or form element in a headless browser session.",
   "category": "browser",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "session_id",
+      "type": "string",
+      "required": true,
+      "description": "Active browser session id."
+    },
+    {
+      "name": "selector",
+      "type": "string",
+      "required": true,
+      "description": "CSS selector of input element."
+    },
+    {
+      "name": "value",
+      "type": "string",
+      "required": true,
+      "description": "Text to fill."
+    },
+    {
+      "name": "timeout",
+      "type": "integer",
+      "required": false,
+      "description": "Milliseconds (default 5000)."
+    }
+  ]
 }

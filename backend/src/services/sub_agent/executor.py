@@ -368,11 +368,15 @@ async def _execute_sub_agent_task(
 
     _MAX_ITERATIONS = 10
     _MAX_NO_TOOL_NUDGES = 2
+    _MAX_SAME_TOOL_REPEATS = 3  # same read tool N times in a row → force a wrap-up
     final_response = ""
     _total_in_tok = 0
     _total_out_tok = 0
     _nudge_count = 0
     _verify_attempts = 0  # acceptance-criteria bounces (#233)
+    _tool_repeat: dict[str, int] = {}  # tool name → consecutive-call count (#loop guard)
+    _forced_wrapup = False
+    _pending_wrapup: str | None = None  # STOP directive to inject at next iteration top
 
     from src.services.interrupt_store import is_interrupted, clear_interrupt, get_reassign_target
 
@@ -399,6 +403,19 @@ async def _execute_sub_agent_task(
                 await clear_interrupt(task_id)
                 await _handle_interrupt(task_id, parent_chat_id, agent_name, task_title, _iter, reassign_to)
                 return
+            # Loop-guard wrap-up (deferred from the prior iteration so that iteration's
+            # tool calls + results persisted first). Inject the STOP directive now so the
+            # agent finalizes this turn.
+            if _pending_wrapup:
+                async with AsyncSessionLocal() as _wdb:
+                    _wdb.add(Message(
+                        id=str(uuid.uuid4()), chat_id=sub_chat_id,
+                        role="user", content=_pending_wrapup, excluded=True,
+                        metadata_={"kind": "loop_guard"},
+                    ))
+                    await _wdb.commit()
+                messages.append({"role": "user", "content": _pending_wrapup})
+                _pending_wrapup = None
             full_response = ""
             msg_metadata = None
             from src.core.stream_buffer import append_chunk as _sa_buf_append, clear as _sa_buf_clear
@@ -501,13 +518,52 @@ async def _execute_sub_agent_task(
             )
             final_response = clean_response
 
+            # Anti-loop guard: a weak model (e.g. gpt-4o-mini) repeatedly calls the SAME
+            # read tool (knowledge_search/memory) without ever finalizing. Track
+            # consecutive same-tool calls; once over the cap, inject a one-time hard
+            # directive to STOP searching and deliver the answer with <final/>. Counts
+            # only same-name calls in a row; a different tool resets the streak.
+            if calls_made and not _forced_wrapup:
+                _names = [c.get("name", "") for c in calls_made if c.get("name")]
+                _distinct = set(_names)
+                if len(_distinct) == 1:
+                    _only = next(iter(_distinct))
+                    _tool_repeat[_only] = _tool_repeat.get(_only, 0) + 1
+                    for _k in list(_tool_repeat):
+                        if _k != _only:
+                            _tool_repeat[_k] = 0
+                    if _tool_repeat[_only] >= _MAX_SAME_TOOL_REPEATS:
+                        # Flag the wrap-up but do NOT continue here — falling through lets
+                        # this iteration's message (its tool_calls_detail) persist and its
+                        # tool results inject normally. The STOP directive is appended at
+                        # the top of the next iteration (see _pending_wrapup), so the agent
+                        # sees: tool turn -> results -> STOP, then finalizes.
+                        _forced_wrapup = True
+                        _pending_wrapup = (
+                            f"STOP. You have called `{_only}` {_tool_repeat[_only]} times. Do NOT call it "
+                            "again. Using ONLY the results you already have, write your final answer to the "
+                            "requester now in plain prose (state what you found, or say plainly you found "
+                            "nothing), then end your turn with <final/>. Do not call any more tools."
+                        )
+                        logger.warning(
+                            f"[sub_agent] {agent_name} iter {_iter+1}: loop guard fired — "
+                            f"{_only} x{_tool_repeat[_only]}; forcing wrap-up next turn"
+                        )
+                else:
+                    _tool_repeat = {}
+
             msg_id = str(uuid.uuid4())
-            if clean_response.strip():
-                save_meta = dict(msg_metadata or {})
-                if calls_made:
-                    from src.services.agent_tools import billable_call_count
-                    save_meta["tool_call_count"] = billable_call_count(calls_made)
-                    save_meta["tool_calls_detail"] = calls_made
+            save_meta = dict(msg_metadata or {})
+            if calls_made:
+                from src.services.agent_tools import billable_call_count
+                save_meta["tool_call_count"] = billable_call_count(calls_made)
+                save_meta["tool_calls_detail"] = calls_made
+            # Persist the turn if it had visible prose OR tool calls — a tool-only
+            # iteration (e.g. a pure knowledge_search round) carries no prose but its
+            # tool_calls_detail is what reconstructs the action card when the sub-chat
+            # is opened directly. Previously these turns weren't saved, so the sub-chat
+            # showed none of the searches the live panel had streamed.
+            if clean_response.strip() or calls_made:
                 _provider_used = (msg_metadata or {}).get("account_name") or (providers[0][0].name if providers else None)
                 async with AsyncSessionLocal() as db:
                     db.add(Message(
@@ -524,7 +580,7 @@ async def _execute_sub_agent_task(
                 "type": "stream_end",
                 "content": clean_response,
                 "message_id": msg_id,
-                "metadata": msg_metadata,
+                "metadata": save_meta or msg_metadata,
             })
             await _broadcast(parent_chat_id, {"type": "stream_end", "content": "", "message_id": msg_id})
 
@@ -557,13 +613,23 @@ async def _execute_sub_agent_task(
                             if ct:
                                 ct.status = "queued"
                         await db.commit()
-                    # Spawn children directly — bypassing the global semaphore to avoid
-                    # deadlock: the parent holds a semaphore slot while waiting here, so
-                    # children must not compete for the same pool.
-                    for child_tid in child_task_ids:
-                        asyncio.create_task(
-                            _execute_sub_agent_task(
-                                task_id=child_tid,
+                    from src.core.config import get_settings as _gs_deleg
+                    _event_driven = _gs_deleg().event_driven_delegation
+                    _done_channel = f"subagent_done:{sub_chat_id}"
+
+                    # Event-driven wait (#218): subscribe BEFORE spawning so no child
+                    # completion can be missed between spawn and wait.
+                    _done_q = None
+                    if _event_driven:
+                        from src.core import pubsub as _ps
+                        _done_q = await _ps.subscribe(_done_channel)
+
+                    async def _run_child(_ctid: str) -> None:
+                        """Run a child task, then (event mode) publish a done signal so
+                        the waiting parent wakes immediately instead of polling."""
+                        try:
+                            await _execute_sub_agent_task(
+                                task_id=_ctid,
                                 parent_chat_id=sub_chat_id,
                                 org_id=org_id,
                                 parent_chat_project_id=parent_chat_project_id,
@@ -571,25 +637,52 @@ async def _execute_sub_agent_task(
                                 user_id=user_id,
                                 depth=depth + 1,
                             )
-                        )
-                    _CHILD_WAIT_MAX = 300
-                    for _ in range(_CHILD_WAIT_MAX):
-                        await asyncio.sleep(1)
-                        if await is_interrupted(task_id):
-                            reassign_to = await get_reassign_target(task_id)
-                            await clear_interrupt(task_id)
-                            await _handle_interrupt(task_id, parent_chat_id, agent_name, task_title, _iter, reassign_to)
-                            return
-                        async with AsyncSessionLocal() as db:
-                            cr = await db.execute(
-                                select(Task).where(
-                                    Task.id.in_(child_task_ids),
-                                    Task.status.in_(["pending", "queued", "in_progress"]),
+                        finally:
+                            if _event_driven:
+                                try:
+                                    from src.core import pubsub as _ps2
+                                    await _ps2.broadcast(_done_channel, {"task_id": _ctid})
+                                except Exception:
+                                    pass
+
+                    # Spawn children directly — bypassing the global semaphore to avoid
+                    # deadlock: the parent holds a slot while waiting here, so children
+                    # must not compete for the same pool. (Slot release = runner phase.)
+                    for child_tid in child_task_ids:
+                        asyncio.create_task(_run_child(child_tid))
+
+                    _CHILD_WAIT_MAX = 300  # seconds
+                    try:
+                        import time as _time
+                        _deadline = _time.monotonic() + _CHILD_WAIT_MAX
+                        while _time.monotonic() < _deadline:
+                            if _event_driven:
+                                # Wake on a child-done signal; 5s safety re-poll covers
+                                # any missed event. Far less DB load than the 1s poll.
+                                try:
+                                    await asyncio.wait_for(_done_q.get(), timeout=5)
+                                except asyncio.TimeoutError:
+                                    pass
+                            else:
+                                await asyncio.sleep(1)
+                            if await is_interrupted(task_id):
+                                reassign_to = await get_reassign_target(task_id)
+                                await clear_interrupt(task_id)
+                                await _handle_interrupt(task_id, parent_chat_id, agent_name, task_title, _iter, reassign_to)
+                                return
+                            async with AsyncSessionLocal() as db:
+                                cr = await db.execute(
+                                    select(Task).where(
+                                        Task.id.in_(child_task_ids),
+                                        Task.status.in_(["pending", "queued", "in_progress"]),
+                                    )
                                 )
-                            )
-                            still_running = cr.scalars().all()
-                            if not still_running:
-                                break
+                                if not cr.scalars().all():
+                                    break
+                    finally:
+                        if _done_q is not None:
+                            from src.core import pubsub as _ps3
+                            await _ps3.unsubscribe(_done_channel, _done_q)
 
                     async with AsyncSessionLocal() as db:
                         child_results_r = await db.execute(
@@ -763,6 +856,27 @@ async def _execute_sub_agent_task(
                     "type": "task_updated",
                     "task": _task_to_dict(t, agent_name),
                 })
+
+        # Auto-reply to an originating agent message (send_message_to_agent): if this
+        # task was created by a peer message, mark that message "replied" with the
+        # task output so a SYNC sender unblocks immediately — instead of waiting the
+        # full 120s timeout because the (weak) model never called reply_to_id itself.
+        if t and getattr(t, "status", None) == "completed":
+            try:
+                from src.models.agent_message import AgentMessage
+                async with AsyncSessionLocal() as _mdb:
+                    _msg = (await _mdb.execute(
+                        select(AgentMessage).where(AgentMessage.task_id == task_id)
+                    )).scalar_one_or_none()
+                    if _msg and _msg.status in ("pending", "delivered"):
+                        _msg.status = "replied"
+                        _msg.reply_body = (t.output or "Task completed.")[:4000]
+                        _msg.replied_at = datetime.now(timezone.utc)
+                        await _mdb.commit()
+                        logger.info(f"[sub_agent] auto-replied agent message {_msg.id} from completed task {task_id}")
+            except Exception as exc:
+                logger.warning(f"[sub_agent] auto-reply to agent message failed: {exc}")
+
         if t and t.parent_id and getattr(t, "status", None) not in ("blocked",):
             asyncio.create_task(_bubble_complete_parent(t.parent_id))
 
@@ -990,7 +1104,23 @@ async def _execute_sub_agent_task(
         _parent_chat = parent_chat_r.scalar_one_or_none()
         _is_top_level = _parent_chat is None or _parent_chat.parent_chat_id is None
 
-    if _is_top_level:
+    # If this task was created by a SYNC send_message_to_agent, the sender's blocking
+    # wait (unblocked by the auto-reply above) drives the orchestrator continuation via
+    # the tool-result resume. Firing _resume_orchestrator here too would double-resume
+    # the orchestrator → it answers, then spuriously re-delegates ("I've sent a message,
+    # I'll get back to you"). So skip path A for a sync-message task.
+    _sync_msg_owns_resume = False
+    try:
+        from src.models.agent_message import AgentMessage as _AM
+        async with AsyncSessionLocal() as _amdb:
+            _am = (await _amdb.execute(
+                select(_AM).where(_AM.task_id == task_id, _AM.mode == "sync")
+            )).scalar_one_or_none()
+            _sync_msg_owns_resume = _am is not None
+    except Exception:
+        pass
+
+    if _is_top_level and not _sync_msg_owns_resume:
         if not remaining:
             from src.services.orchestrator import _resume_orchestrator
             asyncio.create_task(

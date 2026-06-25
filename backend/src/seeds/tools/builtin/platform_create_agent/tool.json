@@ -6,5 +6,73 @@
   "group": "platform_create",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Display name for the agent."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "What the agent does."
+    },
+    {
+      "name": "system_prompt",
+      "type": "string",
+      "required": false,
+      "description": "Agent-specific system prompt (Markdown)."
+    },
+    {
+      "name": "agent_type",
+      "type": "string",
+      "required": false,
+      "description": "Agent type identifier (default assistant)."
+    },
+    {
+      "name": "skills",
+      "type": "array",
+      "required": false,
+      "description": "Skill keys to attach."
+    },
+    {
+      "name": "tools",
+      "type": "array",
+      "required": false,
+      "description": "Tool keys to enable."
+    },
+    {
+      "name": "soul",
+      "type": "object",
+      "required": false,
+      "description": "Personality fields (tone, style, values, ...)."
+    },
+    {
+      "name": "temperature",
+      "type": "number",
+      "required": false,
+      "description": "LLM temperature 0.0-1.0."
+    },
+    {
+      "name": "max_tokens",
+      "type": "integer",
+      "required": false,
+      "description": "Max tokens per response."
+    },
+    {
+      "name": "persona_key",
+      "type": "string",
+      "required": false,
+      "description": "Bootstrap from a persona template."
+    },
+    {
+      "name": "context_seed",
+      "type": "object",
+      "required": false,
+      "description": "Seed the new agent with context from the current session."
+    }
+  ]
 }

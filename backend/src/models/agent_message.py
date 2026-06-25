@@ -13,7 +13,10 @@ class AgentMessage(Base):
     __tablename__ = "agent_messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    from_agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id"), nullable=False, index=True)
+    # Nullable: a message can originate from the conversation's default assistant,
+    # which has no org-scoped Agent row (sending one with from_agent_id="" or a
+    # non-existent id FK-crashed and looped). None = "from the conversation".
+    from_agent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agents.id"), nullable=True, index=True)
     to_agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id"), nullable=False, index=True)
     chat_id: Mapped[str] = mapped_column(String(36), ForeignKey("chats.id"), nullable=False, index=True)
     task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tasks.id"), nullable=True)

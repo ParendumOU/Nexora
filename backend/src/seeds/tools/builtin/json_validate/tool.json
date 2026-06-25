@@ -4,5 +4,19 @@
   "description": "Validate a JSON string and optionally check it against a JSON Schema.",
   "category": "data",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "json",
+      "type": "string",
+      "required": true,
+      "description": "JSON string to validate."
+    },
+    {
+      "name": "schema",
+      "type": "object",
+      "required": false,
+      "description": "JSON Schema to validate against."
+    }
+  ]
 }

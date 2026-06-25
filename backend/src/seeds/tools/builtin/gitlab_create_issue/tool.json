@@ -4,7 +4,41 @@
   "description": "Create a new issue in a GitLab project.",
   "category": "gitlab",
   "group": "gitlab_write",
-  "env_vars": ["GITLAB_TOKEN"],
+  "env_vars": [
+    "GITLAB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": true,
+      "description": "Project ID or path."
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": "Issue title."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "Issue description (Markdown)."
+    },
+    {
+      "name": "labels",
+      "type": "array",
+      "required": false,
+      "description": "Label names to apply."
+    },
+    {
+      "name": "assignee_ids",
+      "type": "array",
+      "required": false,
+      "description": "GitLab user IDs to assign."
+    }
+  ]
 }

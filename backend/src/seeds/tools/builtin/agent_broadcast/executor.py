@@ -34,13 +34,16 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
     explicit_ids: list[str] = args.get("agent_ids") or []
 
     async with AsyncSessionLocal() as db:
-        # Resolve sender and org
-        r = await db.execute(select(Agent).where(Agent.id == agent_id))
-        from_agent = r.scalar_one_or_none()
-        if not from_agent:
-            return {"error": f"Sender agent {agent_id} not found"}
-        org_id = from_agent.org_id
-        from_name = from_agent.name or agent_name or agent_id
+        # Resolve sender and org. The sender may be the chat's default assistant with
+        # no Agent row — that's fine (from_agent_id is nullable); resolve the org from
+        # the chat chain instead of hard-failing.
+        r = await db.execute(select(Agent).where(Agent.id == agent_id)) if agent_id else None
+        from_agent = r.scalar_one_or_none() if r is not None else None
+        from src.services.org_resolve import resolve_chat_org
+        org_id = await resolve_chat_org(db, chat_id, agent_id)
+        if not org_id:
+            return {"error": "Could not resolve org for this chat"}
+        from_name = (from_agent.name if from_agent else None) or agent_name or "Agent"
 
         # Resolve parent chat context
         r2 = await db.execute(select(Chat).where(Chat.id == chat_id))
@@ -99,7 +102,7 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
             channel_prefix = f"[{channel}] " if channel else ""
             msg = AgentMessage(
                 id=msg_id,
-                from_agent_id=agent_id,
+                from_agent_id=(from_agent.id if from_agent else None),
                 to_agent_id=recipient.id,
                 chat_id=parent_chat_id,
                 subject=f"{channel_prefix}{subject}",

@@ -1,5 +1,5 @@
 """Agent context: provider resolution, system prompt building, and repo tree helpers."""
-from src.services.agent_context.auth import authenticate_ws
+from src.services.agent_context.auth import authenticate_ws, ws_accept_subprotocol
 from src.services.agent_context.providers import (
     get_chain_providers,
     get_direct_provider,
@@ -14,6 +14,7 @@ from src.services.agent_context.system_prompt import get_agent_system_prompt
 
 __all__ = [
     "authenticate_ws",
+    "ws_accept_subprotocol",
     "get_chain_providers",
     "get_live_chat",
     "get_platform_context",

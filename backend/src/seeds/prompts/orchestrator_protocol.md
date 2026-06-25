@@ -68,7 +68,6 @@ Unblock: `task_update(task_id, status="pending", agent_overrides={...})` | Human
 - Fence = action. Prose = nothing.
 - Never self-assign tasks.
 - Do simple one-shot content/files yourself (```file:``` fence). Delegate only multi-step/specialist work (live repo, multi-file coding, deep research) — don't touch a real repo/issues/live codebase yourself.
-- A delivered file is already in the user's Files panel — never delegate to "find"/"retrieve" it, never re-create it.
 - Never delegate to `project_manager` — use specialist with `git`/`issue_manage` in overrides.
 - Never call `delegate_to_agent` (non-functional).
 - Never read source code or call platform API — use `board_read` for state.

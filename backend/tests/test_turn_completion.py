@@ -1,7 +1,46 @@
 """Deterministic turn completion (GitLab #213)."""
 from src.services.turn_completion import (
     is_turn_complete, has_final_marker, finalize_marker, FINAL_MARKER, looks_like_promise,
+    visible_text,
 )
+
+
+# ── visible_text: user-visible prose after stripping scaffolding (cf88b04) ────
+
+def test_visible_text_bare_final_is_empty():
+    # weak model answered with only the marker → nothing the user can read
+    assert visible_text("<final/>") == ""
+    assert visible_text("  <final/>  ") == ""
+
+
+def test_visible_text_strips_tool_fence_and_empty_code():
+    assert visible_text('```tool_calls\n[{"name":"x"}]\n```') == ""
+    assert visible_text("```\n   \n```") == ""
+    assert visible_text("```python\n```") == ""
+
+
+def test_visible_text_strips_thinking_and_proposal():
+    assert visible_text("<think>reasoning</think>") == ""
+    assert visible_text("<proposal>do x</proposal>") == ""
+
+
+def test_visible_text_keeps_real_prose():
+    assert visible_text("Here is your answer.\n<final/>") == "Here is your answer."
+    assert visible_text("The 4 cards are in your Files panel.") == "The 4 cards are in your Files panel."
+
+
+def test_visible_text_empty_input():
+    assert visible_text("") == ""
+    assert visible_text(None) == ""
+
+
+def test_final_marker_overrides_promise_heuristic():
+    # "...let me know" trips the promise heuristic, but a sealed final turn must
+    # NOT be nudged (the cf88b04 double-reply fix).
+    text = "Done — your report is delivered. Let me know if you need anything else.\n<final/>"
+    assert has_final_marker(text)
+    # sub_agent gate: nudge only when promise AND NOT sealed
+    assert not (looks_like_promise(text) and not has_final_marker(text))
 
 
 def test_complete_iff_no_tool_calls():

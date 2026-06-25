@@ -4,5 +4,19 @@
   "description": "List running Docker containers and their status.",
   "category": "docker",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "all",
+      "type": "boolean",
+      "required": false,
+      "description": "Show all containers incl. stopped (default false)."
+    },
+    {
+      "name": "filter",
+      "type": "string",
+      "required": false,
+      "description": "Filter expression (e.g. name=backend)."
+    }
+  ]
 }

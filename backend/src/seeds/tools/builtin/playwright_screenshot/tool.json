@@ -4,5 +4,37 @@
   "description": "Take a screenshot of a web page using a headless browser. Returns a base64-encoded PNG image.",
   "category": "browser",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": "URL to screenshot."
+    },
+    {
+      "name": "full_page",
+      "type": "boolean",
+      "required": false,
+      "description": "Capture full scrollable page (default false)."
+    },
+    {
+      "name": "selector",
+      "type": "string",
+      "required": false,
+      "description": "Screenshot a specific element by CSS selector."
+    },
+    {
+      "name": "width",
+      "type": "integer",
+      "required": false,
+      "description": "Viewport width px (default 1280)."
+    },
+    {
+      "name": "height",
+      "type": "integer",
+      "required": false,
+      "description": "Viewport height px (default 720)."
+    }
+  ]
 }

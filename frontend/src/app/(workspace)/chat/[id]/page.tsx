@@ -1,5 +1,5 @@
 "use client";
-import { use, useEffect, useRef, useState, useCallback } from "react";
+import { use, useEffect, useRef, useState, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { chatsApi, tasksApi, projectsApi, plansApi, chatFilesApi, approvalsApi } from "@/lib/api";
@@ -414,6 +414,14 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setActivePlan(null);
     setPendingApprovals([]);
     setExpandedApprovals(new Set());
+    // Reset per-chat sub-agent + action state too — otherwise the parent chat's
+    // sub-agents panel and action cards bleed into a sub-chat you navigate into
+    // (so a sub-chat appeared to list ITSELF). Each chat repopulates from its own
+    // tasks/history; a sub-chat shows only the sub-chats IT spawned.
+    setTasks([]);
+    setSubAgentActivities([]);
+    setAgentActionGroups([]);
+    activeSubAgentsRef.current = 0;
   }, [chatId]);
 
   // Seed inline approval cards for this chat (so they survive a refresh / late open,
@@ -449,7 +457,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   // are preserved in metadata_.tool_calls_detail and need to be re-projected here.
   useEffect(() => {
     if (!history) return;
-    type ToolDetail = { name: string; args?: Record<string, unknown> };
+    type ToolDetail = { name: string; args?: Record<string, unknown>; status?: string; error?: string };
     const rebuilt: AgentActionGroup[] = [];
     for (const msg of history as Message[]) {
       const detail = (msg.metadata_ as { tool_calls_detail?: ToolDetail[] } | undefined)?.tool_calls_detail;
@@ -463,7 +471,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         else if (d.name === "log_entry" && args.message) label = `Log: ${String(args.message).slice(0, 60)}`;
         else if (d.name === "read_url" && args.url) label = `Fetch: ${String(args.url).slice(0, 60)}`;
         else if (d.name === "issue_manage" && args.action === "create" && args.title) label = `Issue: ${String(args.title).slice(0, 60)}`;
-        return { tool: d.name, label, status: "success" };
+        // Honor the persisted per-tool status so a failed tool stays red on refresh
+        // (old behavior hardcoded "success", flipping failed tools green on reload).
+        const failed = d.status === "failed";
+        return { tool: d.name, label, status: failed ? "failed" : "success", error: d.error };
       });
       rebuilt.push({
         groupId: `hist-${msg.id}`,
@@ -474,11 +485,16 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     }
     if (rebuilt.length === 0) return;
     setAgentActionGroups((prev) => {
-      // Merge: keep live groups, add reconstructed ones for messages without a live group
-      const liveMessageIds = new Set(prev.map((g) => g.messageId));
-      const additions = rebuilt.filter((g) => !liveMessageIds.has(g.messageId));
-      if (additions.length === 0) return prev;
-      return [...prev, ...additions];
+      // Reconcile so the live view always converges to the PERSISTED truth: for any
+      // message that now has a reconstructed group (a completed, saved turn), the
+      // reconstruction is authoritative — replace any live group for that message
+      // (which may be partial, or missing entirely if this page was unmounted while
+      // the turn ran). Keep live groups only for messages NOT yet in history (genuine
+      // in-flight turns whose message hasn't been persisted yet). This makes the
+      // real-time view identical to what a refresh would show.
+      const rebuiltIds = new Set(rebuilt.map((g) => g.messageId));
+      const liveInFlight = prev.filter((g) => !rebuiltIds.has(g.messageId));
+      return [...liveInFlight, ...rebuilt];
     });
     // Collapse historical groups by default — user can expand them on demand
     setCollapsedActionGroups((prev) => {
@@ -567,8 +583,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     if (!hasHydrated) return;
 
     let cleaned = false;
-    const url = getWsUrl(chatId);
-    const ws = new WebSocket(url);
+    const { url, protocols } = getWsUrl(chatId);
+    const ws = new WebSocket(url, protocols);
     wsRef.current = ws;
     stopRef.current = false;
 
@@ -744,20 +760,33 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         // vanished on refresh (live ≠ saved). Now live snaps to exactly what's persisted.
         const finalContent = (data.content as string | undefined) ?? streamingContentRef.current ?? "";
         setStreamingContent(null);
-        if (finalContent.trim()) {
+        // A tool-only turn (e.g. knowledge_search) has its prose blanked, so finalContent
+        // is empty — but it carries tool_calls_detail. Keep that message anyway so the
+        // action card anchors to it (in chronological place, above the resume answer)
+        // instead of orphaning to the bottom of the thread. The empty message renders no
+        // bubble (ChatMessage returns null for empty content); only its card shows.
+        const _endMeta = (data.metadata as Record<string, unknown>) || {};
+        const _hasToolDetail = Array.isArray(_endMeta.tool_calls_detail) && (_endMeta.tool_calls_detail as unknown[]).length > 0;
+        if (finalContent.trim() || _hasToolDetail) {
           setMessages((msgs) => {
             if (data.message_id && msgs.some((m) => m.id === data.message_id)) return msgs;
             return [...msgs, {
               id: (data.message_id as string) || Date.now().toString(),
               role: "assistant" as const,
               content: finalContent,
-              metadata_: (data.metadata as Record<string, unknown>) || {},
+              metadata_: _endMeta,
               created_at: (data.created_at as string) ?? new Date().toISOString(),
             }];
           });
         }
         qc.invalidateQueries({ queryKey: ["chats"] });
         qc.invalidateQueries({ queryKey: ["chat-usage", chatId] });
+        // Refetch persisted messages so the action-card rebuild re-runs against the
+        // saved turn (with its real tool_calls_detail) and the live view converges to
+        // exactly what a refresh would show — including cards for turns that ran while
+        // this page wasn't the active view. Authoritative reconcile happens in the
+        // rebuild effect; keyed message fragments keep this from causing a remount blink.
+        qc.invalidateQueries({ queryKey: ["messages", chatId] });
       } else if (data.type === "task_created") {
         setTasks((prev) => [...prev, data.task as TaskData]);
       } else if (data.type === "task_updated") {
@@ -1512,9 +1541,22 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                     );
 
                     return (
-                      <>
+                      // Keyed Fragment: without a key here React reconciles these map
+                      // items by index, so when sibling structure shifts (orphan action
+                      // cards appearing/disappearing per sub-agent step) the ChatMessages
+                      // remount and their header + fade-in replays — the per-step blink.
+                      <Fragment key={msg.id}>
+                        {/* Action + approval cards render ABOVE this message's bubble:
+                            the tool calls happened to produce the turn, so they read as
+                            "agent did X, then said Y" — and stay above the final answer
+                            instead of dangling beneath it. */}
+                        {agentActionGroups
+                          .filter((g) => g.messageId === msg.id)
+                          .map((g) => renderActionGroup(g))}
+                        {pendingApprovals
+                          .filter((a) => a.messageId === msg.id)
+                          .map((a) => renderApprovalCard(a))}
                         <ChatMessage
-                          key={msg.id}
                           role={displayRole}
                           content={msg.content}
                           providerUsed={msg.provider_used}
@@ -1549,23 +1591,15 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                           onEditSubmit={handleEditSubmit}
                           onExcludedToggle={handleExcludedToggle}
                         />
-                        {/* Agent action cards — PM tool calls anchored to this message */}
-                        {agentActionGroups
-                          .filter((g) => g.messageId === msg.id)
-                          .map((g) => renderActionGroup(g))}
-                        {/* Approval cards anchored to the message that requested them */}
-                        {pendingApprovals
-                          .filter((a) => a.messageId === msg.id)
-                          .map((a) => renderApprovalCard(a))}
-
-                      </>
+                      </Fragment>
                     );
                   })}
 
                 {/* Orphan action cards — live groups whose anchor message isn't in the
-                    list yet (the assistant message arrives on stream_end). Render them
-                    here so the "Agent · N actions" card shows in real time, not only
-                    after a refresh. */}
+                    list yet (the assistant message arrives on stream_end). Rendered
+                    ABOVE the streaming bubble so the card sits ABOVE the text both during
+                    streaming and once anchored on finalize (anchored cards also render
+                    above their message) — consistent, no above→below jump. */}
                 {agentActionGroups
                   .filter((g) => !messages.some((m) => m.id === g.messageId))
                   .map((g) => renderActionGroup(g))}
@@ -1591,6 +1625,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                     />
                   );
                 })()}
+
                 <div ref={bottomRef} />
               </div>
             )}

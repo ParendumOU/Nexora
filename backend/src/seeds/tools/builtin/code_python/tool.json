@@ -4,5 +4,25 @@
   "description": "Execute a Python code snippet in a sandboxed environment and return stdout, stderr, and return value.",
   "category": "code",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "code",
+      "type": "string",
+      "required": true,
+      "description": "Python code to execute."
+    },
+    {
+      "name": "timeout",
+      "type": "integer",
+      "required": false,
+      "description": "Timeout in seconds (default 30)."
+    },
+    {
+      "name": "packages",
+      "type": "array",
+      "required": false,
+      "description": "pip packages to install before running."
+    }
+  ]
 }

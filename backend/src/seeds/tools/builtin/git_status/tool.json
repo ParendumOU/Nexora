@@ -4,5 +4,13 @@
   "description": "Show the working tree status of a local Git repository.",
   "category": "git",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "Path to git repo."
+    }
+  ]
 }

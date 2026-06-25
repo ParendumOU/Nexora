@@ -4,5 +4,19 @@
   "description": "Format a code snippet using the appropriate formatter for the given language.",
   "category": "code",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "code",
+      "type": "string",
+      "required": true,
+      "description": "Code to format."
+    },
+    {
+      "name": "language",
+      "type": "string",
+      "required": true,
+      "description": "python | javascript | typescript | json | html | css."
+    }
+  ]
 }

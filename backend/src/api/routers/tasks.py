@@ -195,10 +195,13 @@ async def list_tasks(
         return [await _task_to_dict(t, db) for t in tasks]
     elif chat_id:
         await _assert_chat_access(chat_id, current_user, db)
+        # #170: bound the per-chat list too (was unbounded).
         result = await db.execute(
             select(Task)
             .where(Task.chat_id == chat_id)
             .order_by(Task.position, Task.created_at)
+            .limit(limit)
+            .offset(offset)
         )
     else:
         # Global view: all tasks for the active org, direct via org_id column

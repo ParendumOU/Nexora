@@ -8,20 +8,10 @@ from src.models.chat import Chat
 
 
 async def _resolve_org(agent_id: str | None, chat_id: str) -> str | None:
+    # Robust chain (agent → chat parent walk → root user org).
+    from src.services.org_resolve import resolve_chat_org
     async with AsyncSessionLocal() as db:
-        if agent_id:
-            r = await db.execute(select(Agent).where(Agent.id == agent_id))
-            ag = r.scalar_one_or_none()
-            if ag:
-                return ag.org_id
-        r2 = await db.execute(select(Chat).where(Chat.id == chat_id))
-        chat = r2.scalar_one_or_none()
-        if chat and chat.agent_id:
-            r3 = await db.execute(select(Agent).where(Agent.id == chat.agent_id))
-            ag2 = r3.scalar_one_or_none()
-            if ag2:
-                return ag2.org_id
-    return None
+        return await resolve_chat_org(db, chat_id, agent_id)
 
 
 def _rule_dict(r: WebhookRule) -> dict:

@@ -4,7 +4,23 @@
   "description": "Fetch metadata for a GitLab project: description, stars, forks, default branch.",
   "category": "gitlab",
   "group": "gitlab_read",
-  "env_vars": ["GITLAB_TOKEN"],
+  "env_vars": [
+    "GITLAB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": true,
+      "description": "Project ID or URL-encoded path (e.g. group/project)."
+    },
+    {
+      "name": "gitlab_url",
+      "type": "string",
+      "required": false,
+      "description": "GitLab instance URL (default https://gitlab.com)."
+    }
+  ]
 }

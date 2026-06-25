@@ -5,5 +5,25 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "message",
+      "type": "string",
+      "required": false,
+      "description": "The log message to record."
+    },
+    {
+      "name": "level",
+      "type": "string",
+      "required": false,
+      "description": "info | warning | error (default info)."
+    },
+    {
+      "name": "data",
+      "type": "object",
+      "required": false,
+      "description": "Optional structured payload."
+    }
+  ]
 }

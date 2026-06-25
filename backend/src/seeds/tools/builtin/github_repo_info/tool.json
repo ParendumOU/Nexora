@@ -4,7 +4,23 @@
   "description": "Fetch metadata for a GitHub repository: description, stars, forks, default branch, topics.",
   "category": "github",
   "group": "github_read",
-  "env_vars": ["GITHUB_TOKEN"],
+  "env_vars": [
+    "GITHUB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "owner",
+      "type": "string",
+      "required": true,
+      "description": "Repo owner (user or org)."
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "required": true,
+      "description": "Repo name."
+    }
+  ]
 }

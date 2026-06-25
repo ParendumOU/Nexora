@@ -4,5 +4,31 @@
   "description": "Search for files matching a name pattern or containing specific text within a directory tree.",
   "category": "file",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "Root dir to search."
+    },
+    {
+      "name": "pattern",
+      "type": "string",
+      "required": false,
+      "description": "Glob pattern (e.g. *.ts, **/*.json)."
+    },
+    {
+      "name": "contains",
+      "type": "string",
+      "required": false,
+      "description": "Text the file content must contain."
+    },
+    {
+      "name": "max_results",
+      "type": "integer",
+      "required": false,
+      "description": "Max results (default 50)."
+    }
+  ]
 }

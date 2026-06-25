@@ -1,4 +1,5 @@
 """Agent tool execution — task/issue/skill/platform tools invoked from tool_calls fences."""
+import asyncio
 import json
 import logging
 import re
@@ -480,7 +481,49 @@ async def _execute_agent_tools(
 
     tool_results: list[dict] = []
     _held_for_approval: list[dict] = []  # tools held by the approval gate (not executed)
-    for call in tool_calls:
+    from src.services.chat_cancel import is_cancelled as _is_cancelled_tools
+
+    # Parallel read-tier precompute (#229). Read-tier tools (file_read, board_read,
+    # knowledge_search, github/gitlab read, …) have no side effects, no approval gate,
+    # and no file delivery, so their order is irrelevant and they can run concurrently.
+    # We compute them up-front via asyncio.gather and the sequential loop below then
+    # consumes the cached result at the single _run_single_tool site — AFTER all gates
+    # pass — so every event, ordering, and gating decision is byte-identical to the
+    # sequential path; only the side-effect-free awaits overlap. Flag-gated; default off
+    # runs everything inline exactly as before. A result is only consumed post-gate, so
+    # a cached call the loop later skips (gate fail) is simply discarded.
+    _precomputed: dict[int, dict] = {}
+    from src.core.config import get_settings as _gs_par
+    if _gs_par().parallel_tool_calls_enabled and len(tool_calls) > 1:
+        from src.services.agent_tools.risk import tool_risk_tier as _trt
+        _read_idx = [
+            _i for _i, _c in enumerate(tool_calls)
+            if _c.get("name") and _trt(_c.get("name", "")) == "read"
+            and is_tool_allowed(_c.get("name", ""), agent_enabled)
+        ]
+        if len(_read_idx) > 1:
+            async def _precompute_one(_idx: int) -> tuple[int, dict]:
+                _c = tool_calls[_idx]
+                try:
+                    _r = await _run_single_tool(
+                        _c["name"], dict(_c.get("args", {})), chat_id,
+                        agent_id, agent_name, parent_chat_id=parent_chat_id,
+                    )
+                    return _idx, _r
+                except Exception as _exc:
+                    return _idx, {"tool": _c.get("name"), "error": str(_exc)}
+            _done = await asyncio.gather(*[_precompute_one(_i) for _i in _read_idx])
+            _precomputed = {i: r for i, r in _done}
+
+    for _call_idx, call in enumerate(tool_calls):
+        # Pre-emptive cancel check (#223): stop between tools so a user cancel during a
+        # multi-tool turn takes effect promptly instead of after the whole batch runs.
+        try:
+            if await _is_cancelled_tools(chat_id):
+                logger.info("[tools] cancellation observed — halting remaining tool calls")
+                break
+        except Exception:
+            pass
         name = call.get("name", "")
         args = dict(call.get("args", {}))
         if not name:
@@ -597,10 +640,21 @@ async def _execute_agent_tools(
                 await _broadcast(chat_id, step_start_event)
 
         try:
-            result = await _run_single_tool(name, args, chat_id, agent_id, agent_name, parent_chat_id=parent_chat_id)
+            # Use the parallel-precomputed result for a read-tier call (#229); else
+            # run it inline now. Identical result either way — reads have no side effects.
+            if _call_idx in _precomputed:
+                result = _precomputed[_call_idx]
+            else:
+                result = await _run_single_tool(name, args, chat_id, agent_id, agent_name, parent_chat_id=parent_chat_id)
             logger.info(f"[tools] executed {name} args={json.dumps(args)[:120]}")
 
             tool_errored = isinstance(result, dict) and "error" in result
+            # Record the outcome on the call so tool_calls_detail can persist real
+            # per-tool status — otherwise a failed tool reconstructs as "success" on
+            # refresh (live shows red, refresh shows green).
+            call["_status"] = "failed" if tool_errored else "success"
+            if tool_errored:
+                call["_error"] = str(result.get("error", ""))[:300]
 
             if task_id and parent_chat_id:
                 async with AsyncSessionLocal() as db:
@@ -659,6 +713,8 @@ async def _execute_agent_tools(
                         }})
         except Exception as exc:
             logger.warning(f"[tools] {name} failed: {exc}")
+            call["_status"] = "failed"
+            call["_error"] = str(exc)[:300]
 
             if task_id and parent_chat_id:
                 async with AsyncSessionLocal() as db:
@@ -699,7 +755,14 @@ async def _execute_agent_tools(
     # of the approval card; it ran via the approve flow, not here).
     _held_ids = {id(c) for c in _held_for_approval}
     counted = [
-        {"name": c.get("name", ""), "args": c.get("args", {})}
+        {
+            "name": c.get("name", ""),
+            "args": c.get("args", {}),
+            # Persist real per-tool outcome so the action card reconstructs with the
+            # correct status/color on refresh (matches the live agent_action_done).
+            "status": c.get("_status", "success"),
+            **({"error": c["_error"]} if c.get("_error") else {}),
+        }
         for c in tool_calls
         if c.get("name") and id(c) not in _held_ids
     ]

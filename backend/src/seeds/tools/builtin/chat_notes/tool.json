@@ -5,19 +5,24 @@
   "category": "memory",
   "is_builtin": true,
   "always_allowed": true,
-  "args": {
-    "type": "object",
-    "properties": {
-      "action": {
-        "type": "string",
-        "enum": ["read", "write", "append"],
-        "description": "read: return current notes. write: replace notes entirely. append: add text to end of notes."
-      },
-      "content": {
-        "type": "string",
-        "description": "Text to write or append (required for write/append actions)."
-      }
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "read | write | append."
     },
-    "required": ["action"]
-  }
+    {
+      "name": "content",
+      "type": "string",
+      "required": false,
+      "description": "[write/append] Note body."
+    },
+    {
+      "name": "heading",
+      "type": "string",
+      "required": false,
+      "description": "[write/append] Optional note heading."
+    }
+  ]
 }

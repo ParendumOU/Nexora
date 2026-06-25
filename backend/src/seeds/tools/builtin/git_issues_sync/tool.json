@@ -5,5 +5,25 @@
   "category": "issues",
   "group": "issues",
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "repo_url",
+      "type": "string",
+      "required": false,
+      "description": "Repo URL to sync from (defaults to the project's linked repo)."
+    },
+    {
+      "name": "labels",
+      "type": "array",
+      "required": false,
+      "description": "Import issues matching at least one of these labels."
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "required": false,
+      "description": "Max issues to import (default 50)."
+    }
+  ]
 }

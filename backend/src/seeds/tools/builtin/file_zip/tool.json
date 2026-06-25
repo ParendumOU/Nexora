@@ -4,5 +4,25 @@
   "description": "Create a ZIP archive from a directory or list of files.",
   "category": "file",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "source",
+      "type": "array",
+      "required": true,
+      "description": "Path(s) to compress (string or array)."
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "required": true,
+      "description": "Output ZIP file path."
+    },
+    {
+      "name": "base_dir",
+      "type": "string",
+      "required": false,
+      "description": "Strip this prefix from paths inside the archive."
+    }
+  ]
 }

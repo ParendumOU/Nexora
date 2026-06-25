@@ -5,5 +5,37 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "goal_id",
+      "type": "string",
+      "required": true,
+      "description": "The goal to add a milestone to."
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": "Milestone title."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "What the milestone covers."
+    },
+    {
+      "name": "success_criteria",
+      "type": "string",
+      "required": false,
+      "description": "What completing it means."
+    },
+    {
+      "name": "position",
+      "type": "integer",
+      "required": false,
+      "description": "Ordering position."
+    }
+  ]
 }

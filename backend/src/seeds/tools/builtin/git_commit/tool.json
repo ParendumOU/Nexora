@@ -4,5 +4,25 @@
   "description": "Stage all changes and create a commit in a local Git repository.",
   "category": "git",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "Path to git repo."
+    },
+    {
+      "name": "message",
+      "type": "string",
+      "required": true,
+      "description": "Commit message."
+    },
+    {
+      "name": "add_all",
+      "type": "boolean",
+      "required": false,
+      "description": "Stage all changes before commit (default true)."
+    }
+  ]
 }

@@ -4,7 +4,53 @@
   "description": "Create or update a single file in a GitHub repository via the Contents API.",
   "category": "github",
   "group": "github_write",
-  "env_vars": ["GITHUB_TOKEN"],
+  "env_vars": [
+    "GITHUB_TOKEN"
+  ],
   "is_builtin": true,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "owner",
+      "type": "string",
+      "required": true,
+      "description": "Repo owner."
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "required": true,
+      "description": "Repo name."
+    },
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "File path within repo."
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "required": true,
+      "description": "New file content."
+    },
+    {
+      "name": "message",
+      "type": "string",
+      "required": true,
+      "description": "Commit message."
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "required": false,
+      "description": "Target branch (default branch)."
+    },
+    {
+      "name": "sha",
+      "type": "string",
+      "required": false,
+      "description": "Existing file SHA — required when updating an existing file."
+    }
+  ]
 }

@@ -14,14 +14,30 @@ backend container. This module is the server-side half of that proxy:
   request id. The WS reader resolves that Future when the client replies with a
   ``tool_exec_result`` frame (via :func:`resolve`).
 
+Multi-worker safety (GitLab #224): the turn coroutine (holding the Future) and the CLI
+socket (delivering the result) may live on **different** uvicorn workers. The request
+already crosses workers — ``send`` publishes via ``pubsub.broadcast`` and the forwarder
+delivers it to whichever worker holds the socket. The RESULT is routed back the same way:
+``resolve`` first tries the local bridge (single-worker fast path) and, when there is no
+local match, republishes the result on a private pub/sub channel that the bridge-owning
+worker subscribes to. So a result raised on any worker reaches the Future on the worker
+that issued the call.
+
 Nothing here changes web/cloud behavior: if no bridge is registered for a chat (the web
 never opts in), the tool executor takes its normal in-container path.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Awaitable, Callable
+
+logger = logging.getLogger(__name__)
+
+# Private pub/sub channel namespace for cross-worker result return (#224). Distinct
+# from the chat's broadcast channel, so client sockets never receive these frames.
+_RESULT_NS = "localexec_result:"
 
 # Builtin tools that may be proxied to a local CLI host. Server-only tools (git, http,
 # integrations, etc.) are intentionally excluded — they keep running in the container.
@@ -41,6 +57,9 @@ class LocalExecBridge:
         self.chat_id = chat_id
         self._send = send
         self._pending: dict[str, asyncio.Future] = {}
+        # Cross-worker result listener (#224): set by register().
+        self._result_q: asyncio.Queue | None = None
+        self._result_task: asyncio.Task | None = None
 
     async def run(self, tool: str, args: dict) -> dict:
         """Send the tool call to the client and await its result dict.
@@ -63,13 +82,27 @@ class LocalExecBridge:
             self._pending.pop(request_id, None)
             return {"error": f"local exec send failed: {exc}"}
 
+        # Cancellation-aware wait (#223): poll the chat's cancel flag in short slices
+        # so a user cancel during a long-running local tool takes effect within ~1s
+        # instead of blocking up to the full LOCAL_EXEC_TIMEOUT.
+        from src.services.chat_cancel import is_cancelled
+        deadline = asyncio.get_event_loop().time() + LOCAL_EXEC_TIMEOUT
         try:
-            result = await asyncio.wait_for(fut, timeout=LOCAL_EXEC_TIMEOUT)
-        except asyncio.TimeoutError:
-            return {"error": f"local exec timed out after {int(LOCAL_EXEC_TIMEOUT)}s (no client response)"}
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    return {"error": f"local exec timed out after {int(LOCAL_EXEC_TIMEOUT)}s (no client response)"}
+                try:
+                    result = await asyncio.wait_for(asyncio.shield(fut), timeout=min(1.0, remaining))
+                    return result if isinstance(result, dict) else {"error": "malformed local exec result"}
+                except asyncio.TimeoutError:
+                    try:
+                        if await is_cancelled(self.chat_id):
+                            return {"error": "local exec cancelled by user"}
+                    except Exception:
+                        pass
         finally:
             self._pending.pop(request_id, None)
-        return result if isinstance(result, dict) else {"error": "malformed local exec result"}
 
     def resolve(self, request_id: str, result: dict) -> bool:
         """Resolve a pending request with the client's result. Returns True if it matched."""
@@ -90,9 +123,32 @@ class LocalExecBridge:
 _bridges: dict[str, LocalExecBridge] = {}
 
 
-def register(chat_id: str, send: SendFn) -> LocalExecBridge:
+async def _result_listener(bridge: LocalExecBridge, q: asyncio.Queue) -> None:
+    """Drain cross-worker result messages and resolve the bridge's local Futures."""
+    try:
+        while True:
+            msg = await q.get()
+            rid = msg.get("request_id")
+            if rid:
+                bridge.resolve(rid, msg.get("result") or {})
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("[local_exec] result listener stopped: %s", exc)
+
+
+async def register(chat_id: str, send: SendFn) -> LocalExecBridge:
     bridge = LocalExecBridge(chat_id, send)
     _bridges[chat_id] = bridge
+    # Subscribe to this chat's private result channel so a result raised on another
+    # worker (which republishes it) resolves the Future held here (#224).
+    try:
+        from src.core import pubsub
+        q = await pubsub.subscribe(_RESULT_NS + chat_id)
+        bridge._result_q = q
+        bridge._result_task = asyncio.create_task(_result_listener(bridge, q))
+    except Exception as exc:  # pubsub unavailable → single-worker still works
+        logger.debug("[local_exec] result channel subscribe failed: %s", exc)
     return bridge
 
 
@@ -103,6 +159,14 @@ def unregister(chat_id: str, bridge: LocalExecBridge | None = None) -> None:
     if bridge is not None and cur is not bridge:
         return  # a newer turn replaced it; leave it
     cur.cancel_all()
+    if cur._result_task is not None:
+        cur._result_task.cancel()
+    if cur._result_q is not None:
+        try:
+            from src.core import pubsub
+            asyncio.create_task(pubsub.unsubscribe(_RESULT_NS + chat_id, cur._result_q))
+        except Exception:
+            pass
     _bridges.pop(chat_id, None)
 
 
@@ -110,8 +174,21 @@ def get_bridge(chat_id: str) -> LocalExecBridge | None:
     return _bridges.get(chat_id)
 
 
-def resolve(chat_id: str, request_id: str, result: dict) -> bool:
+async def resolve(chat_id: str, request_id: str, result: dict) -> bool:
+    """Resolve a pending local-exec request.
+
+    Same-worker fast path: resolve the local bridge's Future directly. If there is no
+    local match (the Future lives on another worker, #224), republish the result on the
+    chat's private result channel so the bridge-owning worker resolves it.
+    """
     bridge = _bridges.get(chat_id)
-    if bridge is None:
+    if bridge is not None and bridge.resolve(request_id, result):
+        return True
+    # No local match — route to the worker holding the bridge.
+    try:
+        from src.core import pubsub
+        await pubsub.broadcast(_RESULT_NS + chat_id, {"request_id": request_id, "result": result})
+        return True
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("[local_exec] cross-worker result publish failed: %s", exc)
         return False
-    return bridge.resolve(request_id, result)

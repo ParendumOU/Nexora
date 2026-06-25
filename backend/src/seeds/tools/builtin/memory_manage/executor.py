@@ -14,12 +14,11 @@ _VALID_SCOPES = {"agent", "project", "thread"}
 _VALID_ACTIONS = {"save", "read", "delete"}
 
 
-async def _resolve_org_id(db, agent_id: str | None) -> str | None:
-    if not agent_id:
-        return None
-    ra = await db.execute(select(Agent).where(Agent.id == agent_id))
-    ag = ra.scalar_one_or_none()
-    return ag.org_id if ag else None
+async def _resolve_org_id(db, agent_id: str | None, chat_id: str | None = None) -> str | None:
+    # Robust chain (agent → chat parent walk → root user org) so a sub-agent in a
+    # system-user sub-chat, or a builtin agent with no row, still resolves its org.
+    from src.services.org_resolve import resolve_chat_org
+    return await resolve_chat_org(db, chat_id, agent_id)
 
 
 async def _resolve_root_chat_id(db, chat_id: str) -> str:
@@ -57,7 +56,7 @@ async def _save(args: dict, chat_id: str, agent_id: str | None) -> dict:
         if not chat:
             return {"error": "Chat not found"}
 
-        org_id = await _resolve_org_id(db, agent_id)
+        org_id = await _resolve_org_id(db, agent_id, chat_id)
 
         if scope == "project":
             if mem_type not in PROJECT_MEMORY_TYPES:
@@ -176,7 +175,7 @@ async def _read(args: dict, chat_id: str, agent_id: str | None) -> dict:
     return {"data": {"memories": results, "count": len(results), "scope": scope}}
 
 
-async def _delete(args: dict, agent_id: str | None) -> dict:
+async def _delete(args: dict, agent_id: str | None, chat_id: str | None = None) -> dict:
     memory_id = (args.get("memory_id") or "").strip()
     if not memory_id:
         return {"error": "memory_id is required"}
@@ -184,7 +183,7 @@ async def _delete(args: dict, agent_id: str | None) -> dict:
     scope = (args.get("scope") or "agent").lower()
 
     async with AsyncSessionLocal() as db:
-        org_id = await _resolve_org_id(db, agent_id)
+        org_id = await _resolve_org_id(db, agent_id, chat_id)
 
         if scope == "project":
             r = await db.execute(select(ProjectMemory).where(ProjectMemory.id == memory_id))
@@ -343,4 +342,4 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
     elif action == "read":
         return await _read(args, chat_id, agent_id)
     else:
-        return await _delete(args, agent_id)
+        return await _delete(args, agent_id, chat_id)

@@ -1,7 +1,10 @@
 services:
   # ─── Data stores ───────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    # pgvector image (PG16) for knowledge-base / memory ANN search (#201). Same
+    # on-disk format as the official postgres:16, so an existing volume upgrades
+    # in place; just adds the `vector` extension.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nexora}

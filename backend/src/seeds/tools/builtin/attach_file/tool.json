@@ -5,5 +5,19 @@
   "category": "file",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "Path to the file to attach."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": false,
+      "description": "Display filename in the Files panel (defaults to the basename)."
+    }
+  ]
 }

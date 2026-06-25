@@ -24,20 +24,36 @@ export function truncate(str: string, maxLength: number): string {
   return str.length > maxLength ? str.slice(0, maxLength) + "…" : str;
 }
 
-export function getWsUrl(chatId: string): string {
-  const token = localStorage.getItem("access_token") || "";
-  const isSecure = window.location.protocol === "https:";
-  const wsProto = isSecure ? "wss" : "ws";
-  const host = window.location.host;
-  return `${wsProto}://${host}/ws/chat/${chatId}?token=${token}`;
+// Auth subprotocol scheme — must match backend WS_AUTH_SUBPROTOCOL (#159). The
+// token is passed as a WebSocket subprotocol instead of a ?token= query param so
+// it never lands in server/proxy access logs.
+export const WS_AUTH_SUBPROTOCOL = "nexora-bearer";
+
+export interface WsConn {
+  url: string;
+  protocols: string[];
 }
 
-export function getUserWsUrl(): string {
+export function getWsUrl(chatId: string): WsConn {
   const token = localStorage.getItem("access_token") || "";
   const isSecure = window.location.protocol === "https:";
   const wsProto = isSecure ? "wss" : "ws";
   const host = window.location.host;
-  return `${wsProto}://${host}/ws/user?token=${token}`;
+  return {
+    url: `${wsProto}://${host}/ws/chat/${chatId}`,
+    protocols: token ? [WS_AUTH_SUBPROTOCOL, token] : [],
+  };
+}
+
+export function getUserWsUrl(): WsConn {
+  const token = localStorage.getItem("access_token") || "";
+  const isSecure = window.location.protocol === "https:";
+  const wsProto = isSecure ? "wss" : "ws";
+  const host = window.location.host;
+  return {
+    url: `${wsProto}://${host}/ws/user`,
+    protocols: token ? [WS_AUTH_SUBPROTOCOL, token] : [],
+  };
 }
 
 export async function copyToClipboard(text: string): Promise<void> {

@@ -84,4 +84,4 @@ def test_gemini_function_declaration_uppercase_types():
 def test_all_schemaed_keys_includes_core_excludes_schemaless():
     keys = set(all_schemaed_tool_keys())
     assert {"shell_run", "file_write", "http_request"} <= keys
-    assert "file_find" not in keys
+    assert "note_read" not in keys

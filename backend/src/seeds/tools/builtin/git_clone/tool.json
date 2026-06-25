@@ -4,5 +4,31 @@
   "description": "Clone a Git repository to a local directory.",
   "category": "git",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": "Repo URL (HTTPS or SSH)."
+    },
+    {
+      "name": "destination",
+      "type": "string",
+      "required": false,
+      "description": "Local path to clone into."
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "required": false,
+      "description": "Branch to checkout after clone."
+    },
+    {
+      "name": "depth",
+      "type": "integer",
+      "required": false,
+      "description": "Shallow clone depth."
+    }
+  ]
 }

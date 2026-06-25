@@ -4,5 +4,25 @@
   "description": "Navigate a headless browser to a URL and return the rendered page content.",
   "category": "browser",
   "env_vars": [],
-  "is_builtin": true
+  "is_builtin": true,
+  "args": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": "URL to navigate to."
+    },
+    {
+      "name": "wait_for",
+      "type": "string",
+      "required": false,
+      "description": "load | networkidle | CSS selector to wait for."
+    },
+    {
+      "name": "timeout",
+      "type": "integer",
+      "required": false,
+      "description": "Milliseconds (default 30000)."
+    }
+  ]
 }

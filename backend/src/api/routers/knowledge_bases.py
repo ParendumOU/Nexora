@@ -408,6 +408,36 @@ async def search_kb(
 
     query_vec = await embed(q, org_id)
 
+    # #201: indexed ANN fast path via pgvector. When available, rank with the
+    # `<=>` index instead of loading + scoring every chunk in Python. Falls
+    # through to the Python-cosine path below if unavailable or empty.
+    if query_vec:
+        from src.services.vector_search import search_kb_chunks
+        ann = await search_kb_chunks(db, kb_id, query_vec, top_k, min_score)
+        if ann:
+            by_id = {
+                c.id: c for c in (await db.execute(
+                    select(KnowledgeChunk).where(KnowledgeChunk.id.in_([cid for cid, _ in ann]))
+                )).scalars().all()
+            }
+            fids = {c.file_id for c in by_id.values()}
+            fmap: dict[str, str] = {}
+            if fids:
+                fr = await db.execute(select(KnowledgeFile).where(KnowledgeFile.id.in_(fids)))
+                fmap = {f.id: f.filename for f in fr.scalars().all()}
+            out = []
+            for cid, score in ann:
+                c = by_id.get(cid)
+                if not c:
+                    continue
+                out.append(ChunkResult(
+                    chunk_id=c.id, file_id=c.file_id,
+                    filename=fmap.get(c.file_id, "unknown"),
+                    content=c.content, score=round(score, 4),
+                    chunk_index=c.chunk_index,
+                ))
+            return out
+
     cr = await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id))
     chunks = cr.scalars().all()
 

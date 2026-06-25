@@ -6,5 +6,37 @@
   "group": "platform_create",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "key",
+      "type": "string",
+      "required": true,
+      "description": "Unique skill identifier (snake_case)."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Human-readable skill name."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "Capability this skill grants."
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "required": false,
+      "description": "SKILL.md content injected when the skill is active."
+    },
+    {
+      "name": "config",
+      "type": "object",
+      "required": false,
+      "description": "Arbitrary skill config merged at runtime."
+    }
+  ]
 }

@@ -201,6 +201,12 @@ async def _resume_with_tool_results(
         calls_made = result.calls_made
         had_fence = result.had_fence
         save_meta = result.save_meta
+        # Never persist a blank prose bubble (bare <final/>, empty code fence, tool-call
+        # residue) — blank it so the frontend renders no hollow bubble; tool/agent cards
+        # still render from save_meta.
+        from src.services.turn_completion import visible_text as _visible_text
+        if not _visible_text(clean_response):
+            clean_response = ""
         msg_id = str(uuid.uuid4())
         async with AsyncSessionLocal() as db:
             db.add(Message(

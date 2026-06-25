@@ -37,29 +37,32 @@
     {
       "name": "to_agent_id",
       "type": "string",
-      "required": true,
-      "description": "to agent id"
+      "required": false,
+      "description": "Recipient agent id (required for a NEW message; omit when replying — a reply uses reply_to_id). Discover ids via list_available_agents."
     },
     {
       "name": "body",
       "type": "string",
       "required": true,
-      "description": "body"
+      "description": "Message body (for a new message) or your answer (for a reply)."
     },
     {
       "name": "subject",
       "type": "string",
-      "description": "subject"
+      "required": false,
+      "description": "Short subject line (new message only)."
     },
     {
       "name": "mode",
       "type": "string",
-      "description": "mode"
+      "required": false,
+      "description": "sync (block up to 120s for a reply) | async (fire-and-forget). Default sync."
     },
     {
       "name": "reply_to_id",
       "type": "string",
-      "description": "reply to id"
+      "required": false,
+      "description": "Original message id when replying. A reply only needs reply_to_id + body."
     }
   ]
 }

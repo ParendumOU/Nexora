@@ -5,5 +5,37 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": false,
+      "description": "Target project ID (defaults to the chat's current project)."
+    },
+    {
+      "name": "filter_by_agent",
+      "type": "string",
+      "required": false,
+      "description": "Return only tasks assigned to this agent ID."
+    },
+    {
+      "name": "filter_by_status",
+      "type": "string",
+      "required": false,
+      "description": "Comma-separated statuses to include (e.g. pending,queued,in_progress)."
+    },
+    {
+      "name": "include_completed",
+      "type": "boolean",
+      "required": false,
+      "description": "Include completed/failed tasks (default false)."
+    },
+    {
+      "name": "include_details",
+      "type": "boolean",
+      "required": false,
+      "description": "Include description/priority/blocked_by/checklist (default false)."
+    }
+  ]
 }

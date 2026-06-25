@@ -63,7 +63,8 @@ export function useUserSocket(enabled: boolean) {
       }
       let ws: WebSocket;
       try {
-        ws = new WebSocket(getUserWsUrl());
+        const { url, protocols } = getUserWsUrl();
+        ws = new WebSocket(url, protocols);
       } catch {
         scheduleReconnect();
         return;

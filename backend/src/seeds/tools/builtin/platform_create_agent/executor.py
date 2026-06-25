@@ -37,19 +37,31 @@ def _build_system_prompt(base: str | None, context_seed: dict) -> str | None:
 
 
 async def _resolve_org(agent_id, chat_id) -> str | None:
+    """Resolve the org for the new agent. Tries, in order: the calling agent's org,
+    the chat-agent's org, the chat's project org, then the chat user's active org.
+    The user fallback matters when the chat runs on a builtin/seed agent that has no
+    org-scoped DB row (the old version returned None there and create failed)."""
+    from src.models.project import Project
+    from src.models.user import User
     async with AsyncSessionLocal() as db:
         if agent_id:
-            r = await db.execute(select(Agent).where(Agent.id == agent_id))
-            ag = r.scalar_one_or_none()
-            if ag:
+            ag = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+            if ag and ag.org_id:
                 return ag.org_id
-        r2 = await db.execute(select(Chat).where(Chat.id == chat_id))
-        chat_rec = r2.scalar_one_or_none()
-        if chat_rec and chat_rec.agent_id:
-            r3 = await db.execute(select(Agent).where(Agent.id == chat_rec.agent_id))
-            ag2 = r3.scalar_one_or_none()
-            if ag2:
-                return ag2.org_id
+        chat_rec = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
+        if chat_rec:
+            if chat_rec.agent_id:
+                ag2 = (await db.execute(select(Agent).where(Agent.id == chat_rec.agent_id))).scalar_one_or_none()
+                if ag2 and ag2.org_id:
+                    return ag2.org_id
+            if chat_rec.project_id:
+                po = (await db.execute(select(Project.org_id).where(Project.id == chat_rec.project_id))).scalar_one_or_none()
+                if po:
+                    return po
+            if chat_rec.user_id:
+                uo = (await db.execute(select(User.active_org_id).where(User.id == chat_rec.user_id))).scalar_one_or_none()
+                if uo:
+                    return uo
     return None
 
 

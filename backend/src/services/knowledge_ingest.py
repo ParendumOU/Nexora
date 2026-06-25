@@ -194,6 +194,12 @@ async def ingest_file(file_id: str, org_id: str, kb_id: str, data: bytes,
         async with AsyncSessionLocal() as db:
             for row in chunk_rows:
                 db.add(row)
+            await db.flush()
+            # #201: populate the pgvector column for indexed ANN search (PG-only,
+            # best-effort; the JSON embedding remains the source of truth + fallback).
+            from src.services.vector_search import store_embedding_vec
+            for row in chunk_rows:
+                await store_embedding_vec(db, "knowledge_chunks", row.id, row.embedding)
             await db.execute(
                 update(KnowledgeFile).where(KnowledgeFile.id == file_id)
                 .values(status="ready", chunk_count=len(chunk_rows), error=None)

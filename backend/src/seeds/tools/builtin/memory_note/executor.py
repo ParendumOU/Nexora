@@ -13,18 +13,16 @@ _VALID_ACTIONS = {"write", "append", "read", "list"}
 
 
 async def _resolve_org_and_user(db, chat_id: str, agent_id: str | None) -> tuple[str | None, str | None, str | None]:
-    """Return (org_id, user_id, agent_id). org_id is derived from the agent (chats have no org_id)."""
+    """Return (org_id, user_id, agent_id). org_id uses the robust chain (agent → chat
+    parent walk → root user org) so a sub-agent / builtin-agent chat still resolves."""
     user_id = None
     rc = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
     if rc:
         user_id = rc.user_id
         if not agent_id and rc.agent_id:
             agent_id = rc.agent_id
-    org_id = None
-    if agent_id:
-        ag = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
-        if ag:
-            org_id = ag.org_id
+    from src.services.org_resolve import resolve_chat_org
+    org_id = await resolve_chat_org(db, chat_id, agent_id)
     return org_id, user_id, agent_id
 
 

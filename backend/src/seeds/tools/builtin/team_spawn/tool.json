@@ -12,7 +12,9 @@
       "description": "List of role specs. Each entry defines a persona_key and how many agents to create.",
       "items": {
         "type": "object",
-        "required": ["persona_key"],
+        "required": [
+          "persona_key"
+        ],
         "properties": {
           "persona_key": {
             "type": "string",
@@ -38,5 +40,19 @@
       "type": "string",
       "description": "Optional label for this team (returned in the response for reference)."
     }
-  }
+  },
+  "args": [
+    {
+      "name": "members",
+      "type": "array",
+      "required": true,
+      "description": "List of role specs for the team."
+    },
+    {
+      "name": "team_name",
+      "type": "string",
+      "required": false,
+      "description": "Label for the team, returned for reference."
+    }
+  ]
 }

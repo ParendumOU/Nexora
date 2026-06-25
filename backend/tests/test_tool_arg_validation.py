@@ -6,10 +6,10 @@ from src.services.agent_tools.tool_schemas import (
 
 
 def test_no_schema_tool_is_not_validated():
-    # executor.py tools without a declared args schema are never blocked
-    assert get_tool_arg_schema("file_find") is None
-    assert validate_tool_args("file_find", {}) is None
-    assert validate_tool_args("file_find", {"anything": 1}) is None
+    # tools without a declared args schema are never blocked
+    assert get_tool_arg_schema("note_read") is None
+    assert validate_tool_args("note_read", {}) is None
+    assert validate_tool_args("note_read", {"anything": 1}) is None
 
 
 def test_unknown_tool_is_not_validated():
@@ -62,10 +62,10 @@ def test_openai_tool_schema_shape():
 
 
 def test_build_provider_tools_skips_schemaless():
-    out = build_provider_tools(["shell_run", "file_find", "nonexistent"], "anthropic")
+    out = build_provider_tools(["shell_run", "note_read", "nonexistent"], "anthropic")
     names = [t["name"] for t in out]
-    assert names == ["shell_run"]  # file_find (no schema) + nonexistent dropped
+    assert names == ["shell_run"]  # note_read (no schema) + nonexistent dropped
 
 
 def test_input_schema_none_for_schemaless():
-    assert tool_input_schema("file_find") is None
+    assert tool_input_schema("note_read") is None

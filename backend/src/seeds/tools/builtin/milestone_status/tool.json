@@ -5,5 +5,19 @@
   "category": "platform",
   "env_vars": [],
   "is_builtin": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "milestone_id",
+      "type": "string",
+      "required": true,
+      "description": "The milestone to update."
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": true,
+      "description": "pending | in_progress | done | failed | skipped."
+    }
+  ]
 }
