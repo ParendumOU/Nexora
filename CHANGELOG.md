@@ -10,6 +10,23 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.7.0
+
+- Structured audit log for sensitive actions (member changes, invites, backup export/import/migrate) with a superuser and org-admin viewer.
+- Incoming custom webhooks can now verify an HMAC signature of the request body, not just the path secret.
+- Rate limits added to marketplace import and install, git proxy file and tree fetches, and new WebSocket connections.
+- First-run registration is hardened against a race that could let two concurrent signups both skip the invite requirement.
+- Integration config is validated against a per-type allowlist, and user backup import now enforces field size limits.
+- Pagination added to users, memories, notifications, proposals, and knowledge base files; old notifications are trimmed automatically.
+- Faster organization, knowledge base, and integration list endpoints by removing per-row extra queries.
+- New database indexes for the recovery scan, scheduler, and proposals, plus trigram-accelerated chat and message search.
+- Schedules now retry on failure and surface errors instead of failing silently, reject overlapping runs, validate the cron expression when you save, and support a per-schedule concurrency limit and timeout.
+- Global search now spans agents, tools, skills, projects, and knowledge bases, not just chats and messages.
+- Marketplace import now installs the declared dependencies of skill, tool, and persona packages, not only agents and packs.
+- API keys can be scoped to read-only or restricted to specific organizations.
+- Notifications can be delivered by email or Telegram for events missed while you were offline.
+- Knowledge base search accepts a relevance threshold to drop low-quality matches.
+
 ## 1.6.0
 
 - Outcome tracking and decision log: agents record what an action or goal achieved (with optional KPI) and the decisions they made, and can query that history to learn.

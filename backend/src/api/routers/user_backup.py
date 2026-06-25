@@ -90,11 +90,21 @@ async def import_my_backup(
         raise HTTPException(400, "Invalid backup format — expected nexora-profile-backup-v1")
 
     profile = payload.get("profile", {})
+    if not isinstance(profile, dict):
+        raise HTTPException(400, "profile must be an object")
     allowed = {"full_name", "avatar_url", "avatar_emoji", "notes", "contact_info"}
+    # Field length caps (#208) — reject an oversized payload instead of storing it.
+    _caps = {"full_name": 255, "avatar_url": 2048, "avatar_emoji": 16, "notes": 20000, "contact_info": 10000}
     restored = []
     for field in allowed:
         if field in profile:
-            setattr(current_user, field, profile[field])
+            value = profile[field]
+            cap = _caps.get(field)
+            if isinstance(value, str) and cap and len(value) > cap:
+                raise HTTPException(400, f"Field '{field}' exceeds maximum length ({cap})")
+            if isinstance(value, (dict, list)) and len(str(value)) > 20000:
+                raise HTTPException(400, f"Field '{field}' is too large")
+            setattr(current_user, field, value)
             restored.append(field)
 
     db.add(current_user)

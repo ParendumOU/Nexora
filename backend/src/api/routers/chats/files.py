@@ -18,6 +18,16 @@ from src.models.user import User
 router = APIRouter()
 
 
+def _safe_file_path(root_chat_id: str, stored_filename: str) -> Path:
+    """Build the on-disk path for a chat file and guarantee it stays inside the
+    thread's upload dir (defense-in-depth against path traversal, #181)."""
+    base = (Path(get_settings().upload_dir) / root_chat_id).resolve()
+    target = (base / stored_filename).resolve()
+    if base != target.parent and base not in target.parents:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    return target
+
+
 async def _get_root_chat_id(chat_id: str, db: AsyncSession) -> str:
     visited: set[str] = set()
     cur_id = chat_id
@@ -146,8 +156,7 @@ async def delete_file(
     if file_obj.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not file owner")
 
-    settings = get_settings()
-    path = Path(settings.upload_dir) / file_obj.root_chat_id / file_obj.stored_filename
+    path = _safe_file_path(file_obj.root_chat_id, file_obj.stored_filename)
     if path.exists():
         path.unlink(missing_ok=True)
 
@@ -170,9 +179,12 @@ async def get_file_content(
     file_obj = r.scalar_one_or_none()
     if not file_obj:
         raise HTTPException(status_code=404, detail="File not found")
+    # The file must belong to THIS thread, not just any chat the user can see (#181).
+    root_chat_id = await _get_root_chat_id(chat_id, db)
+    if file_obj.root_chat_id != root_chat_id:
+        raise HTTPException(status_code=404, detail="File not found")
 
-    settings = get_settings()
-    path = Path(settings.upload_dir) / file_obj.root_chat_id / file_obj.stored_filename
+    path = _safe_file_path(file_obj.root_chat_id, file_obj.stored_filename)
     if not path.exists():
         raise HTTPException(status_code=404, detail="File data not found on server")
 

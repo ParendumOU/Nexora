@@ -2,8 +2,8 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import select
+from datetime import datetime, timezone, timedelta
+from sqlalchemy import select, func
 
 from src.core.database import AsyncSessionLocal
 from src.models.schedule import Schedule, ScheduleRun
@@ -32,6 +32,27 @@ async def run_schedule(schedule_id: str, triggered_by: str = "cron") -> str:
                 agent_max_concurrency = ag.max_concurrency or 2
 
         now = datetime.now(timezone.utc)
+
+        # #191: don't start a new run while max_concurrency runs are still in-flight.
+        # Count only recent "running" rows so a crashed/zombie run can't block forever
+        # (cutoff = the schedule timeout, or 6h when unset).
+        max_conc = getattr(schedule, "max_concurrency", 1) or 1
+        timeout_minutes = getattr(schedule, "timeout_minutes", None)
+        cutoff = now - timedelta(minutes=(timeout_minutes or 360))
+        running_r = await db.execute(
+            select(func.count()).select_from(ScheduleRun).where(
+                ScheduleRun.schedule_id == schedule_id,
+                ScheduleRun.status == "running",
+                ScheduleRun.started_at >= cutoff,
+            )
+        )
+        if (running_r.scalar() or 0) >= max_conc and triggered_by == "cron":
+            logger.warning(
+                "[schedule_runner] skip cron run for %s: %d in-flight >= max_concurrency %d",
+                schedule_id, max_conc, max_conc,
+            )
+            return ""
+
         run_id = str(uuid.uuid4())
         chat_id = str(uuid.uuid4())
         task_id = str(uuid.uuid4())
@@ -81,6 +102,7 @@ async def run_schedule(schedule_id: str, triggered_by: str = "cron") -> str:
             org_id=org_id,
             agent_id=agent_id,
             agent_max_concurrency=agent_max_concurrency,
+            timeout_minutes=timeout_minutes,
         )
     )
 
@@ -95,13 +117,14 @@ async def _dispatch_and_track(
     org_id: str,
     agent_id: str | None,
     agent_max_concurrency: int,
+    timeout_minutes: int | None = None,
 ) -> None:
     """Dispatch the sub-agent and update run status when it finishes."""
     from src.services.sub_agent import _execute_sub_agent_task
     from src.services.task_dispatcher import dispatch as _dispatch
     from src.seeding.seed_platform import SYSTEM_USER_ID
 
-    try:
+    async def _do_dispatch():
         await _dispatch(
             task_id=task_id,
             org_id=org_id,
@@ -116,6 +139,17 @@ async def _dispatch_and_track(
             agent_id=agent_id,
             agent_max_concurrency=agent_max_concurrency,
         )
+
+    try:
+        # #207: enforce an optional wall-clock timeout on the run.
+        if timeout_minutes and timeout_minutes > 0:
+            await asyncio.wait_for(_do_dispatch(), timeout=timeout_minutes * 60)
+        else:
+            await _do_dispatch()
+    except asyncio.TimeoutError:
+        logger.error(f"[schedule_runner] run {run_id} timed out after {timeout_minutes}m")
+        await _finish_run(run_id, status="failed", error=f"Run timed out after {timeout_minutes} minutes")
+        return
     except Exception as exc:
         logger.error(f"[schedule_runner] dispatch failed for run {run_id}: {exc}")
         await _finish_run(run_id, status="failed", error=str(exc)[:500])

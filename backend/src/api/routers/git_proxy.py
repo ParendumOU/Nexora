@@ -3,13 +3,14 @@ from __future__ import annotations
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_active_org_id, get_current_user
 from src.core.database import get_db
+from src.core.rate_limit import rate_limit
 from src.models.git_credential import GitCredential
 from src.models.user import User
 
@@ -54,7 +55,15 @@ def _headers(cred: GitCredential) -> dict:
 def _base(cred: GitCredential) -> str:
     if cred.provider == "github":
         return "https://api.github.com"
-    return (cred.base_url or "https://gitlab.com").rstrip("/")
+    base = (cred.base_url or "https://gitlab.com").rstrip("/")
+    # SSRF guard (#188): base_url is user-controlled (self-hosted GitLab) and proxied to.
+    from src.core.ssrf import assert_public_url
+    try:
+        assert_public_url(base)
+    except ValueError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Blocked git base_url: {exc}")
+    return base
 
 
 # ── branches ────────────────────────────────────────────────────────────────
@@ -113,12 +122,15 @@ async def delete_branch(
 
 @router.get("/tree")
 async def get_tree(
+    request: Request,
     credential_id: str = Query(...),
     repo_url: str = Query(...),
     branch: str = Query("main"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # #209: tree/file fetches proxy to GitHub/GitLab; cap to protect upstream quota.
+    await rate_limit(request, "git-proxy-read", max_requests=60, window_seconds=60)
     org_id = await get_active_org_id(current_user, db)
     cred = await _get_cred(credential_id, org_id, db)
     repo = _parse_repo(repo_url)
@@ -162,6 +174,7 @@ async def get_tree(
 
 @router.get("/file")
 async def get_file(
+    request: Request,
     credential_id: str = Query(...),
     repo_url: str = Query(...),
     path: str = Query(...),
@@ -169,6 +182,7 @@ async def get_file(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await rate_limit(request, "git-proxy-read", max_requests=60, window_seconds=60)
     org_id = await get_active_org_id(current_user, db)
     cred = await _get_cred(credential_id, org_id, db)
     repo = _parse_repo(repo_url)

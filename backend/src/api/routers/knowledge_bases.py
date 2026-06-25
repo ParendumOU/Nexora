@@ -4,7 +4,7 @@ import uuid
 import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import httpx
@@ -142,16 +142,25 @@ async def list_kbs(
     await require_org_role(current_user, org_id, OrgRole.viewer, db)
     r = await db.execute(select(KnowledgeBase).where(KnowledgeBase.org_id == org_id))
     kbs = r.scalars().all()
+    if not kbs:
+        return []
+    # #193: one grouped count instead of a COUNT query per KB.
+    kb_ids = [kb.id for kb in kbs]
+    fc_r = await db.execute(
+        select(KnowledgeFile.kb_id, func.count())
+        .where(KnowledgeFile.kb_id.in_(kb_ids))
+        .group_by(KnowledgeFile.kb_id)
+    )
+    counts = {row[0]: row[1] for row in fc_r.all()}
     results = []
     for kb in kbs:
-        fc = await db.execute(select(KnowledgeFile).where(KnowledgeFile.kb_id == kb.id))
         results.append(KBResponse(
             id=kb.id, org_id=org_id, project_id=kb.project_id,
             name=kb.name, description=kb.description,
             chunk_strategy=kb.chunk_strategy,
             chunk_size=kb.chunk_size,
             chunk_overlap=kb.chunk_overlap,
-            file_count=len(fc.scalars().all()),
+            file_count=counts.get(kb.id, 0),
         ))
     return results
 
@@ -283,6 +292,8 @@ async def upload_file(
 @router.get("/{kb_id}/files", response_model=list[KBFileResponse])
 async def list_files(
     kb_id: str,
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -291,7 +302,11 @@ async def list_files(
     r = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id, KnowledgeBase.org_id == org_id))
     if not r.scalar_one_or_none():
         raise HTTPException(404, "Knowledge base not found")
-    fr = await db.execute(select(KnowledgeFile).where(KnowledgeFile.kb_id == kb_id))
+    # #194: paginate — a KB can hold thousands of files.
+    fr = await db.execute(
+        select(KnowledgeFile).where(KnowledgeFile.kb_id == kb_id)
+        .order_by(KnowledgeFile.created_at.desc()).limit(limit).offset(offset)
+    )
     return [KBFileResponse(
         id=f.id, kb_id=kb_id, filename=f.filename, content_type=f.content_type,
         size_bytes=f.size_bytes, status=f.status, chunk_count=f.chunk_count, error=f.error,
@@ -378,6 +393,8 @@ async def search_kb(
     kb_id: str,
     q: str = Query(..., min_length=1),
     top_k: int = Query(default=5, ge=1, le=20),
+    min_score: float = Query(default=0.0, ge=0.0, le=1.0,
+                             description="Drop results scoring below this (#206)"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -412,6 +429,7 @@ async def search_kb(
         scored.append((score, chunk))
 
     scored.sort(key=lambda x: x[0], reverse=True)
+    # #206: drop low-relevance noise so a high top_k doesn't return junk.
     return [
         ChunkResult(
             chunk_id=c.id, file_id=c.file_id,
@@ -420,4 +438,5 @@ async def search_kb(
             chunk_index=c.chunk_index,
         )
         for score, c in scored[:top_k]
+        if score >= min_score
     ]

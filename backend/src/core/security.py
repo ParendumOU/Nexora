@@ -73,11 +73,15 @@ def create_token(data: dict[str, Any], expires_delta: timedelta) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
-def create_access_token(user_id: str, org_id: str | None = None, expires_minutes: int | None = None, scope: str | None = None) -> str:
+def create_access_token(user_id: str, org_id: str | None = None, expires_minutes: int | None = None, scope: str | None = None, token_version: int | None = None) -> str:
     settings = get_settings()
     payload: dict = {"sub": user_id, "org": org_id, "type": "access"}
     if scope:
         payload["scope"] = scope
+    # Stamp the user's token_version so a password change / logout-all invalidates
+    # outstanding access tokens too, not just refresh tokens (#173).
+    if token_version is not None:
+        payload["tv"] = token_version
     return create_token(payload, timedelta(minutes=expires_minutes or settings.access_token_expire_minutes))
 
 
@@ -100,3 +104,38 @@ def encrypt(plaintext: str) -> str:
 
 def decrypt(ciphertext: str) -> str:
     return _get_fernet().decrypt(ciphertext.encode()).decode()
+
+
+def encrypt_opt(plaintext: str | None) -> str | None:
+    """Encrypt a nullable/empty string (returns it unchanged when falsy)."""
+    if not plaintext:
+        return plaintext
+    return encrypt(plaintext)
+
+
+def decrypt_safe(value: str | None) -> str | None:
+    """Decrypt a value that MIGHT be a legacy plaintext (pre-encryption) row.
+    Returns the decrypted text, or the original value if it isn't Fernet
+    ciphertext. Lets us roll encryption out without a data migration."""
+    if not value:
+        return value
+    try:
+        return decrypt(value)
+    except Exception:
+        return value
+
+
+def encrypt_env_map(data: dict | None) -> dict:
+    """Encrypt the VALUES of an env-var map (keys stay plaintext so they're still
+    listable/filterable). Non-string values are JSON-encoded first."""
+    import json as _json
+    out: dict = {}
+    for k, v in (data or {}).items():
+        s = v if isinstance(v, str) else _json.dumps(v)
+        out[str(k)] = encrypt(s)
+    return out
+
+
+def decrypt_env_map(data: dict | None) -> dict:
+    """Decrypt an env-var map's values (tolerates legacy plaintext values)."""
+    return {str(k): decrypt_safe(v) for k, v in (data or {}).items()}

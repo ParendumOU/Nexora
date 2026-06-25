@@ -36,6 +36,7 @@ from .goal import Goal, Milestone
 from .tool_approval import ToolApproval
 from .outcome import Outcome
 from .agent_role import AgentRole
+from .audit_log import AuditLog
 
 __all__ = [
     "User", "UserProfileFact", "Organization", "OrgMember", "OrgInvite", "SignupInvite",
@@ -60,4 +61,5 @@ __all__ = [
     "ToolApproval",
     "Outcome",
     "AgentRole",
+    "AuditLog",
 ]

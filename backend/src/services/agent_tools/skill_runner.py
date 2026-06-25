@@ -94,7 +94,7 @@ async def _run_skill_tool(
                 r2 = await db.execute(select(Project).where(Project.id == chat_rec.project_id))
                 proj_rec = r2.unique().scalar_one_or_none()
                 if proj_rec and proj_rec.env_vars:
-                    effective_env.update(proj_rec.env_vars)
+                    effective_env.update(proj_rec.plain_env_vars)
             rt = await db.execute(select(_Task).where(_Task.sub_chat_id == chat_id).limit(1))
             parent_task = rt.scalar_one_or_none()
             if parent_task:
@@ -104,12 +104,12 @@ async def _run_skill_tool(
                     rpa = await db.execute(select(Agent).where(Agent.id == parent_chat_rec.agent_id))
                     parent_agent_rec = rpa.scalar_one_or_none()
                     if parent_agent_rec and parent_agent_rec.env_vars:
-                        effective_env.update(parent_agent_rec.env_vars)
+                        effective_env.update(parent_agent_rec.plain_env_vars)
             if agent_id:
                 r3 = await db.execute(select(Agent).where(Agent.id == agent_id))
                 ag_rec = r3.scalar_one_or_none()
                 if ag_rec and ag_rec.env_vars:
-                    effective_env.update(ag_rec.env_vars)
+                    effective_env.update(ag_rec.plain_env_vars)
 
     try:
         cmd = [sys.executable, str(script_path), command] + _to_cli_args(args)

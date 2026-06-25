@@ -759,7 +759,7 @@ async def _run_single_tool(
                     parent_ag = r_ag.scalar_one_or_none()
                     if parent_ag:
                         org_id_for_agent = parent_ag.org_id
-                        parent_env = parent_ag.env_vars or {}
+                        parent_env = parent_ag.plain_env_vars  # decrypt for injection (#163)
                 if not org_id_for_agent and agent_id:
                     r_om2 = await db.execute(select(Agent).where(Agent.id == agent_id).limit(1))
                     fb_ag = r_om2.scalar_one_or_none()

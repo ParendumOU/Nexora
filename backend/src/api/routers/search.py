@@ -6,6 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_current_user, get_db, get_active_org_id
 from src.models.user import User
 from src.models.chat import Chat, Message
+from src.models.agent import Agent
+from src.models.tool import Tool
+from src.models.skill import Skill
+from src.models.project import Project
+from src.models.knowledge_base import KnowledgeBase
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -36,7 +41,10 @@ async def search(
     """Search chat titles and message content for the current user's org."""
     org_id = await get_active_org_id(current_user, db)
     term = q.strip()
-    ilike = f"%{term}%"
+    # Escape LIKE wildcards so a query of all '%'/'_' can't force a full-table scan
+    # (#197). Backslash is the escape char (passed to .ilike below).
+    _esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    ilike = f"%{_esc}%"
 
     # ── Chat title matches ─────────────────────────────────────────────────────
     chat_q = (
@@ -44,7 +52,7 @@ async def search(
         .where(
             Chat.user_id == current_user.id,
             Chat.is_archived.isnot(True),
-            Chat.title.ilike(ilike),
+            Chat.title.ilike(ilike, escape="\\"),
         )
         .order_by(Chat.updated_at.desc())
         .limit(limit)
@@ -72,7 +80,7 @@ async def search(
             Chat.is_archived.isnot(True),
             Message.excluded.isnot(True),
             Message.role.in_(["user", "assistant"]),
-            Message.content.ilike(ilike),
+            Message.content.ilike(ilike, escape="\\"),
         )
         .order_by(Message.created_at.desc())
         .limit(limit)
@@ -96,5 +104,40 @@ async def search(
     chat_ids_in_title = {h["id"] for h in chat_hits}
     msg_hits_deduped = [h for h in msg_hits if h["chat_id"] not in chat_ids_in_title]
 
-    results = (chat_hits + msg_hits_deduped)[:limit]
+    # ── Cross-resource matches (#211): agents, tools, skills, projects, KBs ──────
+    # Org-scoped by name/description so the global search box reaches the whole
+    # workspace, not just conversations.
+    resource_hits: list[dict] = []
+    _resource_specs = [
+        (Agent, "agent", "/agents", None),
+        (Tool, "tool", "/tools", None),
+        (Skill, "skill", "/skills", None),
+        (Project, "project", "/projects", None),
+        (KnowledgeBase, "knowledge_base", "/knowledge", None),
+    ]
+    for model, rtype, base_url, _ in _resource_specs:
+        rq = (
+            select(model)
+            .where(
+                model.org_id == org_id,
+                or_(
+                    model.name.ilike(ilike, escape="\\"),
+                    model.description.ilike(ilike, escape="\\"),
+                ),
+            )
+            .limit(limit)
+        )
+        for row in (await db.execute(rq)).scalars().unique().all():
+            resource_hits.append({
+                "type": rtype,
+                "id": row.id,
+                "title": row.name,
+                "snippet": (row.description or "")[:_SNIPPET_LEN],
+                "url": f"{base_url}/{row.id}",
+                "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
+            })
+
+    # Surface titles + named resources above fuzzy message-body matches so a high
+    # message count can't starve them out of the capped result list.
+    results = (chat_hits + resource_hits + msg_hits_deduped)[:limit]
     return {"query": term, "results": results, "total": len(results)}

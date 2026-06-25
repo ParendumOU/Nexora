@@ -23,8 +23,13 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(50), default="active")
     tools: Mapped[list] = mapped_column(JSON, default=list)
     mcps: Mapped[list] = mapped_column(JSON, default=list)
-    env_vars: Mapped[dict] = mapped_column(JSON, default=dict)
+    env_vars: Mapped[dict] = mapped_column(JSON, default=dict)  # {KEY: encrypted VALUE}
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    @property
+    def plain_env_vars(self) -> dict:
+        from src.core.security import decrypt_env_map
+        return decrypt_env_map(self.env_vars)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

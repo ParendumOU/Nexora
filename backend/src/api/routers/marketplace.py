@@ -5,12 +5,14 @@ import uuid as _uuid
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user, get_db, get_active_org_id
+from src.core.rate_limit import rate_limit
+from src.core.security import encrypt_env_map
 from src.api.routers.seeds import write_custom_seed
 from src.models.user import User
 from src.models.marketplace import MarketplaceItem
@@ -332,7 +334,7 @@ async def _create_agent_row(data: dict, org_id: str, db: AsyncSession) -> str | 
     """Materialize an imported agent: write its seed files on disk and add the
     org-scoped Agent row. Returns None on success or a reason string if skipped
     (already installed). Does NOT resolve sub-dependencies — see
-    `_install_agent_deps`."""
+    `_install_declared_deps`."""
     manifest = data.get("manifest") or {}
     slug = data.get("slug") or data.get("key", "")
     name = data.get("name", slug)
@@ -370,7 +372,7 @@ async def _create_agent_row(data: dict, org_id: str, db: AsyncSession) -> str | 
         skills=_f("skills", []),
         tools=_f("tools", []),
         mcps=_f("mcps", []),
-        env_vars=_f("env_vars", {}),
+        env_vars=encrypt_env_map(_f("env_vars", {})),
         max_subagents=_f("max_subagents", 5),
         max_concurrency=_f("max_concurrency", 2),
         model_pref=_f("model_pref", None),
@@ -382,12 +384,18 @@ async def _create_agent_row(data: dict, org_id: str, db: AsyncSession) -> str | 
     return None
 
 
-async def _install_agent_deps(
+async def _install_declared_deps(
     data: dict, import_url: str, headers: dict, org_id: str, db: AsyncSession
 ) -> tuple[list, list, list]:
-    """Resolve + install an imported agent's structured `dependencies` (leaf
-    skill/tool/persona packages) from the same marketplace. Returns
-    (installed, skipped, failed). Nested agent deps are recorded, not recursed."""
+    """Resolve + install a package's structured `dependencies` (leaf
+    skill/tool/persona packages) from the same marketplace. Applies to ANY
+    package type — an imported skill/tool/persona/agent can declare deps (#120).
+    Returns (installed, skipped, failed). Nested agent deps are recorded, not
+    recursed (avoids unbounded fan-out / cycles)."""
+    from src.core.ssrf import assert_public_url
+    from src.core.http_safe import get_capped, ResponseTooLarge
+    import json as _json
+
     manifest = data.get("manifest") or {}
     raw_deps = data.get("dependencies") or manifest.get("dependencies") or []
     installed: list[dict] = []
@@ -408,22 +416,31 @@ async def _install_agent_deps(
         if dep_type == "agent":
             skipped.append({"slug": dep_slug, "type": dep_type, "reason": "nested agent not auto-installed"})
             continue
+        dep_url = _dep_url_for(import_url, dep_slug)
         try:
+            # Same SSRF guard + size cap as the top-level import (the dep URL is
+            # derived from a user-supplied origin).
+            assert_public_url(dep_url)
             async with httpx.AsyncClient(timeout=10.0) as dep_client:
-                dep_resp = await dep_client.get(_dep_url_for(import_url, dep_slug), headers=headers)
-            dep_resp.raise_for_status()
-            dep_data = dep_resp.json()
-        except httpx.HTTPStatusError as exc:
-            failed.append({"slug": dep_slug, "type": dep_type, "reason": f"HTTP {exc.response.status_code}"})
+                sc, raw, _ = await get_capped(dep_client, dep_url, headers=headers, max_bytes=5 * 1024 * 1024)
+            if sc >= 400:
+                failed.append({"slug": dep_slug, "type": dep_type, "reason": f"HTTP {sc}"})
+                continue
+            dep_data = _json.loads(raw)
+        except ResponseTooLarge:
+            failed.append({"slug": dep_slug, "type": dep_type, "reason": "response too large"})
+            continue
+        except ValueError as exc:
+            failed.append({"slug": dep_slug, "type": dep_type, "reason": f"blocked: {exc}"})
             continue
         except Exception as exc:
-            logger.warning("[marketplace] failed to fetch agent dep %s: %s", dep_slug, exc)
+            logger.warning("[marketplace] failed to fetch dep %s: %s", dep_slug, exc)
             failed.append({"slug": dep_slug, "type": dep_type, "reason": "fetch failed"})
             continue
         try:
             reason = await _install_dependency_package(dep_type, dep_data, org_id, db)
         except Exception as exc:
-            logger.warning("[marketplace] failed to install agent dep %s: %s", dep_slug, exc)
+            logger.warning("[marketplace] failed to install dep %s: %s", dep_slug, exc)
             failed.append({"slug": dep_slug, "type": dep_type, "reason": str(exc)})
             continue
         if reason is None:
@@ -541,23 +558,38 @@ async def like_registry_package(
 @router.post("/import", status_code=status.HTTP_201_CREATED)
 async def import_marketplace_item(
     body: ImportRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Fetch an item definition from a remote marketplace URL and install it."""
+    # Rate limit (#184): each import triggers a server-side outbound fetch + file
+    # materialization + possible dependency cascade. Cap per client IP.
+    await rate_limit(request, "mk-import", max_requests=20, window_seconds=60)
     url = str(body.url).strip()
     if not url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+    # SSRF guard (#160): the server fetches this user-supplied URL — block internal hosts.
+    from src.core.ssrf import assert_public_url
+    try:
+        assert_public_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Blocked URL: {exc}")
 
     headers = _marketplace_headers(current_user)
 
     try:
+        import json as _json
+        from src.core.http_safe import get_capped, ResponseTooLarge
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(status_code=502, detail=f"Remote returned {exc.response.status_code}")
+            status_code, raw, _ = await get_capped(client, url, headers=headers, max_bytes=5 * 1024 * 1024)
+        if status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"Remote returned {status_code}")
+        data = _json.loads(raw)
+    except ResponseTooLarge:
+        raise HTTPException(status_code=413, detail="Import response too large")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=502, detail="Failed to fetch import URL")
 
@@ -636,6 +668,8 @@ async def import_marketplace_item(
             is_builtin=False,
         ))
         await record_install(db, org_id, "skill", data, origin, risk_record)
+        # #120: a skill package can declare leaf dependencies — resolve them too.
+        dep_installed, dep_skipped, dep_failed = await _install_declared_deps(data, url, headers, org_id, db)
 
     elif item_type == "tool":
         existing = await db.execute(select(Tool).where(Tool.org_id == org_id, Tool.key == slug))
@@ -653,6 +687,7 @@ async def import_marketplace_item(
             category=seed.get("category", category),
         ))
         await record_install(db, org_id, "tool", data, origin, risk_record)
+        dep_installed, dep_skipped, dep_failed = await _install_declared_deps(data, url, headers, org_id, db)
 
     elif item_type == "persona":
         # Rich fields (soul, system_prompt, defaults) live in the package manifest
@@ -679,6 +714,8 @@ async def import_marketplace_item(
             default_mcps=manifest.get("default_mcps") or data.get("default_mcps") or seed.get("default_mcps") or [],
         ))
         await record_install(db, org_id, "persona", data, origin, risk_record)
+        # #120: a persona references skills/tools; resolve any declared deps.
+        dep_installed, dep_skipped, dep_failed = await _install_declared_deps(data, url, headers, org_id, db)
 
     elif item_type == "agent":
         # Write the agent seed + DB row, then auto-install its structured
@@ -688,7 +725,7 @@ async def import_marketplace_item(
         if reason == "already installed":
             raise HTTPException(status_code=409, detail="Agent already installed")
         await record_install(db, org_id, "agent", data, origin, risk_record)
-        dep_installed, dep_skipped, dep_failed = await _install_agent_deps(data, url, headers, org_id, db)
+        dep_installed, dep_skipped, dep_failed = await _install_declared_deps(data, url, headers, org_id, db)
         if not (data.get("dependencies") or (data.get("manifest") or {}).get("dependencies")):
             # No resolvable dependency metadata; the agent's flat skills/tools
             # (bare keys) may reference capabilities that are not installed.
@@ -734,7 +771,7 @@ async def import_marketplace_item(
                 if p_type == "agent":
                     reason = await _create_agent_row(p_data, org_id, db)
                     if reason is None:
-                        ai, ask, af = await _install_agent_deps(p_data, p_url, headers, org_id, db)
+                        ai, ask, af = await _install_declared_deps(p_data, p_url, headers, org_id, db)
                         dep_installed.extend(ai)
                         dep_skipped.extend(ask)
                         dep_failed.extend(af)
@@ -778,7 +815,9 @@ async def import_marketplace_item(
         "trust_tier": risk["trust_tier"],
         "risk_acknowledged": risk_record["acknowledged"],
     }
-    if item_type in ("agent", "pack"):
+    # Surface resolved dependencies for any type that can carry them (#120:
+    # skill/tool/persona now resolve declared leaf deps too, not just agent/pack).
+    if dep_installed or dep_skipped or dep_failed or item_type in ("agent", "pack"):
         response["installed_dependencies"] = dep_installed
         response["skipped_dependencies"] = dep_skipped
         response["failed_dependencies"] = dep_failed
@@ -1127,6 +1166,7 @@ async def get_marketplace_item(
 @router.post("/{slug}/install", status_code=status.HTTP_201_CREATED)
 async def install_marketplace_item(
     slug: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -1135,6 +1175,7 @@ async def install_marketplace_item(
     Builtin items are always available — install simply marks them active for the org.
     For skills/tools: creates an org-scoped DB record pointing at the builtin seed.
     """
+    await rate_limit(request, "mk-install", max_requests=30, window_seconds=60)
     org_id = await get_active_org_id(current_user, db)
 
     r = await db.execute(select(MarketplaceItem).where(MarketplaceItem.slug == slug, MarketplaceItem.is_active == True))

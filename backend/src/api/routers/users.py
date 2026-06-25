@@ -1,10 +1,10 @@
 import re
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from src.api.deps import get_current_user, get_db
 from src.core.security import hash_password, verify_password
 from src.models.user import User
@@ -24,16 +24,22 @@ class UserResponse(BaseModel):
     contact_info: str | None
     is_active: bool
     is_superuser: bool
+    notify_email: bool = False
+    notify_telegram: bool = False
 
     model_config = {"from_attributes": True}
 
 
 class UpdateUserRequest(BaseModel):
-    full_name: str | None = None
-    avatar_url: str | None = None
-    avatar_emoji: str | None = None
-    notes: str | None = None
-    contact_info: str | None = None
+    # #167: cap unbounded text fields so a client can't store megabytes.
+    full_name: str | None = Field(None, max_length=255)
+    avatar_url: str | None = Field(None, max_length=2048)
+    avatar_emoji: str | None = Field(None, max_length=16)
+    notes: str | None = Field(None, max_length=20000)
+    contact_info: str | None = Field(None, max_length=10000)
+    # #212: notification delivery channel opt-ins.
+    notify_email: bool | None = None
+    notify_telegram: bool | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -78,6 +84,10 @@ async def update_me(
         current_user.notes = req.notes
     if req.contact_info is not None:
         current_user.contact_info = req.contact_info
+    if req.notify_email is not None:
+        current_user.notify_email = req.notify_email
+    if req.notify_telegram is not None:
+        current_user.notify_telegram = req.notify_telegram
     db.add(current_user)
     await db.commit()
     await db.refresh(current_user)
@@ -86,13 +96,17 @@ async def update_me(
 
 @router.get("/", response_model=list[UserResponse])
 async def list_users(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Superuser required")
+    # #174: paginate — an unbounded list of all users is an OOM risk at scale.
     result = await db.execute(
-        select(User).where(User.email != "system@nexora.internal").order_by(User.full_name)
+        select(User).where(User.email != "system@nexora.internal")
+        .order_by(User.full_name).limit(limit).offset(offset)
     )
     return result.scalars().all()
 

@@ -251,7 +251,7 @@ async def oauth_callback(
         if member:
             org_id = member.org_id
 
-    access_token_jwt = create_access_token(user.id, org_id)
+    access_token_jwt = create_access_token(user.id, org_id, token_version=user.token_version)
     refresh_token_jwt = create_refresh_token(user.id, user.token_version)
 
     return RedirectResponse(

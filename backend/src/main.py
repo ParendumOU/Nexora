@@ -28,6 +28,7 @@ from src.api.routers import goals as goals_router
 from src.api.routers import approvals as approvals_router
 from src.api.routers import outcomes as outcomes_router
 from src.api.routers import org_roles as org_roles_router
+from src.api.routers import audit as audit_router
 from src.integrations import github, gitlab
 
 logging.basicConfig(level=logging.INFO)
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(approvals_router.router, prefix=prefix)
     app.include_router(outcomes_router.router, prefix=prefix)
     app.include_router(org_roles_router.router, prefix=prefix)
+    app.include_router(audit_router.router, prefix=prefix)
 
     # WebSocket
     app.include_router(ws_router.router)

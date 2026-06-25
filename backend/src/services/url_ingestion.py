@@ -15,30 +15,23 @@ logger = logging.getLogger(__name__)
 
 
 def _is_url_allowed(url: str) -> bool:
-    """Check URL against SSRF policy. Returns True if allowed."""
-    settings = get_settings()
-    parsed = urlparse(url)
-    host = parsed.hostname or ""
+    """Check URL against SSRF policy. Returns True if allowed.
 
-    # Block private/loopback/link-local IP ranges
-    try:
-        ip = ipaddress.ip_address(host)
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            return False
-    except ValueError:
-        pass  # hostname, not an IP — proceed
-
-    # Check SSRF allowlist if configured (reuse http_tool_allowed_origins)
-    allowlist = settings.http_tool_allowed_origins
+    Uses the central SSRF guard (resolves DNS, blocks private/loopback/reserved),
+    then an optional origin allowlist on top.
+    """
+    from src.core.ssrf import is_public_url
+    if not is_public_url(url):
+        return False
+    allowlist = get_settings().http_tool_allowed_origins
     if allowlist:
-        # Only allow if the scheme+host matches a base URL in the allowlist
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
         origin = f"{parsed.scheme}://{host}"
         return any(
             origin == entry or host.endswith("." + entry.split("://")[-1].split("/")[0])
             for entry in allowlist
         )
-
-    # No allowlist configured — allow public internet (private already blocked above)
     return True
 
 
@@ -55,25 +48,52 @@ async def fetch_url_content(url: str) -> tuple[str, str]:
     if not _is_url_allowed(url):
         raise ValueError(f"URL not allowed by SSRF policy: {url}")
 
-    async with httpx.AsyncClient(
-        timeout=30,
-        follow_redirects=True,
-        max_redirects=5,
-    ) as client:
-        resp = await client.get(
-            url,
-            headers={"User-Agent": "NexoraBot/1.0 (knowledge-ingestion)"},
-        )
-        resp.raise_for_status()
-        content_type = resp.headers.get("content-type", "")
+    # Follow redirects MANUALLY, re-validating each hop — a public URL can 302 to an
+    # internal address (SSRF via redirect). httpx auto-redirect would bypass the check.
+    # Each hop is size-capped (#200) so a malicious server can't OOM us.
+    from src.core.http_safe import get_capped, ResponseTooLarge
+    _MAX = 10 * 1024 * 1024  # 10 MiB
+    _ua = {"User-Agent": "NexoraBot/1.0 (knowledge-ingestion)"}
+    async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        cur = url
+        body = b""
+        resp_headers: dict = {}
+        try:
+            for _ in range(6):
+                async with client.stream("GET", cur, headers=_ua) as resp:
+                    if resp.is_redirect and resp.headers.get("location"):
+                        nxt = str(resp.next_request.url) if resp.next_request else resp.headers["location"]
+                        if not _is_url_allowed(nxt):
+                            raise ValueError(f"Redirect to a blocked URL: {nxt}")
+                        cur = nxt
+                        continue
+                    resp.raise_for_status()
+                    clen = resp.headers.get("content-length")
+                    if clen and clen.isdigit() and int(clen) > _MAX:
+                        raise ValueError("URL content too large")
+                    parts: list[bytes] = []
+                    total = 0
+                    async for ch in resp.aiter_bytes():
+                        total += len(ch)
+                        if total > _MAX:
+                            raise ValueError("URL content too large")
+                        parts.append(ch)
+                    body = b"".join(parts)
+                    resp_headers = dict(resp.headers)
+                    break
+        except ResponseTooLarge:
+            raise ValueError("URL content too large")
+
+        content_type = resp_headers.get("content-type", "")
+        text_body = body.decode("utf-8", errors="replace")
 
         if "text/plain" in content_type:
-            return url, resp.text
+            return url, text_body
 
         if "text/html" not in content_type:
             raise ValueError(f"Unsupported content type: {content_type!r}")
 
-        soup = BeautifulSoup(resp.text, "lxml")
+        soup = BeautifulSoup(text_body, "lxml")
 
         # Remove noisy tags
         for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript"]):

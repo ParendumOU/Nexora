@@ -1,11 +1,36 @@
 """APScheduler integration for scheduled jobs."""
+import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED
 
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+
+
+def build_cron_trigger(cron_expr: str) -> CronTrigger:
+    """Parse a 5-field crontab string into a CronTrigger. Raises ValueError on
+    a malformed expression (#192) — callers surface this as a 422 at creation."""
+    try:
+        return CronTrigger.from_crontab(cron_expr)
+    except Exception:
+        parts = cron_expr.split()
+        if len(parts) == 5:
+            try:
+                return CronTrigger(
+                    minute=parts[0], hour=parts[1], day=parts[2],
+                    month=parts[3], day_of_week=parts[4],
+                )
+            except Exception as exc:
+                raise ValueError(f"Invalid cron expression: {cron_expr!r} ({exc})")
+        raise ValueError(f"Invalid cron expression: {cron_expr!r}")
+
+
+def validate_cron_expr(cron_expr: str) -> None:
+    """Raise ValueError if cron_expr is not a valid 5-field crontab (#192)."""
+    build_cron_trigger(cron_expr)
 
 
 def get_scheduler() -> AsyncIOScheduler:
@@ -15,9 +40,18 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
+def _on_job_event(event) -> None:
+    """Surface job errors/misses loudly instead of letting them pass silently (#183)."""
+    if getattr(event, "exception", None) is not None:
+        logger.error("[scheduler] job %s raised: %s", event.job_id, event.exception)
+    else:
+        logger.warning("[scheduler] job %s missed its scheduled run time", event.job_id)
+
+
 async def start_scheduler() -> None:
     s = get_scheduler()
     if not s.running:
+        s.add_listener(_on_job_event, EVENT_JOB_ERROR | EVENT_JOB_MISSED)
         s.start()
         logger.info("[scheduler] APScheduler started")
 
@@ -39,26 +73,27 @@ async def schedule_job(schedule_id: str, cron_expr: str | None, interval_minutes
     from apscheduler.triggers.interval import IntervalTrigger
 
     async def _job():
-        try:
-            await run_schedule(schedule_id, triggered_by="cron")
-        except Exception as exc:
-            logger.error(f"[scheduler] schedule job {schedule_id} failed: {exc}")
+        # #183: a couple of quick retries on transient failure before giving up.
+        last_exc = None
+        for attempt in range(3):
+            try:
+                await run_schedule(schedule_id, triggered_by="cron")
+                return
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "[scheduler] schedule %s attempt %d/3 failed: %s",
+                    schedule_id, attempt + 1, exc,
+                )
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+        logger.error("[scheduler] schedule %s failed after retries: %s", schedule_id, last_exc)
 
     s = get_scheduler()
     jid = _sched_job_id(schedule_id)
 
     if cron_expr:
-        try:
-            trigger = CronTrigger.from_crontab(cron_expr)
-        except Exception:
-            parts = cron_expr.split()
-            if len(parts) == 5:
-                trigger = CronTrigger(
-                    minute=parts[0], hour=parts[1], day=parts[2],
-                    month=parts[3], day_of_week=parts[4],
-                )
-            else:
-                raise ValueError(f"Invalid cron expression: {cron_expr!r}")
+        trigger = build_cron_trigger(cron_expr)
     elif interval_minutes:
         trigger = IntervalTrigger(minutes=interval_minutes)
     else:
@@ -66,7 +101,12 @@ async def schedule_job(schedule_id: str, cron_expr: str | None, interval_minutes
 
     if s.get_job(jid):
         s.remove_job(jid)
-    s.add_job(_job, trigger=trigger, id=jid, replace_existing=True)
+    # #191: coalesce missed runs + cap to one running instance so a slow agent
+    # run can't pile up overlapping executions.
+    s.add_job(
+        _job, trigger=trigger, id=jid, replace_existing=True,
+        max_instances=1, coalesce=True, misfire_grace_time=300,
+    )
     logger.info(f"[scheduler] registered schedule {schedule_id}")
 
 

@@ -164,13 +164,20 @@ async def create_signup_invite(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a platform signup invite link. Any authenticated user can generate one."""
+    """Create a platform signup invite link. Superuser only (#162) — a signup invite
+    grants access to the whole platform, so a regular user must not mint them."""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only a superuser can create signup invites")
     invite = SignupInvite(
         id=str(uuid.uuid4()),
         email=req.email or None,
         created_by_id=current_user.id,
     )
     db.add(invite)
+    from src.services.audit import record_audit
+    await record_audit(db, action="signup_invite.create", user=current_user,
+                       resource_type="signup_invite", resource_id=invite.id,
+                       detail={"email": req.email or None})
     await db.commit()
     await db.refresh(invite)
     return {
@@ -189,8 +196,14 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
 
     # First-run bypass: if no non-superuser users exist, the invite requirement is
     # waived so the initial admin account can be created via the /setup page.
+    # #166: take a transaction-scoped Postgres advisory lock around the count so two
+    # concurrent invite-less registrations can't both observe an empty table and both
+    # bypass the invite requirement. (No-op on non-PG dialects, e.g. the SQLite tests.)
     is_first_run = False
     if settings.require_invite and not req.invite_token:
+        if db.bind is not None and db.bind.dialect.name == "postgresql":
+            from sqlalchemy import text
+            await db.execute(text("SELECT pg_advisory_xact_lock(91823461)"))
         count_r = await db.execute(select(func.count()).select_from(User).where(User.email != "system@nexora.internal"))
         is_first_run = count_r.scalar_one() == 0
 
@@ -268,7 +281,7 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
     _fire_onboarding(org.id, req.email, org_name)
 
     return TokenResponse(
-        access_token=create_access_token(user.id, org.id),
+        access_token=create_access_token(user.id, org.id, token_version=user.token_version),
         refresh_token=create_refresh_token(user.id, user.token_version),
     )
 
@@ -300,7 +313,7 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     if org_id:
         _fire_audit_event(org_id, "user.login", "user", resource_id=user.id, user_id=user.id)
     return TokenResponse(
-        access_token=create_access_token(user.id, org_id),
+        access_token=create_access_token(user.id, org_id, token_version=user.token_version),
         refresh_token=create_refresh_token(user.id, user.token_version),
     )
 
@@ -352,7 +365,7 @@ async def totp_login(
 
     org_id = await _get_active_org_id(user, db)
     return TokenResponse(
-        access_token=create_access_token(user.id, org_id),
+        access_token=create_access_token(user.id, org_id, token_version=user.token_version),
         refresh_token=create_refresh_token(user.id, user.token_version),
     )
 
@@ -379,7 +392,7 @@ async def refresh(req: RefreshRequest, request: Request, db: AsyncSession = Depe
     org_id = await _get_active_org_id(user, db)
 
     return TokenResponse(
-        access_token=create_access_token(user.id, org_id),
+        access_token=create_access_token(user.id, org_id, token_version=user.token_version),
         refresh_token=create_refresh_token(user.id, user.token_version),
     )
 
@@ -472,6 +485,6 @@ async def reset_password(req: ResetPasswordRequest, request: Request, db: AsyncS
 
     org_id = await _get_active_org_id(user, db)
     return TokenResponse(
-        access_token=create_access_token(user.id, org_id),
+        access_token=create_access_token(user.id, org_id, token_version=user.token_version),
         refresh_token=create_refresh_token(user.id, user.token_version),
     )

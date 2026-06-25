@@ -23,6 +23,10 @@ class User(Base):
     contact_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+    # #212: opt-in delivery of notifications via email / Telegram DM for events
+    # missed while no real-time client was connected.
+    notify_email: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    notify_telegram: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     token_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     active_org_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=True)
     # TOTP 2FA — secret encrypted with Fernet, backup_codes JSON array also encrypted

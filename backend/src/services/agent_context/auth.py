@@ -33,6 +33,9 @@ async def authenticate_ws(websocket: WebSocket) -> User | None:
         payload = decode_token(token)
         if payload.get("type") != "access":
             return None
+        # Reject a 2FA-pending token on the socket too (#161).
+        if payload.get("scope") == "2fa_pending":
+            return None
         user_id = payload.get("sub")
     except Exception:
         return None

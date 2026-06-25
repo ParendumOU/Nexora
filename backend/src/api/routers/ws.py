@@ -223,6 +223,13 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
         await websocket.close(code=4003)
         return
 
+    # #168: cap new connections per client IP to blunt a connection-flood DoS.
+    from src.core.rate_limit import ws_rate_limit_ok
+    _ip = websocket.client.host if websocket.client else "unknown"
+    if not await ws_rate_limit_ok(_ip, "ws-connect", max_requests=60, window_seconds=60):
+        await websocket.close(code=4029)
+        return
+
     await websocket.accept()
 
     user = await authenticate_ws(websocket)
@@ -910,6 +917,13 @@ async def user_socket(websocket: WebSocket) -> None:
     belong to, and forwards each event straight to the client. Keepalive ping
     every 60s of silence; the client reconnects with backoff on drop.
     """
+    # #168: cap new connections per client IP.
+    from src.core.rate_limit import ws_rate_limit_ok
+    _ip = websocket.client.host if websocket.client else "unknown"
+    if not await ws_rate_limit_ok(_ip, "ws-connect", max_requests=60, window_seconds=60):
+        await websocket.close(code=4029)
+        return
+
     await websocket.accept()
     user = await authenticate_ws(websocket)
     if not user:

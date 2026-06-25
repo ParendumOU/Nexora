@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,8 @@ class ScheduleCreate(BaseModel):
     interval_minutes: int | None = None
     agent_id: str | None = None
     prompt: str
+    max_concurrency: int = Field(1, ge=1, le=20)
+    timeout_minutes: int | None = Field(None, ge=1, le=1440)
 
 
 class ScheduleUpdate(BaseModel):
@@ -37,6 +39,8 @@ class ScheduleUpdate(BaseModel):
     interval_minutes: int | None = None
     agent_id: str | None = None
     prompt: str | None = None
+    max_concurrency: int | None = Field(None, ge=1, le=20)
+    timeout_minutes: int | None = Field(None, ge=1, le=1440)
 
 
 def _schedule_dict(s: Schedule) -> dict:
@@ -50,6 +54,8 @@ def _schedule_dict(s: Schedule) -> dict:
         "agent_id": s.agent_id,
         "prompt": s.prompt,
         "is_active": s.is_active,
+        "max_concurrency": getattr(s, "max_concurrency", 1),
+        "timeout_minutes": getattr(s, "timeout_minutes", None),
         "last_run_at": s.last_run_at.isoformat() if s.last_run_at else None,
         "next_run_at": s.next_run_at.isoformat() if s.next_run_at else None,
         "created_at": s.created_at.isoformat(),
@@ -78,6 +84,14 @@ def _validate_trigger(cron_expr: str | None, interval_minutes: int | None) -> No
         raise HTTPException(status_code=422, detail="cron_expr or interval_minutes is required")
     if cron_expr and interval_minutes:
         raise HTTPException(status_code=422, detail="Provide either cron_expr or interval_minutes, not both")
+    # #192: validate the cron expression at creation/update so a bad value fails
+    # here (422) instead of silently erroring later when APScheduler activates it.
+    if cron_expr:
+        from src.services.scheduler import validate_cron_expr
+        try:
+            validate_cron_expr(cron_expr)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
 
 async def _activate(s: Schedule) -> None:
@@ -145,6 +159,8 @@ async def create_schedule(
         agent_id=req.agent_id or None,
         prompt=req.prompt,
         is_active=False,
+        max_concurrency=req.max_concurrency,
+        timeout_minutes=req.timeout_minutes,
     )
     db.add(s)
     await db.commit()

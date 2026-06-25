@@ -28,6 +28,9 @@ class Schedule(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    # #207: cap simultaneous in-flight runs of this schedule; optional wall-clock timeout.
+    max_concurrency: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    timeout_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

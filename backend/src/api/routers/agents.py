@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, Date
 from pydantic import BaseModel, Field
 from src.core.database import get_db
+from src.core.security import encrypt_env_map
 from src.api.deps import get_current_user, get_active_org_id
 from src.core.permissions import require_org_role
 from src.models.org import OrgRole
@@ -45,7 +46,7 @@ def _build_snapshot(agent: Agent) -> dict:
         "skills": agent.skills or [],
         "tools": agent.tools or [],
         "mcps": agent.mcps or [],
-        "env_vars": agent.env_vars or {},
+        "env_vars": agent.env_vars or {},  # keep encrypted in the snapshot (#172)
         "model_pref": agent.model_pref,
         "model_profile_id": agent.model_profile_id,
         "temperature": agent.temperature,
@@ -163,6 +164,11 @@ class AgentResponse(BaseModel):
         if self.env_vars is None: self.env_vars = {}
         if self.mcps is None: self.mcps = []
         if self.flow_config is None: self.flow_config = {}
+        # env_vars are encrypted at rest (#163) — decrypt for the owner's editor
+        # (legacy-plaintext safe). The agent is already org-scoped by the endpoint.
+        if self.env_vars:
+            from src.core.security import decrypt_env_map
+            self.env_vars = decrypt_env_map(self.env_vars)
 
 
 class MemoryCreate(BaseModel):
@@ -362,7 +368,7 @@ async def create_agent(
         temperature=req.temperature,
         max_tokens=req.max_tokens,
         flow_config=req.flow_config,
-        env_vars=req.env_vars,
+        env_vars=encrypt_env_map(req.env_vars),
         mcps=req.mcps,
         max_subagents=req.max_subagents,
         max_concurrency=req.max_concurrency,
@@ -406,6 +412,9 @@ async def update_agent(
         _updates["model_profile_id"] = await _validate_model_profile(
             _updates["model_profile_id"], org_id, db
         )
+    if "env_vars" in _updates:
+        from src.core.security import encrypt_env_map
+        _updates["env_vars"] = encrypt_env_map(_updates["env_vars"])  # encrypt at rest (#163)
     for field, value in _updates.items():
         setattr(agent, field, value)
 
@@ -561,7 +570,12 @@ async def revert_agent_to_version(
     ]
     for field in config_fields:
         if field in snap:
-            setattr(agent, field, snap[field])
+            value = snap[field]
+            if field == "env_vars":
+                # Normalize to encrypted-at-rest (older snapshots may hold plaintext).
+                from src.core.security import encrypt_env_map, decrypt_env_map
+                value = encrypt_env_map(decrypt_env_map(value))
+            setattr(agent, field, value)
 
     # Create a new version capturing the reverted state
     await _create_version(agent, current_user.id, db)
@@ -888,6 +902,13 @@ async def public_agent_chat(
     await rate_limit(request, f"public_chat:{share_token}", max_requests=10, window_seconds=60)
 
     agent = await _get_shared_agent(share_token, db)
+
+    # A public share must not be able to drain the org's token budget (#180/#235):
+    # refuse when the agent's org is over budget. (Interactive owner chat is exempt;
+    # this is unauthenticated public traffic.)
+    from src.services.budget import over_budget
+    if await over_budget(agent.org_id):
+        raise HTTPException(status_code=429, detail="This agent is temporarily unavailable (usage budget reached).")
 
     # Resolve providers for the agent's org
     from src.services.agent_context import get_chain_providers

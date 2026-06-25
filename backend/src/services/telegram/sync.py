@@ -23,10 +23,7 @@ async def _load_config(integration_id: str) -> dict | None:
     i = await _load_integration(integration_id)
     if not i or not i.config:
         return None
-    try:
-        return json.loads(i.config)
-    except Exception:
-        return None
+    return i.get_config() or None
 
 
 async def _save_config(integration_id: str, config: dict) -> None:
@@ -37,7 +34,7 @@ async def _save_config(integration_id: str, config: dict) -> None:
         r = await db.execute(select(Integration).where(Integration.id == integration_id))
         i = r.scalar_one_or_none()
         if i:
-            i.config = json.dumps(config)
+            i.set_config(config)
             await db.commit()
 
 
@@ -71,10 +68,7 @@ async def _get_default_tg_integration(org_id: str) -> tuple[str | None, dict | N
         i = r.scalar_one_or_none()
         if not i or not i.config:
             return None, None
-        try:
-            return i.id, json.loads(i.config)
-        except Exception:
-            return None, None
+        return i.id, (i.get_config() or None)
 
 
 # ─── Bot command handlers ──────────────────────────────────────────────────────

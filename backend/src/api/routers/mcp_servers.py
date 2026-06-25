@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from src.core.database import get_db
+from src.core.security import encrypt_opt
 from src.api.deps import get_current_user, get_active_org_id
 from src.models.user import User
 from src.models.mcp_server import McpServer
@@ -252,7 +253,7 @@ async def create_mcp_server(
         url=req.url,
         config=req.config,
         auth_type=req.auth_type,
-        auth_value=req.auth_value,
+        auth_value=encrypt_opt(req.auth_value),
         known_tools=[],
     )
     db.add(mcp)
@@ -288,13 +289,21 @@ async def fetch_mcp_tools(
     if not mcp:
         raise HTTPException(status_code=404, detail="MCP server not found")
 
+    # SSRF guard (#185): we're about to connect to this user-registered URL.
+    from src.core.ssrf import assert_public_url
+    try:
+        assert_public_url(mcp.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Blocked MCP URL: {exc}")
+
     headers: dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
-    if mcp.auth_type in ("token", "bearer") and mcp.auth_value:
-        headers["Authorization"] = f"Bearer {mcp.auth_value}"
-    elif mcp.auth_type == "header" and mcp.auth_value:
+    _auth = mcp.plain_auth_value
+    if mcp.auth_type in ("token", "bearer") and _auth:
+        headers["Authorization"] = f"Bearer {_auth}"
+    elif mcp.auth_type == "header" and _auth:
         # auth_value expected as "HeaderName: value"
-        if ": " in mcp.auth_value:
-            k, v = mcp.auth_value.split(": ", 1)
+        if ": " in _auth:
+            k, v = _auth.split(": ", 1)
             headers[k] = v
 
     tools: list[dict] = []
@@ -367,6 +376,8 @@ async def update_mcp_server(
     if not mcp:
         raise HTTPException(status_code=404, detail="MCP server not found")
     for field, value in req.model_dump(exclude_unset=True).items():
+        if field == "auth_value":
+            value = encrypt_opt(value)  # keep the secret encrypted at rest
         setattr(mcp, field, value)
     await db.commit()
     await db.refresh(mcp)

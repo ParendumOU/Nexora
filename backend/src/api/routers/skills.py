@@ -41,7 +41,7 @@ class SkillResponse(BaseModel):
 
 
 @router.get("/builtin")
-async def list_builtin():
+async def list_builtin(_=Depends(get_current_user)):
     from src.seeds.loader import get_all_skills
     loaded = get_all_skills()
     return [
@@ -58,7 +58,7 @@ async def list_builtin():
 
 
 @router.get("/builtin/{skill_key}/files")
-async def get_builtin_skill_files(skill_key: str):
+async def get_builtin_skill_files(skill_key: str, _=Depends(get_current_user)):
     from pathlib import Path
     try:
         from src.seeds.loader import get_all_skills

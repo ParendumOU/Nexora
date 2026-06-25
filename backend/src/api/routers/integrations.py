@@ -16,6 +16,24 @@ router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 SUPPORTED_TYPES = {"telegram", "slack", "discord", "whatsapp"}
 
+# Allowed config keys per integration type (#203) — reject arbitrary keys so a
+# client can't stash unbounded junk in the encrypted config blob.
+_ALLOWED_CONFIG_KEYS = {
+    "telegram": {"bot_token", "token", "channel_agent_id", "allowed_chat_ids", "webhook_secret"},
+    "slack": {"bot_token", "token", "signing_secret", "channel_agent_id", "app_token"},
+    "discord": {"bot_token", "token", "channel_agent_id", "guild_id"},
+    "whatsapp": {"api_key", "token", "phone_id", "channel_agent_id"},
+}
+
+
+def _validate_config_keys(integration_type: str, config: dict) -> None:
+    allowed = _ALLOWED_CONFIG_KEYS.get(integration_type)
+    if allowed is None:
+        return
+    unknown = set(config or {}) - allowed
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown config keys for {integration_type}: {sorted(unknown)}")
+
 
 class IntegrationCreate(BaseModel):
     name: str
@@ -43,12 +61,7 @@ def _mask_config(cfg: dict) -> dict:
 
 
 def _int_dict(i: Integration, pending_count: int = 0) -> dict:
-    cfg: dict = {}
-    if i.config:
-        try:
-            cfg = json.loads(i.config)
-        except Exception:
-            pass
+    cfg: dict = i.get_config()
     return {
         "id": i.id,
         "name": i.name,
@@ -74,19 +87,21 @@ async def list_integrations(
     )
     integrations = r.scalars().all()
 
-    result = []
-    for i in integrations:
-        pending_count = 0
-        if i.integration_type == "telegram":
-            cnt_r = await db.execute(
-                select(func.count()).select_from(TelegramPending).where(
-                    TelegramPending.integration_id == i.id,
-                    TelegramPending.status == "pending",
-                )
+    # #202: one grouped count for all telegram integrations instead of a query each.
+    tg_ids = [i.id for i in integrations if i.integration_type == "telegram"]
+    pending_by_int: dict[str, int] = {}
+    if tg_ids:
+        cnt_r = await db.execute(
+            select(TelegramPending.integration_id, func.count())
+            .where(
+                TelegramPending.integration_id.in_(tg_ids),
+                TelegramPending.status == "pending",
             )
-            pending_count = cnt_r.scalar() or 0
-        result.append(_int_dict(i, pending_count))
-    return result
+            .group_by(TelegramPending.integration_id)
+        )
+        pending_by_int = {row[0]: row[1] for row in cnt_r.all()}
+
+    return [_int_dict(i, pending_by_int.get(i.id, 0)) for i in integrations]
 
 
 @router.post("", status_code=201)
@@ -97,15 +112,16 @@ async def create_integration(
 ):
     if req.integration_type not in SUPPORTED_TYPES:
         raise HTTPException(status_code=422, detail=f"integration_type must be one of {sorted(SUPPORTED_TYPES)}")
+    _validate_config_keys(req.integration_type, req.config or {})
     org_id = await get_active_org_id(current_user, db)
     i = Integration(
         id=str(uuid.uuid4()),
         org_id=org_id,
         integration_type=req.integration_type,
         name=req.name,
-        config=json.dumps(req.config) if req.config else None,
         is_active=True,
     )
+    i.set_config(req.config or {})
     db.add(i)
     await db.commit()
     await db.refresh(i)
@@ -129,12 +145,13 @@ async def update_integration(
     if req.name is not None:
         i.name = req.name
     if req.config is not None:
-        existing: dict = json.loads(i.config) if i.config else {}
+        _validate_config_keys(i.integration_type, req.config)
+        existing: dict = i.get_config()
         for k, v in req.config.items():
             # Skip blank or placeholder values so we don't erase existing secrets
             if v not in ("", None) and not (isinstance(v, str) and "..." in v):
                 existing[k] = v
-        i.config = json.dumps(existing)
+        i.set_config(existing)
     if req.is_active is not None:
         i.is_active = req.is_active
     await db.commit()
@@ -143,7 +160,7 @@ async def update_integration(
     # Sync allowlist to Redis so live bots pick up the change immediately
     if i.integration_type == "telegram":
         try:
-            cfg_synced: dict = json.loads(i.config) if i.config else {}
+            cfg_synced: dict = i.get_config()
             allowed_synced = [int(x) for x in cfg_synced.get("allowed_chat_ids", [])]
             from src.services.telegram_workflow import _sync_allowed_to_redis
             await _sync_allowed_to_redis(int_id, allowed_synced)
@@ -270,13 +287,13 @@ async def accept_pending(
     if not pending:
         raise HTTPException(status_code=404, detail="Code not found or already used")
 
-    cfg: dict = json.loads(i.config) if i.config else {}
+    cfg: dict = i.get_config()
     allowed: list = cfg.get("allowed_chat_ids", [])
     tg_id = int(pending.tg_user_id)
     if tg_id not in allowed:
         allowed.append(tg_id)
     cfg["allowed_chat_ids"] = allowed
-    i.config = json.dumps(cfg)
+    i.set_config(cfg)
     pending.status = "accepted"
     await db.commit()
 
@@ -311,10 +328,10 @@ async def revoke_pending(
     if not pending:
         raise HTTPException(status_code=404, detail="Pending record not found")
 
-    cfg: dict = json.loads(i.config) if i.config else {}
+    cfg: dict = i.get_config()
     tg_id = int(pending.tg_user_id)
     cfg["allowed_chat_ids"] = [x for x in cfg.get("allowed_chat_ids", []) if int(x) != tg_id]
-    i.config = json.dumps(cfg)
+    i.set_config(cfg)
     pending.status = "revoked"
     await db.commit()
 
@@ -340,7 +357,7 @@ async def start_bot(
 ):
     org_id = await get_active_org_id(current_user, db)
     i = await _get_tg_integration(int_id, org_id, db)
-    cfg: dict = json.loads(i.config) if i.config else {}
+    cfg: dict = i.get_config()
     token = cfg.get("bot_token") or cfg.get("token")
     agent_id = cfg.get("channel_agent_id")
     if not token:

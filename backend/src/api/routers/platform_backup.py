@@ -19,6 +19,7 @@ from src.core.database import AsyncSessionLocal, get_db
 from src.models.backup_job import BackupJob
 from src.models.user import User
 from src.services import platform_backup as pb
+from src.services.audit import record_audit
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,12 @@ async def initiate_migrate(
         raise HTTPException(422, "target_url and target_token are required")
     if not target_url.startswith(("http://", "https://")):
         raise HTTPException(422, "target_url must start with http:// or https://")
+    # SSRF guard: the server pushes the backup to this URL (#169/#160 family).
+    from src.core.ssrf import assert_public_url
+    try:
+        assert_public_url(target_url)
+    except ValueError as exc:
+        raise HTTPException(422, f"Blocked target_url: {exc}")
 
     scope = body.get("scope", "instance")
     if scope not in ("instance", "org"):
@@ -150,6 +157,9 @@ async def initiate_migrate(
         status="pending",
     )
     db.add(job)
+    await record_audit(db, action="platform.migrate", user=user,
+                       resource_type="backup_job", resource_id=job.id,
+                       detail={"scope": scope, "target_url": target_url.rstrip("/")})
     await db.commit()
 
     # The target token is a secret — kept out of the DB row, passed only to the task.
@@ -179,6 +189,9 @@ async def initiate_export(
         status="pending",
     )
     db.add(job)
+    await record_audit(db, action="platform.export", user=user,
+                       resource_type="backup_job", resource_id=job.id,
+                       detail={"scope": scope})
     await db.commit()
 
     asyncio.create_task(_run_export(job.id))
@@ -256,7 +269,7 @@ async def import_backup(
     mode: Annotated[str, Form()] = "skip",
     reembed: Annotated[bool, Form()] = True,
     allow_secret_loss: Annotated[bool, Form()] = False,
-    _: User = Depends(require_superuser),
+    user: User = Depends(require_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Restore a backup ZIP. mode: "skip" (default) or "overwrite"."""
@@ -277,4 +290,7 @@ async def import_backup(
     except Exception as exc:
         logger.error("[platform-backup] import failed: %s", exc, exc_info=True)
         raise HTTPException(500, "Restore failed")
+    await record_audit(db, action="platform.import", user=user,
+                       resource_type="backup", detail={"mode": mode})
+    await db.commit()
     return {"status": "ok", "summary": summary}

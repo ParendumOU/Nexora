@@ -99,7 +99,7 @@ async def _enrich_project(project: Project, db: AsyncSession) -> dict:
         "provider_chain_id": project.provider_chain_id,
         "tools": project.tools,
         "mcps": project.mcps,
-        "env_vars": project.env_vars,
+        "env_vars": project.plain_env_vars,
         "repo_branch": (project.meta or {}).get("repo_branch"),
         "repo_credential_id": (project.meta or {}).get("repo_credential_id"),
         "is_private": (project.meta or {}).get("is_private", False),
@@ -296,7 +296,7 @@ async def update_project(
     if req.mcps is not None:
         project.mcps = req.mcps
     if req.env_vars is not None:
-        project.env_vars = req.env_vars
+        from src.core.security import encrypt_env_map as _eem; project.env_vars = _eem(req.env_vars)
     # Store repo extras in meta JSON
     if any(v is not None for v in [req.repo_branch, req.repo_credential_id, req.is_private]):
         meta = dict(project.meta or {})

@@ -379,8 +379,9 @@ async def get_platform_context(
             if _proj.repo_url:
                 _cname = _cred.name if _cred else "none"
                 lean.append(f"Repo ({_plabel}): {_proj.repo_url} | branch: `{_branch}` | credential: `{_cname}`")
-            if _proj.env_vars:
-                for k, v in _proj.env_vars.items():
+            _penv = _proj.plain_env_vars
+            if _penv:
+                for k, v in _penv.items():
                     lean.append(f"  {k} = {v}")
             lean.append("")
 
@@ -556,9 +557,10 @@ async def get_platform_context(
             )
         lines.append("")
 
-    if current_project and current_project.env_vars:
+    _cp_env = current_project.plain_env_vars if current_project else {}
+    if _cp_env:
         lines += ["### Project Environment Variables", ""]
-        for k, v in current_project.env_vars.items():
+        for k, v in _cp_env.items():
             lines.append(f"  {k} = {v}")
         lines.append("")
 

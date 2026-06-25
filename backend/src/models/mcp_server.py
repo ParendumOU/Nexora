@@ -21,7 +21,13 @@ class McpServer(Base):
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     auth_type: Mapped[str] = mapped_column(String(20), default="none")   # none | bearer | apikey
-    auth_value: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    auth_value: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Fernet-encrypted
     known_tools: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    @property
+    def plain_auth_value(self) -> str | None:
+        """Decrypted auth value (tolerates legacy plaintext rows)."""
+        from src.core.security import decrypt_safe
+        return decrypt_safe(self.auth_value)

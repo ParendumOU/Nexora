@@ -77,17 +77,20 @@ async def list_memories(
     scope: MemoryScope | None = Query(None),
     agent_id: str | None = Query(None),
     project_id: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     org_id = await get_active_org_id(current_user, db)
     results: list[MemoryOut] = []
+    # #199: cap each scope's result set so a large memory store can't OOM the response.
 
     if scope in (None, "agent"):
         q = select(AgentMemory).where(AgentMemory.org_id == org_id)
         if agent_id:
             q = q.where(AgentMemory.agent_id == agent_id)
-        q = q.order_by(AgentMemory.priority.desc(), AgentMemory.created_at)
+        q = q.order_by(AgentMemory.priority.desc(), AgentMemory.created_at).limit(limit).offset(offset)
         r = await db.execute(q)
         results += [_agent_mem_to_out(m) for m in r.scalars().all()]
 
@@ -97,7 +100,7 @@ async def list_memories(
             q = q.where(ProjectMemory.project_id == project_id)
         if agent_id:
             q = q.where(ProjectMemory.agent_id == agent_id)
-        q = q.order_by(ProjectMemory.priority.desc(), ProjectMemory.created_at)
+        q = q.order_by(ProjectMemory.priority.desc(), ProjectMemory.created_at).limit(limit).offset(offset)
         r = await db.execute(q)
         results += [_project_mem_to_out(m) for m in r.scalars().all()]
 

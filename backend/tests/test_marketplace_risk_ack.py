@@ -50,6 +50,27 @@ def _resp(json_body, status_code=200):
     return resp
 
 
+def _stream_cm(json_body, status_code=200):
+    """A fake httpx stream() context manager yielding the JSON body as bytes
+    (the import path now uses size-capped streaming via core.http_safe)."""
+    import json as _json
+    payload = _json.dumps(json_body).encode()
+
+    async def _aiter():
+        yield payload
+
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.headers = {"content-length": str(len(payload)), "content-type": "application/json"}
+    resp.is_redirect = False
+    resp.raise_for_status.return_value = None
+    resp.aiter_bytes = lambda: _aiter()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
+
+
 def _mock_marketplace(package_body, disclaimer_body=None):
     """Build a patch target for `httpx.AsyncClient` that routes GETs by URL:
     `/api/packages/disclaimer` → the disclaimer payload; anything else → the
@@ -63,8 +84,13 @@ def _mock_marketplace(package_body, disclaimer_body=None):
             return _resp(disclaimer_body)
         return _resp(package_body)
 
+    def _stream(method, url, *args, **kwargs):
+        # import path streams the package metadata; deps reuse the same body
+        return _stream_cm(package_body)
+
     inner = MagicMock()
     inner.get = AsyncMock(side_effect=_get)
+    inner.stream = MagicMock(side_effect=_stream)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=inner)
     cm.__aexit__ = AsyncMock(return_value=False)

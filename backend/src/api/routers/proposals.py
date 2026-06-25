@@ -33,18 +33,28 @@ def _row(p: AgentProposal) -> dict:
     }
 
 
+_VALID_STATUSES = {"pending", "approved", "rejected", "auto_approved"}
+
+
 @router.get("", response_model=list)
 async def list_proposals(
     status: str | None = Query(None, description="Filter by status: pending|approved|rejected|auto_approved"),
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     org_id = await get_active_org_id(current_user, db)
     q = select(AgentProposal).where(AgentProposal.org_id == org_id)
     if status:
-        statuses = [s.strip() for s in status.split(",")]
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        # #198: reject unknown status tokens instead of silently returning nothing.
+        invalid = [s for s in statuses if s not in _VALID_STATUSES]
+        if invalid:
+            raise HTTPException(status_code=422, detail=f"Invalid status filter: {invalid}")
         q = q.where(AgentProposal.status.in_(statuses))
-    q = q.order_by(AgentProposal.created_at.desc()).limit(100)
+    # #205: client-controlled paging (was a fixed limit(100) that silently truncated).
+    q = q.order_by(AgentProposal.created_at.desc()).limit(limit).offset(offset)
     rows = (await db.execute(q)).scalars().all()
     return [_row(p) for p in rows]
 
@@ -56,8 +66,10 @@ async def approve_proposal(
     db: AsyncSession = Depends(get_db),
 ):
     org_id = await get_active_org_id(current_user, db)
+    # Lock the row so two concurrent approves can't both execute (#196 TOCTOU).
     r = await db.execute(
         select(AgentProposal).where(AgentProposal.id == proposal_id, AgentProposal.org_id == org_id)
+        .with_for_update()
     )
     proposal = r.scalar_one_or_none()
     if not proposal:
@@ -86,6 +98,7 @@ async def reject_proposal(
     org_id = await get_active_org_id(current_user, db)
     r = await db.execute(
         select(AgentProposal).where(AgentProposal.id == proposal_id, AgentProposal.org_id == org_id)
+        .with_for_update()
     )
     proposal = r.scalar_one_or_none()
     if not proposal:

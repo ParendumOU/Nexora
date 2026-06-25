@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel, Field
 from src.core.database import get_db
 from src.api.deps import get_current_user
@@ -10,6 +10,7 @@ from src.core.security import create_access_token, create_refresh_token
 from src.models.user import User
 from src.models.org import Organization, OrgMember, OrgRole
 from src.models.org_invite import OrgInvite
+from src.services.audit import record_audit
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
 
@@ -95,19 +96,26 @@ async def list_orgs(
         select(OrgMember).where(OrgMember.user_id == current_user.id)
     )
     memberships = r.scalars().all()
+    org_ids = [m.org_id for m in memberships]
+    if not org_ids:
+        return []
+
+    # #164: batch the org fetch + member counts instead of two queries per org.
+    orgs_r = await db.execute(select(Organization).where(Organization.id.in_(org_ids)))
+    orgs_by_id = {o.id: o for o in orgs_r.scalars().all()}
+
+    count_r = await db.execute(
+        select(OrgMember.org_id, func.count())
+        .where(OrgMember.org_id.in_(org_ids))
+        .group_by(OrgMember.org_id)
+    )
+    counts = {row[0]: row[1] for row in count_r.all()}
 
     result = []
     for m in memberships:
-        org_r = await db.execute(select(Organization).where(Organization.id == m.org_id))
-        org = org_r.scalar_one_or_none()
+        org = orgs_by_id.get(m.org_id)
         if not org:
             continue
-
-        count_r = await db.execute(
-            select(OrgMember).where(OrgMember.org_id == org.id)
-        )
-        count = len(count_r.scalars().all())
-
         result.append({
             "id": org.id,
             "name": org.name,
@@ -117,7 +125,7 @@ async def list_orgs(
             "role": m.role.value if hasattr(m.role, "value") else m.role,
             "is_owner": org.owner_id == current_user.id,
             "is_personal": bool(org.is_personal),
-            "member_count": count,
+            "member_count": counts.get(org.id, 0),
         })
 
     return result
@@ -359,6 +367,9 @@ async def remove_member(
         raise HTTPException(status_code=400, detail="Cannot remove the owner")
 
     await db.delete(target)
+    await record_audit(db, action="org.member.remove", user=current_user, org_id=org_id,
+                       resource_type="org_member", resource_id=user_id,
+                       detail={"removed_role": target.role.value})
     await db.commit()
     from src.api.routers.auth import _fire_audit_event
     _fire_audit_event(org_id, "user.removed", "user",
@@ -410,6 +421,9 @@ async def update_member_role(
         raise HTTPException(status_code=400, detail="Transfer ownership before changing the owner's role")
 
     target.role = new_role
+    await record_audit(db, action="org.member.role_change", user=current_user, org_id=org_id,
+                       resource_type="org_member", resource_id=user_id,
+                       detail={"new_role": new_role.value})
     await db.commit()
 
     return {"user_id": user_id, "role": new_role.value}
@@ -469,6 +483,9 @@ async def create_invite(
         invited_by_id=current_user.id,
     )
     db.add(invite)
+    await record_audit(db, action="org.invite.create", user=current_user, org_id=org_id,
+                       resource_type="org_invite", resource_id=invite.id,
+                       detail={"role": body.role})
     await db.commit()
     await db.refresh(invite)
 

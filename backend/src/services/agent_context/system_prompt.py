@@ -42,9 +42,10 @@ async def get_agent_system_prompt(agent_id: str | None) -> str | None:
                 if skill_doc:
                     parts.append(f"---\n## Skill: {skill.name}\n\n{skill_doc}")
 
-        if agent.env_vars:
+        _agent_env = agent.plain_env_vars
+        if _agent_env:
             env_lines = ["## Your Environment Variables", ""]
-            for k, v in agent.env_vars.items():
+            for k, v in _agent_env.items():
                 env_lines.append(f"  {k} = {v}")
             parts.append("\n".join(env_lines))
 

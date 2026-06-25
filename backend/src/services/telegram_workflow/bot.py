@@ -57,12 +57,7 @@ async def start_telegram_bot(
             integ = ir.scalar_one_or_none()
             if integ:
                 wf_org_id = integ.org_id or ""
-                _cfg = {}
-                if integ.config:
-                    try:
-                        _cfg = _json.loads(integ.config) if isinstance(integ.config, str) else dict(integ.config)
-                    except Exception:
-                        _cfg = {}
+                _cfg = integ.get_config()
                 wf_agent_id = _cfg.get("channel_agent_id") or None
 
     if wf_agent_id:
@@ -217,12 +212,7 @@ async def reconcile_telegram_bots() -> None:
 
     active_ids: set[str] = set()
     for i in integrations:
-        cfg: dict = {}
-        if i.config:
-            try:
-                cfg = _json.loads(i.config)
-            except Exception:
-                cfg = {}
+        cfg: dict = i.get_config()
         token = cfg.get("bot_token") or cfg.get("token")
         agent_id = cfg.get("channel_agent_id")
         if not token or not agent_id:

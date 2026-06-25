@@ -22,8 +22,14 @@ class Agent(Base):
     skills: Mapped[list] = mapped_column(JSON, default=list)        # list of skill names
     mcps: Mapped[list] = mapped_column(JSON, default=list)          # [{server_id?, name, url, allowed_tools?}]
     tools: Mapped[list] = mapped_column(JSON, default=list)         # list of tool names
-    env_vars: Mapped[dict] = mapped_column(JSON, default=dict)      # {KEY: VALUE}
+    env_vars: Mapped[dict] = mapped_column(JSON, default=dict)      # {KEY: encrypted VALUE}
     max_subagents: Mapped[int] = mapped_column(Integer, default=5)
+
+    @property
+    def plain_env_vars(self) -> dict:
+        """Decrypted env-var map for injection at execution (legacy-plaintext safe)."""
+        from src.core.security import decrypt_env_map
+        return decrypt_env_map(self.env_vars)
     max_concurrency: Mapped[int] = mapped_column(Integer, default=2)
     model_pref: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Optional capability binding: when set (and the turn has no explicit per-message
