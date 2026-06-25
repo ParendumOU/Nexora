@@ -10,6 +10,14 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.6.0
+
+- Outcome tracking and decision log: agents record what an action or goal achieved (with optional KPI) and the decisions they made, and can query that history to learn.
+- Outcomes are recorded automatically when a goal completes.
+- Persistent agent org chart: assign durable roles and areas of ownership, with escalation paths.
+- Backlog planner: a prioritised plan across all open goals and tasks (priority, then oldest first, dependency-blocked items held out) instead of reactive FIFO.
+- Turn control is now a deterministic state machine in code (resume, wait, nudge, final), not prompt instructions.
+
 ## 1.5.0
 
 - Human-in-the-loop tool approval: tools at/above a configurable risk tier are held for review instead of running (flag, default off).

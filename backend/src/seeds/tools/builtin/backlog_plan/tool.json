@@ -1,0 +1,6 @@
+{
+  "key": "backlog_plan",
+  "name": "Backlog Plan",
+  "description": "Get a prioritised plan across all open goals + tasks (priority, then FIFO; blocked items held out). Field: capacity (optional cap).",
+  "category": "platform", "env_vars": [], "is_builtin": true, "always_allowed": true
+}

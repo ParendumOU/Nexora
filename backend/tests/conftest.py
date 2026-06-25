@@ -72,6 +72,8 @@ def _build_test_app() -> FastAPI:
         cli_hooks as cli_hooks_router,
         goals as goals_router,
         approvals as approvals_router,
+        outcomes as outcomes_router,
+        org_roles as org_roles_router,
     )
 
     app = FastAPI(title="Nexora Test")
@@ -125,6 +127,8 @@ def _build_test_app() -> FastAPI:
     app.include_router(cli_hooks_router.router, prefix=prefix)
     app.include_router(goals_router.router, prefix=prefix)
     app.include_router(approvals_router.router, prefix=prefix)
+    app.include_router(outcomes_router.router, prefix=prefix)
+    app.include_router(org_roles_router.router, prefix=prefix)
 
     @app.get("/health")
     async def health():

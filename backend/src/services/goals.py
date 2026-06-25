@@ -32,17 +32,30 @@ async def recompute_goal_progress(db: AsyncSession, goal_id: str) -> Goal | None
     done = sum(1 for m in rows if m.status in _DONE)
     goal.progress = round(done / total * 100) if total else 0
 
+    _just_completed = False
     if goal.status != "cancelled":
         if total and done == total:
             if goal.status != "completed":
                 goal.status = "completed"
                 goal.completed_at = datetime.now(timezone.utc)
+                _just_completed = True
         elif goal.status == "completed":
             # a milestone was reopened
             goal.status = "active"
             goal.completed_at = None
     await db.commit()
     await db.refresh(goal)
+    # Outcome tracking (#236): record goal completion for the learning loop.
+    if _just_completed:
+        try:
+            from src.services.outcomes import record as _rec_outcome
+            await _rec_outcome(
+                org_id=goal.org_id, subject=f"Goal: {goal.title}", kind="outcome",
+                status="success", detail=goal.success_criteria,
+                ref_type="goal", ref_id=goal.id, agent_id=goal.owner_agent_id, source="system",
+            )
+        except Exception:
+            pass
     return goal
 
 

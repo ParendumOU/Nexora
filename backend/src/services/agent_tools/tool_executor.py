@@ -155,6 +155,8 @@ _INLINE_TOOLS: frozenset[str] = frozenset({
     "plan_create", "plan_step_complete", "plan_complete",
     "board_read", "log_entry", "attach_file",
     "goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read", "goal_delete",
+    "outcome_record", "outcome_query",
+    "org_assign", "org_read", "backlog_plan",
 })
 
 
@@ -1065,7 +1067,8 @@ async def _run_single_tool(
         await broadcast(chat_id, {"type": "plan_completed", "plan_id": plan_id})
         return {"tool": "plan_complete", "data": {"plan_id": plan_id, "status": "completed"}}
 
-    elif name in ("goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read", "goal_delete"):
+    elif name in ("goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read", "goal_delete",
+                  "outcome_record", "outcome_query", "org_assign", "org_read", "backlog_plan"):
         # Autonomy layer (#232): durable objectives the agent can read + advance.
         from src.models.goal import Goal, Milestone
         from src.models.agent import Agent as _Agent
@@ -1251,6 +1254,96 @@ async def _run_single_tool(
                 await db.commit()
             await broadcast(chat_id, {"type": "goal_updated"})
             return {"tool": name, "data": {"deleted": len(deleted), "goal_ids": deleted}}
+
+        if name == "outcome_record":
+            subject = (args.get("subject") or "").strip()
+            if not subject:
+                return {"tool": name, "error": "subject is required"}
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+            if not org_id:
+                return {"tool": name, "error": "no org context"}
+            from src.services.outcomes import record as _rec
+            _mv = args.get("metric_value")
+            try:
+                _mv = float(_mv) if _mv is not None else None
+            except (TypeError, ValueError):
+                _mv = None
+            oid = await _rec(
+                org_id=org_id, subject=subject,
+                kind=args.get("kind") or "outcome", status=args.get("status") or "info",
+                detail=args.get("detail"), metric_name=args.get("metric_name"), metric_value=_mv,
+                ref_type=args.get("ref_type"), ref_id=args.get("ref_id"),
+                agent_id=agent_id, source="agent",
+            )
+            return {"tool": name, "data": {"outcome_id": oid, "recorded": bool(oid)}}
+
+        if name == "outcome_query":
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+            if not org_id:
+                return {"tool": name, "error": "no org context"}
+            from src.services.outcomes import query as _q
+            rows = await _q(
+                org_id=org_id, kind=args.get("kind"), status=args.get("status"),
+                subject_like=args.get("subject") or args.get("subject_like"),
+                ref_id=args.get("ref_id"), limit=int(args.get("limit") or 50),
+            )
+            return {"tool": name, "data": {"outcomes": rows, "count": len(rows)}}
+
+        if name == "org_assign":
+            tgt = args.get("agent_id") or agent_id
+            title = (args.get("title") or "").strip()
+            if not tgt or not title:
+                return {"tool": name, "error": "agent_id and title are required"}
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+            if not org_id:
+                return {"tool": name, "error": "no org context"}
+            from src.services.org_roles import assign_role
+            rid = await assign_role(
+                org_id=org_id, agent_id=tgt, title=title, area=args.get("area"),
+                escalates_to_agent_id=args.get("escalates_to_agent_id"),
+                priority=int(args.get("priority") or 0),
+            )
+            return {"tool": name, "data": {"role_id": rid, "agent_id": tgt, "title": title}}
+
+        if name == "org_read":
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+            if not org_id:
+                return {"tool": name, "error": "no org context"}
+            from src.services.org_roles import list_roles
+            return {"tool": name, "data": {"roles": await list_roles(org_id)}}
+
+        if name == "backlog_plan":
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+                if not org_id:
+                    return {"tool": name, "error": "no org context"}
+                from src.models.goal import Goal
+                from src.models.task import Task as _Task
+                goals = (await db.execute(
+                    select(Goal).where(Goal.org_id == org_id, Goal.status.in_(["active", "blocked"]))
+                )).scalars().all()
+                tasks = (await db.execute(
+                    select(_Task).where(_Task.org_id == org_id, _Task.status.in_(["pending", "queued", "in_progress"]))
+                    .limit(200)
+                )).scalars().all()
+            items = (
+                [{"id": g.id, "kind": "goal", "subject": g.title, "priority": g.priority,
+                  "created_at": g.created_at.isoformat() if g.created_at else "", "status": g.status} for g in goals]
+                + [{"id": t.id, "kind": "task", "subject": t.title,
+                    "priority": {"critical": 3, "high": 2, "medium": 1, "low": 0}.get(t.priority, 1),
+                    "created_at": t.created_at.isoformat() if t.created_at else "",
+                    "status": t.status, "blocked_by": t.blocked_by or []} for t in tasks]
+            )
+            from src.services.planner import prioritize_backlog
+            res = prioritize_backlog(items, capacity=int(args.get("capacity") or 0) or None)
+            return {"tool": name, "data": {
+                "plan": [{"id": i["id"], "kind": i.get("kind"), "subject": i.get("subject"), "priority": i.get("priority")} for i in res["plan"]],
+                "blocked": [{"id": i["id"], "subject": i.get("subject"), "waiting_on": i.get("_waiting_on")} for i in res["blocked"]],
+            }}
 
     elif name == "board_read":
         project_id = args.get("project_id")

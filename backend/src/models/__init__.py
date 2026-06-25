@@ -34,6 +34,8 @@ from .backup_job import BackupJob
 from .env_var import EnvVar
 from .goal import Goal, Milestone
 from .tool_approval import ToolApproval
+from .outcome import Outcome
+from .agent_role import AgentRole
 
 __all__ = [
     "User", "UserProfileFact", "Organization", "OrgMember", "OrgInvite", "SignupInvite",
@@ -56,4 +58,6 @@ __all__ = [
     "EnvVar",
     "Goal", "Milestone",
     "ToolApproval",
+    "Outcome",
+    "AgentRole",
 ]

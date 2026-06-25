@@ -821,11 +821,16 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 except Exception:
                     pass
 
-                # Approval-gated results are terminal: the turn stops and waits for the
-                # human decision (approve runs the tool + posts the result). Don't resume
-                # on those, or a weak model loops re-announcing "pending".
+                # Turn State Machine (#213): the authoritative post-turn decision. Only
+                # RESUME re-invokes here; WAIT (approval / sub-agents) parks the turn,
+                # FINAL/NUDGE are handled by _run_delegated_tasks + the watchdog.
+                from src.services.turn_state import decide_next as _decide_next, TurnOutcome as _TO, TurnAction as _TA
                 _resumable = [r for r in tool_results if not r.get("awaiting_approval")]
-                if _resumable:
+                _decision = _decide_next(_TO(
+                    resumable_results=bool(_resumable),
+                    awaiting_approval=any(r.get("awaiting_approval") for r in tool_results),
+                ))
+                if _decision.action == _TA.RESUME:
                     asyncio.create_task(
                         _resume_with_tool_results(
                             chat_id=chat_id,

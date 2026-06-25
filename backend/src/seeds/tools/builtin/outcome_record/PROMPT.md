@@ -1,0 +1,1 @@
+`outcome_record` subject* — log a result (`kind:outcome`, `status:success|failure|partial`) or a decision-with-rationale (`kind:decision`, `detail`). Optionally a KPI via `metric_name`+`metric_value`. Use it so future work can learn from what happened.

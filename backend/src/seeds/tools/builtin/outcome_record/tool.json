@@ -1,0 +1,9 @@
+{
+  "key": "outcome_record",
+  "name": "Outcome Record",
+  "description": "Record an outcome or decision for the learning loop. Fields: subject*, kind (outcome|decision), status (success|failure|partial|info), detail (what happened / why), metric_name, metric_value (number), ref_type (goal|task|action), ref_id.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

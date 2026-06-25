@@ -1,0 +1,9 @@
+{
+  "key": "outcome_query",
+  "name": "Outcome Query",
+  "description": "Review past outcomes/decisions to learn before acting. Filters: subject (substring), kind (outcome|decision), status, ref_id, limit.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}
