@@ -103,6 +103,36 @@ async def list_chats(
             for row in stat_r.all()
         }
 
+    # Running flag: a chat (or anything in its subtree) has an active task. Lets the
+    # sidebar show a spinner on chats with work in flight (incl. autonomous runs).
+    running_ids: set[str] = set()
+    if all_ids:
+        act_r = await db.execute(
+            text(
+                "SELECT DISTINCT chat_id FROM tasks"
+                " WHERE chat_id = ANY(:ids) AND status IN ('pending','queued','in_progress')"
+            ),
+            {"ids": all_ids},
+        )
+        running_ids = {row[0] for row in act_r.all() if row[0]}
+        # Also: chats with a live turn in progress (set at stream start, short TTL) —
+        # so the spinner shows from the first moment, before any task exists.
+        try:
+            from src.core.stream_buffer import active_chats
+            running_ids |= await active_chats(all_ids)
+        except Exception:
+            pass
+        # Propagate up to ancestors within the loaded set so a parent shows active
+        # while a descendant sub-chat is working.
+        _parent_of = {c.id: c.parent_chat_id for c in all_chats}
+        for _cid in list(running_ids):
+            _p = _parent_of.get(_cid)
+            _seen = set()
+            while _p and _p not in _seen:
+                _seen.add(_p)
+                running_ids.add(_p)
+                _p = _parent_of.get(_p)
+
     result_list = []
     for chat in all_chats:
         creator = creator_map.get(chat.user_id) if chat.user_id else None
@@ -124,6 +154,7 @@ async def list_chats(
                 "tool_calls": ms.get("tool_calls", 0),
                 "input_tokens": ms.get("input_tokens", 0),
                 "output_tokens": ms.get("output_tokens", 0),
+                "running": chat.id in running_ids,
             },
         })
 

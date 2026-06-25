@@ -118,6 +118,7 @@ async def list_files(
         {
             "id": f.id,
             "name": f.original_filename,
+            "folder": getattr(f, "folder", "") or "",
             "size": f.size_bytes,
             "content_type": f.content_type,
             "chat_id": f.chat_id,

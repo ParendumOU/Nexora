@@ -255,11 +255,13 @@ async def _run_delegated_tasks(
             from src.services.turn_completion import looks_like_promise
             _is_promise = looks_like_promise(_last_asst or "")
 
-            # Nudge when THIS turn was empty (a contentless resume to push through) OR
-            # it merely announced a next step (a hallucinated promise). A substantive
-            # final answer is left alone (no nudge → no extra slow turn). last_turn_empty
-            # is supplied by the caller; default False so non-resume callers don't nudge.
-            if _unassigned_pending > 0 or (nudge_if_idle and from_resume and (last_turn_empty or _is_promise)):
+            # Nudge when:
+            #  - a hallucinated PROMISE ("le paso el encargo…", "I'll delegate…") with no
+            #    tool fence — even on the FIRST turn (the agent narrated intent but never
+            #    acted), or
+            #  - an empty resume turn that must be pushed to follow through.
+            # A substantive final answer is left alone (no nudge → no extra slow turn).
+            if _unassigned_pending > 0 or (nudge_if_idle and (_is_promise or (from_resume and last_turn_empty))):
                 asyncio.create_task(_nudge_orchestrator(chat_id, org_id, user_id, from_resume=from_resume)).add_done_callback(_on_task_error("nudge_orchestrator"))
             else:
                 # Truly idle (nothing to dispatch/run, no nudge) → tell the UI to stop

@@ -482,6 +482,9 @@ export function ChatMessage({
       strippedContent = strippedContent.slice(0, idx).trim();
     }
   }
+  // Nuke any orphan/unpaired reasoning tag that escaped the steps above — a model
+  // sometimes emits a bare </think> (or <think>) with no match. Must never render.
+  strippedContent = strippedContent.replace(/<\/?(?:think|thinking)\s*>/gi, "").trim();
   // A whole-message bare tool-call/decompose JSON the model emitted instead of using
   // the protocol — [{"name":"task_create","args":{…}}] or [{"title":…,"task":…}] or a
   // single {"name":…,"args":…} object. Not user-facing; drop it.

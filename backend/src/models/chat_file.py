@@ -17,6 +17,9 @@ class ChatFile(Base):
     root_chat_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Relative folder within the thread's directory ("" = root). Lets agents organize
+    # deliverables (docs/, src/, …) and the panel render a folder tree.
+    folder: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
     stored_filename: Mapped[str] = mapped_column(String(200), nullable=False)
     content_type: Mapped[str] = mapped_column(String(200), nullable=False, default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)

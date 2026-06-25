@@ -47,6 +47,15 @@ def test_promise_detected_es_en():
     assert looks_like_promise("A continuación voy a crear la tarea.")
 
 
+def test_promise_delegation_phrases():
+    # the live stuck case: "Le paso el encargo exacto a S4vvy Carder."
+    assert looks_like_promise("Perfecto, Ivan. Le paso el encargo exacto a S4vvy Carder.")
+    assert looks_like_promise("Se lo paso a S4vvy.")
+    assert looks_like_promise("Lo delego al especialista.")
+    assert looks_like_promise("I'll pass this to the specialist agent.")
+    assert looks_like_promise("Delegating to S4vvy now.")
+
+
 def test_not_promise_for_final_answers():
     assert not looks_like_promise("Las 4 cards ya están disponibles en tu panel de Archivos.")
     assert not looks_like_promise("Ahora puedes descargarlas desde Files.")  # 'ahora puedes' ≠ intent

@@ -1,0 +1,9 @@
+{
+  "key": "goal_delete",
+  "name": "Goal Delete",
+  "description": "Delete goal(s). Fields: goal_id (one goal) OR only_if_no_milestones=true to delete all org goals that have zero milestones (cleanup). Cascades milestones.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true
+}

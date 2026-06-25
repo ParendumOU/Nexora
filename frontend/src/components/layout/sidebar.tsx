@@ -6,7 +6,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import {
   MessageSquare, FolderKanban, Bot, Settings, ChevronLeft, ChevronDown,
   LogOut, User, Trash2, Zap, ListTodo, Sparkles, Server, Network, Wrench, Fingerprint, LayoutGrid, Plus, Search,
-  GitBranch, Users, CircleDot, UserCircle, Clock, Lightbulb, X, CreditCard, ShoppingBag, BookOpen, Radio, BrainCircuit,
+  Users, CircleDot, UserCircle, Clock, Lightbulb, X, CreditCard, ShoppingBag, BookOpen, Radio, BrainCircuit, Loader2,
 } from "lucide-react";
 import { cn, truncate } from "@/lib/utils";
 import { useSidebarStore } from "@/store/sidebar";
@@ -29,6 +29,7 @@ interface ChatStats {
   tool_calls: number;
   input_tokens: number;
   output_tokens: number;
+  running?: boolean;
 }
 
 interface Chat {
@@ -168,9 +169,7 @@ function ProjectGroup({
         <div className="ml-4 mt-1 space-y-0.5 border-l border-sidebar-border">
           {chats.map((chat) => {
             const isActive = pathname === `/chat/${chat.id}`;
-            const chatChildren = childChats.get(chat.id) ?? [];
-            const isChatExpanded = expandedChats[chat.id] === true;
-            const hasChildren = chatChildren.length > 0;
+            const isRunning = chat.stats?.running === true;
 
             return (
               <div key={chat.id} className="mb-1 w-full">
@@ -181,22 +180,12 @@ function ProjectGroup({
                   )}
                   onClick={() => router(`/chat/${chat.id}`)}
                 >
-                  {hasChildren ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleChat(chat.id);
-                      }}
-                      className="p-0.5 rounded hover:bg-sidebar-accent/60 transition-colors"
-                    >
-                      <ChevronDown className={cn("w-3 h-3 text-muted-foreground transition-transform", isChatExpanded ? "rotate-0" : "-rotate-90")} />
-                    </button>
-                  ) : (
-                    <div className="w-4 h-4" />
-                  )}
-                  {chat.is_shared
-                    ? <Users className="w-3.5 h-3.5 shrink-0 text-primary/70" />
-                    : <MessageSquare className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                  {/* Running chats (or with active work in their subtree) show a spinner. */}
+                  {isRunning
+                    ? <Loader2 className="w-3.5 h-3.5 shrink-0 text-primary animate-spin" />
+                    : chat.is_shared
+                      ? <Users className="w-3.5 h-3.5 shrink-0 text-primary/70" />
+                      : <MessageSquare className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
                   }
                   <span className="flex-1 min-w-0 text-xs truncate text-sidebar-foreground">
                     {truncate(chat.title || "New Chat", 18)}
@@ -210,12 +199,6 @@ function ProjectGroup({
                     <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0">
                       {chat.stats && (
                         <>
-                          {chat.stats.subchat_count > 0 && (
-                            <span className="flex items-center gap-0.5 text-[9px] text-muted-foreground/70" title="Subchats">
-                              <GitBranch className="w-2.5 h-2.5" />
-                              {chat.stats.subchat_count}
-                            </span>
-                          )}
                           {chat.stats.tool_calls > 0 && (
                             <span className="flex items-center gap-0.5 text-[9px] text-muted-foreground/70" title="Tool calls">
                               <Wrench className="w-2.5 h-2.5" />
@@ -245,30 +228,6 @@ function ProjectGroup({
                     </div>
                   )}
                 </div>
-
-                {isChatExpanded && hasChildren && (
-                  <div className="ml-4 mt-0.5 space-y-0.5 border-l border-sidebar-border pl-[10px]">
-                    {chatChildren.map((childChat) => {
-                      const isChildActive = pathname === `/chat/${childChat.id}`;
-                      const agentName = childChat.agent_id ? "Sub-agent" : "Unknown";
-                      return (
-                        <div
-                          key={childChat.id}
-                          className={cn(
-                            "flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors",
-                            isChildActive ? "bg-sidebar-accent/80" : "hover:bg-sidebar-accent/40"
-                          )}
-                          onClick={() => router(`/chat/${childChat.id}`)}
-                        >
-                          <GitBranch className="w-3 h-3 shrink-0 text-muted-foreground" />
-                          <span className="flex-1 min-w-0 text-xs truncate text-sidebar-foreground">
-                            {truncate(childChat.title || `${agentName} Chat`, 22)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             );
           })}
@@ -369,9 +328,10 @@ export function Sidebar() {
   const { data: chats = [] } = useQuery<Chat[]>({
     queryKey: ["chats"],
     queryFn: () => chatsApi.list().then((r) => r.data),
-    // Live updates arrive via the user WebSocket (useUserSocket); this long
-    // interval is only a safety-net fallback for when the socket is down.
-    refetchInterval: 60_000,
+    // Poll fairly often so the per-chat running spinner (active-turn marker, 45s TTL)
+    // appears/clears promptly; the chat page also invalidates on stream start/end for
+    // an instant update on the active chat.
+    refetchInterval: 5_000,
     staleTime: 2000,
   });
 

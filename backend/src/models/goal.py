@@ -44,6 +44,11 @@ class Goal(Base):
     # 0-100 roll-up from milestone completion.
     progress: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Host chat for autonomous dispatch (#234) — created on first dispatch; milestone
+    # tasks run as sub-agents under it. Nullable (a goal with no autonomous work).
+    chat_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chats.id", ondelete="SET NULL"), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

@@ -106,6 +106,82 @@ _FILE_OUTPUT_FENCE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,8}$")
+
+
+def _sniff_ext(content: str) -> str:
+    """Best-effort file extension from content when the fence path lacks one."""
+    head = (content or "").lstrip()[:400].lower()
+    if head.startswith(("<!doctype", "<html")) or "<body" in head:
+        return ".html"
+    if head.startswith(("{", "[")):
+        return ".json"
+    if head.startswith(("def ", "import ", "from ", "class ", "#!/usr/bin/env python")):
+        return ".py"
+    if head.startswith(("<?xml", "<svg")):
+        return ".xml"
+    if head.startswith("```") or head.startswith("# ") or "## " in head:
+        return ".md"
+    return ".txt"
+
+
+def sanitize_delivery_name(raw: str, content: str = "", *, index: int = 0) -> str:
+    """Turn a model-supplied file-fence path into a safe display filename.
+
+    Weak models emit garbage paths (``fence.``, ``fence"``, ``pitch.md md``). Strip
+    quotes/whitespace/control chars, drop a trailing language hint, keep the
+    basename, ensure a sane extension (inferred from content), and fall back to a
+    generic name when nothing usable remains.
+    """
+    s = (raw or "").strip().strip("`'\"“”‘’ \t").strip()
+    s = s.split()[0] if s else ""               # first token (drop "path lang" hint)
+    s = s.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]  # basename
+    s = re.sub(r'[<>:"|?*\x00-\x1f]', "", s)      # illegal filename chars
+    s = s.strip(" .\"'`")                         # trailing dots/quotes ("fence." → "fence")
+    if not s or s.lower() in ("fence", "file", "path", "filename", "code", "output"):
+        s = f"deliverable_{index + 1}" if index or not s else "deliverable"
+    if not _EXT_RE.search(s):
+        s += _sniff_ext(content)
+    return s[:120]
+
+
+def looks_like_real_file(raw_path: str, content: str = "") -> bool:
+    """Whether a ```file: fence is a genuine deliverable vs the model fencing junk
+    (a bare word like `syntax`/`fence`, reasoning, an example). Avoids creating junk
+    attachments (deliverable.txt, syntax.txt). True when the path has a real
+    extension, or the content clearly IS a file (html/code/data of some size)."""
+    tok = (raw_path or "").strip().strip("`'\"“”‘’ \t")
+    tok = tok.split()[0] if tok else ""
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if _EXT_RE.search(base):
+        return True
+    head = (content or "").lstrip()[:200].lower()
+    if len(content or "") > 200 and head.startswith((
+        "<!doctype", "<html", "<?xml", "<svg", "{", "[", "def ", "import ", "class ", "#!/",
+    )):
+        return True
+    return False
+
+
+def split_delivery_path(raw: str, content: str = "", *, index: int = 0) -> tuple[str, str]:
+    """Split a model-supplied file-fence path into a (folder, filename) pair for the
+    thread file explorer. Folder segments are sanitized (no .., ~, abs, illegal); the
+    filename reuses sanitize_delivery_name. Folder is "" for a root-level file."""
+    s = (raw or "").strip().strip("`'\"“”‘’ \t")
+    s = s.split()[0] if s else ""          # drop a trailing language hint
+    s = s.replace("\\", "/")
+    parts = [p for p in s.split("/") if p not in ("", ".", "..", "~")]
+    base = parts[-1] if parts else ""
+    name = sanitize_delivery_name(base, content, index=index)
+    segs: list[str] = []
+    for seg in parts[:-1]:
+        seg = re.sub(r'[<>:"|?*\x00-\x1f]', "", seg).strip(" .").strip()
+        if seg:
+            segs.append(seg[:60])
+    folder = "/".join(segs[:6])            # cap depth
+    return folder, name
+
+
 # Whole ```tool_calls|json|tools``` fence span — used only to protect a tool-call
 # JSON region from the inline file-output extraction above. A task_create
 # description can legitimately contain a ```file:...``` example; extracting that
@@ -129,6 +205,11 @@ _TOOL_RESIDUE_RE = re.compile(
 # A run of 2+ closing braces/brackets at the very end (optionally after a quote/comma)
 # is machine residue — legitimate prose effectively never ends this way.
 _ORPHAN_JSON_TAIL_RE = re.compile(r'\s*["\',]?\s*[}\]]{2,}\s*\Z')
+
+# Bare (unfenced) `tool_calls [ {…} ]` left in content when a weak model mangles the
+# fence (e.g. the path runs straight into the keyword). The keyword immediately
+# followed by a JSON-object array is machine residue — never legitimate prose.
+_BARE_TOOLCALLS_RE = re.compile(r'`{0,3}\s*tool_calls\s*`{0,3}\s*\[\s*\{[\s\S]*?\}\s*\]', re.IGNORECASE)
 
 # nexora_spawn directive — the plain-text sub-agent spawn block (primary path for
 # Gemini, but any provider can emit it by copying the format from history). The
@@ -259,15 +340,20 @@ async def _execute_agent_tools(
         m for m in _FILE_OUTPUT_FENCE_RE.finditer(response_text)
         if not _inside_tool_fence(m.start())
     ]
-    for _fm in _file_fence_matches:
+    for _fi, _fm in enumerate(_file_fence_matches):
         _fpath = (_fm.group(1) or "").strip()
         _fcontent = _fm.group(2) or ""
-        # First whitespace-delimited token is the path; a trailing language hint
-        # (```file:card.html html) is ignored. Take the basename for the display name.
-        _first = _fpath.split()[0] if _fpath else "file"
-        _name = _first.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "file"
+        # Skip junk fences (model fencing a bare word / example / reasoning) so we
+        # don't create attachments like syntax.txt / deliverable.txt. Still stripped
+        # from the visible text below (it's in _file_fence_matches).
+        if not looks_like_real_file(_fpath, _fcontent):
+            logger.info(f"[tools] skipping non-file ```file: fence (path={_fpath[:40]!r})")
+            continue
+        # Split the model-supplied path into a safe (folder, filename) so deliverables
+        # land in an organized folder tree (sanitizes junk + infers a missing ext).
+        _folder, _name = split_delivery_path(_fpath, _fcontent, index=_fi)
         try:
-            _dres = await deliver_inline_file(chat_id, parent_chat_id, _name, _fcontent)
+            _dres = await deliver_inline_file(chat_id, parent_chat_id, _name, _fcontent, folder=_folder)
         except Exception as _exc:
             _dres = {"error": str(_exc)}
         if "error" in _dres:
@@ -345,6 +431,7 @@ async def _execute_agent_tools(
         # Scrub any residual fenced tool block + dangling tool-call args fragment — these
         # keys never appear in legitimate prose, so this only removes leaked machine text.
         clean = _ANY_TOOL_FENCE_SPAN_RE.sub("", clean)
+        clean = _BARE_TOOLCALLS_RE.sub("", clean)
         clean = _TOOL_RESIDUE_RE.sub("", clean)
         clean = _ORPHAN_JSON_TAIL_RE.sub("", clean)
         # Caller receives parse_error so it can emit a targeted retry quoting the
@@ -357,6 +444,7 @@ async def _execute_agent_tools(
         return clean.strip(), [], [], False, parse_err
 
     clean_text = (response_text[:match.start()].rstrip() + response_text[match.end():]).strip()
+    clean_text = _BARE_TOOLCALLS_RE.sub("", clean_text)
     clean_text = _ORPHAN_JSON_TAIL_RE.sub("", clean_text).rstrip()
 
     # Resolve which optional built-in tools this agent may call

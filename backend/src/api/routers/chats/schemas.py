@@ -21,6 +21,7 @@ class ChatStats(BaseModel):
     tool_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    running: bool = False  # chat (or its subtree) has a live turn / active task
 
 
 class ChatResponse(BaseModel):

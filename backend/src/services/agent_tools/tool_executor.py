@@ -154,7 +154,7 @@ _INLINE_TOOLS: frozenset[str] = frozenset({
     "task_create", "task_update", "task_delete", "spawn_subagent",
     "plan_create", "plan_step_complete", "plan_complete",
     "board_read", "log_entry", "attach_file",
-    "goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read",
+    "goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read", "goal_delete",
 })
 
 
@@ -462,6 +462,7 @@ async def _store_and_register_file(
     display_name: str,
     content_bytes: bytes,
     suffix_hint: str = "",
+    folder: str = "",
 ) -> dict:
     """Persist bytes under upload_dir, create a ChatFile row on the conversation root,
     and broadcast file_created. Shared by attach_file, the inline file fence, and the
@@ -494,6 +495,7 @@ async def _store_and_register_file(
             root_chat_id=root_id,
             user_id=owner_id,
             original_filename=display_name,
+            folder=folder or "",
             stored_filename=stored_name,
             content_type=content_type,
             size_bytes=len(content_bytes),
@@ -504,7 +506,7 @@ async def _store_and_register_file(
         created_iso = cf.created_at.isoformat() if cf.created_at else None
 
     file_payload = {
-        "id": file_id, "name": display_name, "size": len(content_bytes),
+        "id": file_id, "name": display_name, "folder": folder or "", "size": len(content_bytes),
         "content_type": content_type, "chat_id": chat_id, "created_at": created_iso,
     }
     await broadcast(root_id, {"type": "file_created", "file": file_payload})
@@ -515,6 +517,7 @@ async def _store_and_register_file(
 
 async def deliver_inline_file(
     chat_id: str, parent_chat_id: str | None, display_name: str, content: str,
+    folder: str = "",
 ) -> dict:
     """Write+deliver a file straight from inline text content (the ```file:PATH fence).
 
@@ -526,13 +529,13 @@ async def deliver_inline_file(
     root_id, owner_id = await _resolve_file_owner(chat_id)
     if not owner_id:
         return {"error": "Could not resolve a file owner for this chat"}
-    stored = await _store_and_register_file(chat_id, root_id, owner_id, display_name, content_bytes)
+    stored = await _store_and_register_file(chat_id, root_id, owner_id, display_name, content_bytes, folder=folder)
     if "error" in stored:
         return stored
     return {
         "delivered": True,
         "file_id": stored["file_id"],
-        "name": display_name,
+        "name": (f"{folder}/{display_name}" if folder else display_name),
         "size_bytes": len(content_bytes),
         "download_url": stored["download_url"],
     }
@@ -1062,7 +1065,7 @@ async def _run_single_tool(
         await broadcast(chat_id, {"type": "plan_completed", "plan_id": plan_id})
         return {"tool": "plan_complete", "data": {"plan_id": plan_id, "status": "completed"}}
 
-    elif name in ("goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read"):
+    elif name in ("goal_create", "goal_update", "milestone_add", "milestone_status", "goal_read", "goal_delete"):
         # Autonomy layer (#232): durable objectives the agent can read + advance.
         from src.models.goal import Goal, Milestone
         from src.models.agent import Agent as _Agent
@@ -1112,6 +1115,10 @@ async def _run_single_tool(
                     parent_goal_id=args.get("parent_goal_id"),
                     owner_agent_id=args.get("owner_agent_id") or agent_id,
                     priority=int(args.get("priority") or 0),
+                    # Remember the conversation this goal was born in: autonomous
+                    # dispatch (#234) runs its milestone work as sub-agents UNDER this
+                    # chat (visible live), instead of spawning a new empty chat.
+                    chat_id=chat_id,
                 )
                 db.add(goal)
                 await db.flush()
@@ -1222,6 +1229,28 @@ async def _run_single_tool(
                 return {"tool": name, "data": {"goals": [
                     {"id": g.id, "title": g.title, "status": g.status, "progress": g.progress} for g in rows
                 ]}}
+
+        if name == "goal_delete":
+            gid = args.get("goal_id")
+            only_empty = bool(args.get("only_if_no_milestones"))
+            async with AsyncSessionLocal() as db:
+                org_id = await _agent_org(db)
+                if not org_id:
+                    return {"tool": name, "error": "no org context"}
+                if gid:
+                    targets = [g for g in [(await db.execute(select(Goal).where(Goal.id == gid, Goal.org_id == org_id))).scalar_one_or_none()] if g]
+                else:
+                    targets = (await db.execute(select(Goal).where(Goal.org_id == org_id))).scalars().all()
+                deleted = []
+                for g in targets:
+                    n_ms = (await db.execute(select(func.count(Milestone.id)).where(Milestone.goal_id == g.id))).scalar() or 0
+                    if only_empty and n_ms > 0:
+                        continue
+                    deleted.append(g.id)
+                    await db.delete(g)
+                await db.commit()
+            await broadcast(chat_id, {"type": "goal_updated"})
+            return {"tool": name, "data": {"deleted": len(deleted), "goal_ids": deleted}}
 
     elif name == "board_read":
         project_id = args.get("project_id")

@@ -338,12 +338,18 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
     # emitting stream_start there left a perpetual empty "Agent is writing…" cursor
     # on every reload (the indicator never cleared because no stream_end was coming).
     try:
-        from src.core.stream_buffer import get_partial
+        from src.core.stream_buffer import get_partial, active_chats as _active
         partial = await get_partial(chat_id)
         if partial:
+            # Is the turn still alive? (active marker, short TTL). If it died without a
+            # stream_end (flaky provider), finalize the replayed partial so the client
+            # doesn't hang on a frozen "streaming" bubble forever.
+            still_active = chat_id in await _active([chat_id])
             try:
                 await websocket.send_json({"type": "stream_start"})
                 await websocket.send_json({"type": "chunk", "content": partial})
+                if not still_active:
+                    await websocket.send_json({"type": "stream_end", "content": partial})
             except Exception:
                 pass
     except Exception:
@@ -652,8 +658,9 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 if system_parts:
                     messages = [{"role": "system", "content": "\n\n".join(system_parts)}] + messages
 
-                from src.core.stream_buffer import append_chunk as _buf_append, clear as _buf_clear
+                from src.core.stream_buffer import append_chunk as _buf_append, clear as _buf_clear, mark_active as _buf_active
                 await _buf_clear(chat_id)
+                await _buf_active(chat_id)  # spinner from the first moment (before any chunk)
                 await websocket.send_json({"type": "stream_start"})
                 await pubsub.broadcast(chat_id, {"type": "stream_start", "_origin": conn_id})
                 full_response = ""
@@ -684,8 +691,9 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
 
                 async def _on_chunk(chunk: str):
                     await _buf_append(chat_id, chunk)
-                    # Fan-out to other clients in the same chat (other tabs, other users).
-                    # _origin filter prevents the originating socket from double-receiving via pubsub.
+                    # Fan-out to other clients in the same chat (other tabs, other users,
+                    # reconnects). _origin filter prevents the originating socket from
+                    # double-receiving via pubsub.
                     await pubsub.broadcast(chat_id, {
                         "type": "chunk", "content": chunk, "_origin": conn_id,
                     })
@@ -693,8 +701,12 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                         try:
                             await websocket.send_json({"type": "chunk", "content": chunk})
                         except Exception:
+                            # Originating socket dropped (user navigated away). Keep the
+                            # turn ALIVE — it finishes server-side, streaming to pubsub +
+                            # the buffer + DB, so reconnecting clients catch up live. The
+                            # frontend must never abort the backend turn; explicit Stop
+                            # still works via cancel_check.
                             _alive["v"] = False
-                            return False  # stop consuming provider tokens once client is gone
 
                 _gen_params = await load_agent_gen_params(agent_id if enable_agent else None)
                 try:
@@ -780,26 +792,26 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                     asyncio.create_task(_tg_post(live_chat.project_id, org_id, clean_response))
 
                 await _buf_clear(chat_id)
+                _ts = assistant_msg.created_at.isoformat() if assistant_msg.created_at else None
+                _end_frame = {
+                    "type": "stream_end",
+                    "message_id": msg_id,
+                    "metadata": msg_metadata,
+                    "content": clean_response,
+                    "created_at": _ts,
+                }
+                # Local socket only if still connected…
                 if ws_alive:
                     try:
-                        _ts = assistant_msg.created_at.isoformat() if assistant_msg.created_at else None
-                        await websocket.send_json({
-                            "type": "stream_end",
-                            "message_id": msg_id,
-                            "metadata": msg_metadata,
-                            "content": clean_response,
-                            "created_at": _ts,
-                        })
-                        await pubsub.broadcast(chat_id, {
-                            "type": "stream_end",
-                            "message_id": msg_id,
-                            "metadata": msg_metadata,
-                            "content": clean_response,
-                            "created_at": _ts,
-                            "_origin": conn_id,
-                        })
+                        await websocket.send_json(_end_frame)
                     except Exception:
                         pass
+                # …but ALWAYS broadcast to pubsub so other tabs / reconnected clients
+                # finalize the turn even when the originating socket dropped mid-stream.
+                try:
+                    await pubsub.broadcast(chat_id, {**_end_frame, "_origin": conn_id})
+                except Exception:
+                    pass
 
                 if tool_results:
                     asyncio.create_task(

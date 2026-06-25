@@ -14,6 +14,7 @@ Emit the file as a labelled code block — content goes straight to the user's F
 ```
 ```
 Use this instead of stuffing a big document into a `file_write`/JSON arg (large content breaks JSON and the deliverable is lost). One fence per file; emit several for multiple files.
+Organize related deliverables into **folders** by giving the fence a path: ` ```file:docs/pitch.md `, ` ```file:src/index.html ` — they appear as a folder tree in the user's Files panel. Keep names clean (real filename + extension, no quotes).
 > Files produced via `file_write`, `attach_file`, or a ` ```file: ` fence are **immediately delivered to the user** and tracked. Do NOT re-create, re-write, or go "looking for the file on disk" afterwards — it is already in their Files panel. Confirm delivery and finish.
 `remember_user` notes* | name — new facts about user (name/role/prefs/projects); not on greetings
 `memory_manage` action* (save|read|delete) | scope (agent|project) | content | type | tags | priority | search | limit | memory_id

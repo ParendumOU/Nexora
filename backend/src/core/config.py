@@ -84,11 +84,16 @@ class Settings(BaseSettings):
 
     # Proactive autonomy tick (GitLab #234, Autonomy epic #238). A periodic sweep that
     # advances active goals (picks the next pending milestone, recomputes progress).
-    # OFF by default. It does NOT autonomously spawn agents yet — that step is gated
-    # on governance budgets (#235) — so when enabled it only maintains goal state.
+    # OFF by default. When only the tick is enabled it maintains goal state + plans;
+    # actual agent spawning requires autonomy_dispatch_enabled too (gated on #235).
     autonomy_tick_enabled: bool = False
     autonomy_tick_interval_minutes: int = 5
     autonomy_tick_max_goals: int = 20        # safety cap on goals processed per tick
+    # Autonomous dispatch (#234 last mile): the tick SPAWNS an agent toward the next
+    # milestone (gated additionally by budget #235 + risk tiers on its tools). Requires
+    # autonomy_tick_enabled too. OFF by default — opt-in for unattended runs.
+    autonomy_dispatch_enabled: bool = False
+    autonomy_max_dispatch_per_tick: int = 1  # milestones launched per sweep
 
     # Governance: tool risk policy (GitLab #235, Autonomy epic #238). Each tool is
     # classified into a risk tier (read | write | external | exec); these flags let an

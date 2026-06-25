@@ -766,6 +766,17 @@ async def _execute_sub_agent_task(
         if t and t.parent_id and getattr(t, "status", None) not in ("blocked",):
             asyncio.create_task(_bubble_complete_parent(t.parent_id))
 
+        # Autonomy (#234): a completed task linked to a milestone advances it (and
+        # rolls up to goal progress / completion). Best-effort.
+        _ms_id = getattr(t, "milestone_id", None) if t else None
+        if _ms_id and getattr(t, "status", None) == "completed":
+            try:
+                from src.services.goals import set_milestone_status
+                async with AsyncSessionLocal() as _gdb:
+                    await set_milestone_status(_gdb, _ms_id, "done")
+            except Exception as exc:
+                logger.warning(f"[sub_agent] milestone roll-up failed for {_ms_id}: {exc}")
+
         await _auto_log("info", f"Completed task: {task_title}")
         _fire_agent_run_metering(org_id)
 

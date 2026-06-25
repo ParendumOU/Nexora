@@ -34,11 +34,18 @@ FINAL_MARKER = "<final/>"
 # (first-person intent only) to avoid flagging genuine final answers like "ahora
 # puedes descargarlo".
 _PROMISE_RE = re.compile(
-    r"\b(?:voy\s+a|vamos\s+a|procedo\s+a|procederé|proceder[ée]\s+a|déjame|dejame|"
+    r"\b(?:"
+    # Spanish — intent to act / delegate (no fence emitted yet)
+    r"voy\s+a|vamos\s+a|procedo\s+a|procederé|proceder[ée]\s+a|déjame|dejame|"
     r"a\s+continuaci[oó]n\s+(?:voy|lo|los|la)|lo\s+har[ée]|ahora\s+(?:voy|leo|leer[ée]|reviso|"
     r"revisar[ée]|consulto|consultar[ée]|busco|buscar[ée]|procedo|crear[ée]|cre[oó])|"
+    r"(?:le|se\s+lo|lo|la|los|las)\s+(?:paso|env[íi]o|asigno|delego|encargo|mando|traslado)|"
+    r"paso\s+(?:el|la|este|esta|esto|lo)|delego|me\s+encargo|encargar[ée]|"
+    # English
     r"let\s+me|i['’]?ll\b|i\s+will\b|i['’]?m\s+going\s+to|i\s+am\s+going\s+to|"
-    r"next\s*,?\s+i\b|now\s+i['’]?ll)",
+    r"i['’]?ll\s+(?:pass|delegate|assign|hand|send|create|spawn)|passing\s+(?:the|this|it)|"
+    r"delegating|handing\s+(?:off|it)|assigning|next\s*,?\s+i\b|now\s+i['’]?ll"
+    r")",
     re.IGNORECASE,
 )
 

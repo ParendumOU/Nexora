@@ -239,7 +239,9 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setTasks(initialTasks);
 
     const dbActivities: SubAgentActivity[] = initialTasks
-      .filter((t: TaskData) => t.sub_chat_id && t.steps)
+      // Direct children only — never the current chat itself (a sub-chat must not
+      // list itself in its own Sub-agents panel).
+      .filter((t: TaskData) => t.sub_chat_id && t.sub_chat_id !== chatId && t.steps)
       .map((t: TaskData) => ({
         taskId: t.id,
         agentName: t.assigned_agent_name || "Agent",
@@ -356,21 +358,23 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
   // Restore per-user per-chat UI state from localStorage
   useEffect(() => {
+    // Gate persistence until restore completes, so switching chats can't save the
+    // previous chat's (or default) layout over the new chat's saved one.
+    uiStateLoadedRef.current = false;
     if (!hasHydrated || !currentUser?.id || !chatId) return;
     const key = `nx_chat_ui_${currentUser.id}_${chatId}`;
     const raw = localStorage.getItem(key);
+    // Restore this chat's per-user panel layout (or defaults when none saved, so a
+    // panel left open in another chat doesn't bleed over). This effect — not the
+    // content-reset effect — owns the panel state.
+    let saved: { rightPanel?: RightPanel; showActivitiesPanel?: boolean; activitiesUserClosed?: boolean } = {};
     if (raw) {
-      try {
-        const saved = JSON.parse(raw) as {
-          rightPanel?: RightPanel;
-          showActivitiesPanel?: boolean;
-          activitiesUserClosed?: boolean;
-        };
-        if (saved.rightPanel !== undefined) setRightPanel(saved.rightPanel);
-        if (saved.showActivitiesPanel !== undefined) setShowActivitiesPanel(saved.showActivitiesPanel);
-        userClosedActivitiesRef.current = !!saved.activitiesUserClosed;
-      } catch {}
+      try { saved = JSON.parse(raw); } catch {}
     }
+    setRightPanel(saved.rightPanel ?? null);
+    setShowActivitiesPanel(saved.showActivitiesPanel ?? false);
+    setActivitiesPage(0);
+    userClosedActivitiesRef.current = !!saved.activitiesUserClosed;
     uiStateLoadedRef.current = true;
   }, [hasHydrated, currentUser?.id, chatId]);
 
@@ -395,18 +399,15 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     };
   }, [chatId, qc]);
 
-  // Reset messages when chat changes
+  // Reset chat CONTENT when the chat changes. Panel layout (left sub-agents panel +
+  // right panels) is owned by the restore effect above so it persists per chat.
   useEffect(() => {
     setMessages([]);
     setStreamingContent(null);
     setIsStreaming(false);
     didInitialScroll.current = false;
     setShowScrollBtn(false);
-    setShowActivitiesPanel(false);
-    setActivitiesPage(0);
     setActivePlan(null);
-    userClosedActivitiesRef.current = false;
-    uiStateLoadedRef.current = false;
   }, [chatId]);
 
   // Close advanced-only panels when switching to simple mode
@@ -701,8 +702,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         setAgentStatus({ label: "Agent is writing…" });
         setStreamingContent("");
         stopRef.current = false;
+        // Refresh the sidebar so this chat's running spinner appears immediately.
+        qc.invalidateQueries({ queryKey: ["chats"] });
       } else if (data.type === "stream_end") {
         setIsStreaming(false);
+        // Refresh the sidebar so the running spinner clears promptly.
+        qc.invalidateQueries({ queryKey: ["chats"] });
         // Only clear status if no sub-agents are still running
         if (activeSubAgentsRef.current === 0) {
           setAgentStatus(null);
@@ -756,6 +761,11 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           setAgentStatus({ label: data.label || "Agent is working…" });
         }
       } else if (data.type === "sub_agent_start") {
+        // Ignore an event for THIS chat itself — a chat never lists itself as its
+        // own sub-agent (only directly-spawned children belong in the panel).
+        if (data.sub_chat_id && data.sub_chat_id === chatId) {
+          return;
+        }
         activeSubAgentsRef.current++;
         setIsStreaming(true);
         setAgentStatus({ label: "Sub-agents working…" });
@@ -965,6 +975,61 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       toast.error("Failed to update message");
     }
   }, [chatId]);
+
+  // Render one "Agent · N actions" card (reused for message-anchored + orphan groups).
+  const renderActionGroup = (g: AgentActionGroup) => {
+    const isCollapsed = collapsedActionGroups.has(g.groupId);
+    const allDone = g.steps.every((s) => s.status !== "running");
+    const anyFailed = g.steps.some((s) => s.status === "failed");
+    return (
+      <div key={g.groupId} className={cn(
+        "mx-4 my-2 rounded-xl border text-xs overflow-hidden",
+        anyFailed ? "border-destructive/40 bg-destructive/5" : allDone ? "border-border bg-muted/30" : "border-primary/30 bg-primary/5"
+      )}>
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-inherit">
+          <button
+            onClick={() => setCollapsedActionGroups((prev) => {
+              const next = new Set(prev);
+              next.has(g.groupId) ? next.delete(g.groupId) : next.add(g.groupId);
+              return next;
+            })}
+            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", anyFailed ? "bg-destructive" : allDone ? "bg-green-400" : "bg-primary animate-pulse")} />
+          <span className="font-medium text-foreground">{g.agentName}</span>
+          <span className="text-muted-foreground">·</span>
+          <span className="text-muted-foreground truncate flex-1">
+            {g.steps.length === 1 ? g.steps[0].label : `${g.steps.length} actions`}
+          </span>
+          <span className="text-muted-foreground text-xs ml-1">
+            {!allDone ? "working…" : anyFailed ? "failed" : "done"}
+          </span>
+        </div>
+        {!isCollapsed && (
+          <div className="px-3 py-2 space-y-1.5 bg-muted/20">
+            {g.steps.map((step, i) => (
+              <div key={i} className="flex items-start gap-2 text-[11px] animate-fade-in">
+                {step.status === "success" ? (
+                  <CheckCircle className="w-3 h-3 text-green-500 shrink-0 mt-0.5" />
+                ) : step.status === "failed" ? (
+                  <XCircle className="w-3 h-3 text-destructive shrink-0 mt-0.5" />
+                ) : (
+                  <Clock className="w-3 h-3 text-primary shrink-0 mt-0.5 animate-pulse" />
+                )}
+                <span className="font-medium text-foreground">{step.label}</span>
+                {step.error && <span className="text-destructive ml-1">{step.error}</span>}
+              </div>
+            ))}
+            {g.steps.length === 0 && (
+              <p className="text-[11px] text-muted-foreground italic animate-pulse py-0.5">Working…</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -1375,63 +1440,19 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                         {/* Agent action cards — PM tool calls anchored to this message */}
                         {agentActionGroups
                           .filter((g) => g.messageId === msg.id)
-                          .map((g) => {
-                            const isCollapsed = collapsedActionGroups.has(g.groupId);
-                            const allDone = g.steps.every((s) => s.status !== "running");
-                            const anyFailed = g.steps.some((s) => s.status === "failed");
-                            return (
-                              <div key={g.groupId} className={cn(
-                                "mx-4 my-2 rounded-xl border text-xs overflow-hidden",
-                                anyFailed ? "border-destructive/40 bg-destructive/5" : allDone ? "border-border bg-muted/30" : "border-primary/30 bg-primary/5"
-                              )}>
-                                <div className="flex items-center gap-2 px-3 py-2 border-b border-inherit">
-                                  <button
-                                    onClick={() => setCollapsedActionGroups((prev) => {
-                                      const next = new Set(prev);
-                                      next.has(g.groupId) ? next.delete(g.groupId) : next.add(g.groupId);
-                                      return next;
-                                    })}
-                                    className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                                  >
-                                    {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                                  </button>
-                                  <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", anyFailed ? "bg-destructive" : allDone ? "bg-green-400" : "bg-primary animate-pulse")} />
-                                  <span className="font-medium text-foreground">{g.agentName}</span>
-                                  <span className="text-muted-foreground">·</span>
-                                  <span className="text-muted-foreground truncate flex-1">
-                                    {g.steps.length === 1 ? g.steps[0].label : `${g.steps.length} actions`}
-                                  </span>
-                                  <span className="text-muted-foreground text-xs ml-1">
-                                    {!allDone ? "working…" : anyFailed ? "failed" : "done"}
-                                  </span>
-                                </div>
-                                {!isCollapsed && (
-                                  <div className="px-3 py-2 space-y-1.5 bg-muted/20">
-                                    {g.steps.map((step, i) => (
-                                      <div key={i} className="flex items-start gap-2 text-[11px] animate-fade-in">
-                                        {step.status === "success" ? (
-                                          <CheckCircle className="w-3 h-3 text-green-500 shrink-0 mt-0.5" />
-                                        ) : step.status === "failed" ? (
-                                          <XCircle className="w-3 h-3 text-destructive shrink-0 mt-0.5" />
-                                        ) : (
-                                          <Clock className="w-3 h-3 text-primary shrink-0 mt-0.5 animate-pulse" />
-                                        )}
-                                        <span className="font-medium text-foreground">{step.label}</span>
-                                        {step.error && <span className="text-destructive ml-1">{step.error}</span>}
-                                      </div>
-                                    ))}
-                                    {g.steps.length === 0 && (
-                                      <p className="text-[11px] text-muted-foreground italic animate-pulse py-0.5">Working…</p>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                          .map((g) => renderActionGroup(g))}
 
                       </>
                     );
                   })}
+
+                {/* Orphan action cards — live groups whose anchor message isn't in the
+                    list yet (the assistant message arrives on stream_end). Render them
+                    here so the "Agent · N actions" card shows in real time, not only
+                    after a refresh. */}
+                {agentActionGroups
+                  .filter((g) => !messages.some((m) => m.id === g.messageId))
+                  .map((g) => renderActionGroup(g))}
 
                 {streamingContent !== null && (() => {
                   const visibleMsgs = messages.filter((m) => m.content && m.content.trim().length > 0);
@@ -1466,8 +1487,18 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
           {/* Agent activity status bar — shown whenever agent is active, tools run, or tasks pending */}
           {(() => {
+            // Names of sub-agents working right now (incl. autonomous runs under this
+            // chat) — so the user can see WHAT is running beneath the conversation.
+            const runningAgents = Array.from(
+              new Set(subAgentActivities.filter((a) => !a.done).map((a) => a.agentName).filter(Boolean))
+            );
+            const subAgentLabel =
+              runningAgents.length === 0 ? null
+              : runningAgents.length === 1 ? `${runningAgents[0]} is working…`
+              : `${runningAgents.length} agents working: ${runningAgents.slice(0, 3).join(", ")}${runningAgents.length > 3 ? "…" : ""}`;
             const effectiveStatus = agentStatus ?? (
-              (isStreaming || tasks.some(t => ["pending", "queued", "in_progress"].includes(t.status)))
+              subAgentLabel ? { label: subAgentLabel }
+              : (isStreaming || tasks.some(t => ["pending", "queued", "in_progress"].includes(t.status)))
                 ? { label: "Working…" }
                 : null
             );
