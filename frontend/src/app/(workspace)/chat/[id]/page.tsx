@@ -2,7 +2,7 @@
 import { use, useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { chatsApi, tasksApi, projectsApi, plansApi, chatFilesApi } from "@/lib/api";
+import { chatsApi, tasksApi, projectsApi, plansApi, chatFilesApi, approvalsApi } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { useUIModeStore } from "@/store/ui-mode";
 import { ChatMessage } from "@/components/chat/message";
@@ -19,7 +19,7 @@ import { ChatFilesPanel, ChatFile } from "@/components/chat/chat-files-panel";
 import { WebhookSettingsPanel } from "@/components/chat/webhook-settings-panel";
 import { ExecutionGraphPanel } from "@/components/chat/execution-graph-panel";
 import { getWsUrl } from "@/lib/utils";
-import { Loader2, ListTodo, Network, Terminal, FolderKanban, FolderCode, Zap, ChevronRight, ChevronDown, ChevronLeft, MessageSquare, CheckCircle, XCircle, Clock, X, Info, NotebookPen, Layers, ClipboardList, Paperclip, Download, Webhook, GitBranch } from "lucide-react";
+import { Loader2, ListTodo, Network, Terminal, FolderKanban, FolderCode, Zap, ChevronRight, ChevronDown, ChevronLeft, MessageSquare, CheckCircle, XCircle, Clock, X, Info, NotebookPen, Layers, ClipboardList, Paperclip, Download, Webhook, GitBranch, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 
@@ -127,6 +127,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   
   const [subAgentActivities, setSubAgentActivities] = useState<SubAgentActivity[]>([]);
   const [collapsedActivities, setCollapsedActivities] = useState<Set<string>>(new Set());
+  // Inline tool-approval requests for this chat (#235): show a card with Approve/Deny.
+  type PendingApproval = { id: string; tool: string; tier: string; status: "pending" | "approved" | "denied"; messageId?: string | null; result?: unknown; args?: Record<string, unknown> };
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const [expandedApprovals, setExpandedApprovals] = useState<Set<string>>(new Set());
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
   const [chatTitleOverride, setChatTitleOverride] = useState<string | null>(null);
   const [activePlan, setActivePlan] = useState<PlanType | null>(null);
@@ -408,6 +412,24 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     didInitialScroll.current = false;
     setShowScrollBtn(false);
     setActivePlan(null);
+    setPendingApprovals([]);
+    setExpandedApprovals(new Set());
+  }, [chatId]);
+
+  // Seed inline approval cards for this chat (so they survive a refresh / late open,
+  // not just the live WS event). Loads recent decided ones too — anchored ones stay
+  // in their place in the thread and show their result.
+  useEffect(() => {
+    if (!chatId) return;
+    approvalsApi.list("all").then((r) => {
+      const mine = (r.data as { id: string; chat_id: string; message_id: string | null; tool_name: string; tool_args?: Record<string, unknown>; risk_tier: string; status: string; result?: unknown }[])
+        .filter((a) => a.chat_id === chatId)
+        .map((a) => ({ id: a.id, tool: a.tool_name, tier: a.risk_tier || "write", status: a.status as PendingApproval["status"], messageId: a.message_id, result: a.result, args: a.tool_args ?? {} }));
+      if (mine.length) setPendingApprovals((prev) => {
+        const have = new Set(prev.map((p) => p.id));
+        return [...prev, ...mine.filter((m) => !have.has(m.id))];
+      });
+    }).catch(() => {});
   }, [chatId]);
 
   // Close advanced-only panels when switching to simple mode
@@ -750,6 +772,18 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         qc.invalidateQueries({ queryKey: ["chat-files", chatId] });
         const fname = (data.file && data.file.name) || "file";
         toast.success(`File attached: ${fname}`, { icon: "📎" });
+      } else if (data.type === "approval_pending") {
+        setPendingApprovals((prev) =>
+          prev.some((a) => a.id === data.approval_id)
+            ? prev
+            : [...prev, { id: data.approval_id as string, tool: data.tool as string, tier: (data.tier as string) || "write", status: "pending", messageId: (data.message_id as string) ?? null, args: (data.args as Record<string, unknown>) ?? {} }]
+        );
+        qc.invalidateQueries({ queryKey: ["approvals"] });
+      } else if (data.type === "approval_decided") {
+        setPendingApprovals((prev) =>
+          prev.map((a) => (a.id === data.approval_id ? { ...a, status: data.status as "approved" | "denied", result: data.result ?? a.result } : a))
+        );
+        qc.invalidateQueries({ queryKey: ["approvals"] });
       } else if (data.type === "activity_status") {
         if (data.status === "idle") {
           if (activeSubAgentsRef.current === 0) {
@@ -928,6 +962,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       model_name: options.model_name ?? null,
       enable_agent: options.enable_agent,
       file_ids: options.file_ids ?? [],
+      yolo: options.yolo ?? false,
       client_message_id: clientMsgId,
     }));
   }, []);
@@ -975,6 +1010,83 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       toast.error("Failed to update message");
     }
   }, [chatId]);
+
+  const decideApproval = useCallback(async (id: string, ok: boolean) => {
+    // optimistic
+    setPendingApprovals((prev) => prev.map((a) => (a.id === id ? { ...a, status: ok ? "approved" : "denied" } : a)));
+    try {
+      await (ok ? approvalsApi.approve(id) : approvalsApi.deny(id));
+    } catch {
+      toast.error("Approval action failed");
+      setPendingApprovals((prev) => prev.map((a) => (a.id === id ? { ...a, status: "pending" } : a)));
+    }
+  }, []);
+
+  // Render one inline approval card (anchored to its originating message). Collapsible:
+  // expand to see the exact command + console-formatted output.
+  const renderApprovalCard = (a: PendingApproval) => {
+    // Pending cards start expanded (need the buttons); decided ones start collapsed.
+    const expanded = expandedApprovals.has(a.id) || a.status === "pending";
+    const cmd = (a.args && (a.args.command ?? a.args.cmd)) as string | undefined;
+    const r = a.result as { data?: unknown; error?: string } | undefined;
+    const out = r?.error
+      ?? (r?.data && typeof r.data === "object" && typeof (r.data as { output?: unknown }).output === "string"
+        ? (r.data as { output: string }).output
+        : typeof r?.data === "string" ? r.data
+        : r?.data != null ? JSON.stringify(r.data, null, 2) : undefined);
+    return (
+      <div key={a.id} className={cn(
+        "mx-4 my-2 rounded-xl border text-xs overflow-hidden",
+        a.status === "approved" ? "border-green-500/30 bg-green-500/5"
+          : a.status === "denied" ? "border-destructive/40 bg-destructive/5"
+          : "border-yellow-400/40 bg-yellow-400/5"
+      )}>
+        <button
+          onClick={() => setExpandedApprovals((prev) => { const n = new Set(prev); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n; })}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left"
+        >
+          {expanded ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />}
+          <ShieldCheck className={cn("w-3.5 h-3.5 shrink-0",
+            a.status === "approved" ? "text-green-500" : a.status === "denied" ? "text-destructive" : "text-yellow-400")} />
+          <span className="font-medium text-foreground">Approval required</span>
+          <span className="text-muted-foreground">·</span>
+          <span className="font-mono text-foreground">{a.tool}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase">{a.tier}</span>
+          <span className="ml-auto text-muted-foreground">
+            {a.status === "pending" ? "" : a.status === "approved" ? "approved ✓" : "denied"}
+          </span>
+        </button>
+        {expanded && (
+          <div className="px-3 pb-2.5 space-y-2">
+            {cmd && (
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1">Command</p>
+                <pre className="text-[11px] font-mono bg-black/40 rounded p-2 overflow-x-auto whitespace-pre text-foreground/90">{cmd}</pre>
+              </div>
+            )}
+            {a.status === "approved" && out != null && (
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1">Output</p>
+                <pre className="text-[11px] font-mono leading-relaxed bg-black/40 rounded p-2 max-h-80 overflow-auto whitespace-pre text-foreground/90">{out}</pre>
+              </div>
+            )}
+            {a.status === "pending" && (
+              <div className="flex gap-2 pt-0.5">
+                <button onClick={() => decideApproval(a.id, true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors">
+                  <CheckCircle className="w-3.5 h-3.5" /> Approve & Run
+                </button>
+                <button onClick={() => decideApproval(a.id, false)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">
+                  <XCircle className="w-3.5 h-3.5" /> Deny
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Render one "Agent · N actions" card (reused for message-anchored + orphan groups).
   const renderActionGroup = (g: AgentActionGroup) => {
@@ -1441,6 +1553,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                         {agentActionGroups
                           .filter((g) => g.messageId === msg.id)
                           .map((g) => renderActionGroup(g))}
+                        {/* Approval cards anchored to the message that requested them */}
+                        {pendingApprovals
+                          .filter((a) => a.messageId === msg.id)
+                          .map((a) => renderApprovalCard(a))}
 
                       </>
                     );
@@ -1453,6 +1569,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 {agentActionGroups
                   .filter((g) => !messages.some((m) => m.id === g.messageId))
                   .map((g) => renderActionGroup(g))}
+
+                {/* Orphan approval cards — pending ones whose anchor message isn't in
+                    the list yet (decided ones show anchored in the thread, not here). */}
+                {pendingApprovals
+                  .filter((a) => a.status === "pending" && (!a.messageId || !messages.some((m) => m.id === a.messageId)))
+                  .map((a) => renderApprovalCard(a))}
 
                 {streamingContent !== null && (() => {
                   const visibleMsgs = messages.filter((m) => m.content && m.content.trim().length > 0);

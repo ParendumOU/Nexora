@@ -479,6 +479,7 @@ async def _execute_agent_tools(
                                     _label_map[n] = f"{_prefix_map[pfx]} ({act.replace('_', ' ').title()})…"
 
     tool_results: list[dict] = []
+    _held_for_approval: list[dict] = []  # tools held by the approval gate (not executed)
     for call in tool_calls:
         name = call.get("name", "")
         args = dict(call.get("args", {}))
@@ -511,11 +512,33 @@ async def _execute_agent_tools(
         # tools are exempt. Default config denies nothing → inert.
         if name not in _always_allowed():
             from src.core.config import get_settings as _gs_risk
-            from src.services.agent_tools.risk import tool_denied_by_policy, tool_risk_tier
-            if tool_denied_by_policy(name, _gs_risk()):
+            from src.services.agent_tools.risk import tool_denied_by_policy, tool_risk_tier, tool_requires_approval
+            from src.services.tool_approvals import is_yolo as _is_yolo
+            _gs = _gs_risk()
+            if tool_denied_by_policy(name, _gs):
                 logger.warning(f"[tools] {name!r} blocked by risk policy (tier={tool_risk_tier(name)})")
                 tool_results.append({"tool": name, "error": f"Tool '{name}' ({tool_risk_tier(name)} tier) is blocked by the organization's risk policy."})
                 continue
+            # Human-in-the-loop approval (#235): hold the tool, record a pending
+            # approval, and return a blocking result so the agent stops. A human
+            # approves via the approvals API → the tool then runs + the chat resumes.
+            # Skip if this exact pending call was already recorded (avoid dup on resume).
+            # Per-chat YOLO (user opted out of the prompt) bypasses the gate.
+            if tool_requires_approval(name, _gs) and not await _is_yolo(chat_id):
+                from src.services.tool_approvals import record_pending_approval
+                _appr = await record_pending_approval(
+                    chat_id=chat_id, message_id=message_id, agent_id=agent_id,
+                    agent_name=agent_name, tool_name=name, tool_args=args,
+                    tier=tool_risk_tier(name),
+                )
+                if _appr is not None:
+                    _held_for_approval.append(call)
+                    tool_results.append({"tool": name, "awaiting_approval": True, "data": (
+                        f"⏸ Awaiting human approval to run '{name}' ({tool_risk_tier(name)} tier). "
+                        f"A reviewer must approve it (approval id {_appr}). Do NOT retry — stop now "
+                        "and end your turn; the action will run automatically once approved."
+                    )})
+                    continue
         label = _label_map.get(name)
 
         if not label:
@@ -671,10 +694,14 @@ async def _execute_agent_tools(
     # FULL list of executed tool calls (name+args). This drives the "Agent · N
     # actions" card reconstruction on refresh, so it must include log_entry +
     # task_*/goal_* — usage stats apply their own filter via billable_call_count().
+    # Exclude tools held for approval — they were NOT executed this turn, so they must
+    # not reconstruct as an "Agent · N actions · done" card on refresh (that's the job
+    # of the approval card; it ran via the approve flow, not here).
+    _held_ids = {id(c) for c in _held_for_approval}
     counted = [
         {"name": c.get("name", ""), "args": c.get("args", {})}
         for c in tool_calls
-        if c.get("name")
+        if c.get("name") and id(c) not in _held_ids
     ]
     # Prepend any inline ```file: deliveries (handled before the tool_calls fence) so the
     # resume sees them alongside the JSON tool results.

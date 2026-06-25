@@ -271,12 +271,17 @@ async def run_tools_and_finalize(
     # turn_completion (no-op when the turn called tools or is already marked).
     if append_final_if_stuck:
         from src.services.turn_completion import finalize_marker
+        # A turn whose only tool calls are approval-gated (awaiting_approval) is
+        # TERMINAL — it stops and waits for the human, never resumes — so it must be
+        # marked final (else the watchdog treats it as stuck and re-pokes it forever).
+        _resumable_results = [r for r in tool_results if not (isinstance(r, dict) and r.get("awaiting_approval"))]
+        _has_pending_approval = len(_resumable_results) < len(tool_results)
         # A parse error means the turn ATTEMPTED a tool call → not terminal (it gets
         # retried/nudged); don't mark it final.
-        clean_response = finalize_marker(
-            clean_response,
-            had_tool_calls=(had_fence or bool(tool_results) or bool(parse_err)),
+        _had_active_calls = (had_fence or bool(_resumable_results) or bool(parse_err)) and not (
+            _has_pending_approval and not _resumable_results
         )
+        clean_response = finalize_marker(clean_response, had_tool_calls=_had_active_calls)
 
     save_meta = dict(base_metadata or {})
     if calls_made:

@@ -33,6 +33,7 @@ from .device_token import DeviceToken
 from .backup_job import BackupJob
 from .env_var import EnvVar
 from .goal import Goal, Milestone
+from .tool_approval import ToolApproval
 
 __all__ = [
     "User", "UserProfileFact", "Organization", "OrgMember", "OrgInvite", "SignupInvite",
@@ -54,4 +55,5 @@ __all__ = [
     "BackupJob",
     "EnvVar",
     "Goal", "Milestone",
+    "ToolApproval",
 ]

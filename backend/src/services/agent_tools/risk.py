@@ -66,3 +66,18 @@ def tool_denied_by_policy(name: str, settings) -> bool:
     if tier == "external" and getattr(settings, "deny_external_tools", False):
         return True
     return False
+
+
+# Ordered risk tiers (low → high). Human-in-the-loop approval applies to a tool whose
+# tier is AT OR ABOVE the configured threshold (#235).
+_TIER_RANK = {"read": 0, "write": 1, "external": 2, "exec": 3}
+
+
+def tool_requires_approval(name: str, settings) -> bool:
+    """True if this tool needs human approval before executing, per the org's
+    `require_approval_tier` ("" / "off" = never). Always-allowed coordination tools
+    are exempt at the call site, not here. Pure (settings injected)."""
+    threshold = (getattr(settings, "require_approval_tier", "") or "").lower()
+    if threshold not in _TIER_RANK:
+        return False
+    return _TIER_RANK.get(tool_risk_tier(name), 1) >= _TIER_RANK[threshold]

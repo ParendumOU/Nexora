@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     # tools (task_create, log_entry, goal_*, …) are never gated by risk.
     deny_exec_tools: bool = False        # block exec tier (shell_run, code_*, docker_*)
     deny_external_tools: bool = False    # block external tier (slack, jira, http_request, s3, k8s, …)
+    # Human-in-the-loop approval (#235): a tool whose risk tier is at/above this
+    # threshold is held for human approval before it runs. "" / "off" = never (default).
+    # Values: read | write | external | exec. Always-allowed coordination tools exempt.
+    require_approval_tier: str = ""
     # Per-org token budget over a rolling window (#235). 0 = unlimited (default, no
     # tracking/enforcement). When > 0, LLM usage is tallied in Redis and over_budget()
     # gates the proactive autonomy dispatch (interactive chat is never hard-blocked).

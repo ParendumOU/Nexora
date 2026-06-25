@@ -22,6 +22,7 @@ export interface SendOptions {
   model_name?: string | null;
   enable_agent: boolean;
   file_ids?: string[];
+  yolo?: boolean;
 }
 
 interface ChainStep { position: number; model_name: string | null; provider_type: string; account_count: number }
@@ -248,6 +249,7 @@ export function ChatInput({
   const [agentId, setAgentId] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [enableAgent, setEnableAgent] = useState(true);
+  const [yolo, setYolo] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<ChatFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -430,12 +432,13 @@ export function ChatInput({
       model_name: modelOverride,
       enable_agent: enableAgent,
       file_ids: pendingFiles.map((f) => f.id),
+      yolo,
     });
     setValue("");
     setPendingFiles([]);
     setMentionQuery(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, isStreaming, disabled, onSend, agentId, mode, modelOverride, enableAgent, pendingFiles]);
+  }, [value, isStreaming, disabled, onSend, agentId, mode, modelOverride, enableAgent, yolo, pendingFiles]);
 
   // ─── Textarea key handler ─────────────────────────────────────
 
@@ -667,6 +670,27 @@ export function ChatInput({
                         <span className="text-xs text-muted-foreground w-14 shrink-0">Model</span>
                         <ModelSelector value={modelOverride} onChange={handleModelChange} currentChainId={currentChainId} currentDirectProviderId={currentDirectProviderId} />
                       </div>
+                    </div>
+                    {/* YOLO: skip the human-in-the-loop approval prompt for this chat */}
+                    <div className="mt-2 pt-2 border-t border-border flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="text-xs font-medium">YOLO</span>
+                        <p className="text-[10px] text-muted-foreground leading-tight">Auto-approve risky tools (no prompt)</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setYolo((v) => !v)}
+                        className={cn(
+                          "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+                          yolo ? "bg-red-500" : "bg-muted"
+                        )}
+                        title={yolo ? "YOLO on — tools run without approval" : "YOLO off — risky tools need approval"}
+                      >
+                        <span className={cn(
+                          "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
+                          yolo ? "translate-x-4" : "translate-x-0.5"
+                        )} />
+                      </button>
                     </div>
                     {(settingsHasNonDefault || !enableAgent) && (
                       <div className="mt-2.5 pt-2 border-t border-border">

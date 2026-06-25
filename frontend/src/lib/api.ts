@@ -699,6 +699,13 @@ export const proposalsApi = {
   reject: (id: string) => api.post(`/proposals/${id}/reject`),
 };
 
+// ─── Tool approvals (human-in-the-loop, #235) ───────────────────
+export const approvalsApi = {
+  list: (status = "pending") => api.get("/approvals", { params: { status } }),
+  approve: (id: string) => api.post(`/approvals/${id}/approve`),
+  deny: (id: string) => api.post(`/approvals/${id}/deny`),
+};
+
 // ─── Logs ───────────────────────────────────────────────────────
 export const logsApi = {
   list: (chatId: string, limit = 200) => api.get(`/logs?chat_id=${chatId}&limit=${limit}`),

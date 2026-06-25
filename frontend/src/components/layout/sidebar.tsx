@@ -6,7 +6,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import {
   MessageSquare, FolderKanban, Bot, Settings, ChevronLeft, ChevronDown,
   LogOut, User, Trash2, Zap, ListTodo, Sparkles, Server, Network, Wrench, Fingerprint, LayoutGrid, Plus, Search,
-  Users, CircleDot, UserCircle, Clock, Lightbulb, X, CreditCard, ShoppingBag, BookOpen, Radio, BrainCircuit, Loader2,
+  Users, CircleDot, UserCircle, Clock, Lightbulb, X, CreditCard, ShoppingBag, BookOpen, Radio, BrainCircuit, Loader2, ShieldCheck,
 } from "lucide-react";
 import { cn, truncate } from "@/lib/utils";
 import { useSidebarStore } from "@/store/sidebar";
@@ -63,6 +63,7 @@ const _baseManageItems = [
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/issues", label: "Issues", icon: CircleDot },
   { href: "/proposals", label: "Proposals", icon: Lightbulb },
+  { href: "/approvals", label: "Approvals", icon: ShieldCheck },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/channels", label: "Channels", icon: Radio },
   { href: "/schedules", label: "Schedules", icon: Clock },

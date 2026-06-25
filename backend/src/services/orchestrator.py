@@ -42,6 +42,13 @@ async def _resume_with_tool_results(
     """Re-invoke the agent after skill tool calls returned data."""
     from src.core.pubsub import broadcast as _broadcast
 
+    # Approval-gated results are terminal — the turn waits for the human decision
+    # (approve runs the tool + posts the result). Never resume on those (a weak model
+    # would loop re-announcing "pending"). If nothing else is resumable, stop here.
+    tool_results = [r for r in (tool_results or []) if not (isinstance(r, dict) and r.get("awaiting_approval"))]
+    if not tool_results:
+        return
+
     redis = get_redis()
     lock_key = f"tool_resume:{chat_id}"
     acquired = await redis.set(lock_key, "1", nx=True, ex=60)

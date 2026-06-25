@@ -450,6 +450,14 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 enable_agent: bool = data.get("enable_agent", True)
                 file_ids: list[str] = data.get("file_ids") or []
                 client_message_id: str | None = data.get("client_message_id") or None
+                # Per-chat YOLO toggle (#235): when present, persist it so the approval
+                # gate is bypassed for this chat until turned off.
+                if "yolo" in data:
+                    try:
+                        from src.services.tool_approvals import set_yolo as _set_yolo
+                        await _set_yolo(chat_id, bool(data.get("yolo")))
+                    except Exception:
+                        pass
 
                 # Local execution opt-in (CLI clients): proxy filesystem/shell builtins to
                 # the client host for this chat. Bridge sends frames via pubsub.broadcast so
@@ -813,14 +821,18 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 except Exception:
                     pass
 
-                if tool_results:
+                # Approval-gated results are terminal: the turn stops and waits for the
+                # human decision (approve runs the tool + posts the result). Don't resume
+                # on those, or a weak model loops re-announcing "pending".
+                _resumable = [r for r in tool_results if not r.get("awaiting_approval")]
+                if _resumable:
                     asyncio.create_task(
                         _resume_with_tool_results(
                             chat_id=chat_id,
                             org_id=org_id,
                             agent_id=agent_id,
                             agent_name=agent_name,
-                            tool_results=tool_results,
+                            tool_results=_resumable,
                             provider_chain_id=effective_chain_id,
                             model_override=model_override,
                         )

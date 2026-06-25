@@ -10,6 +10,14 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.5.0
+
+- Human-in-the-loop tool approval: tools at/above a configurable risk tier are held for review instead of running (flag, default off).
+- Approve or deny inline in the chat or from the Approvals page; on approve the tool runs and the agent responds.
+- Approval card is collapsible and shows the exact command + console-formatted output.
+- Per-chat YOLO toggle to skip the prompt, like the CLI.
+- Agents now wrap command output, code, logs and JSON in fenced code blocks across web, CLI and Telegram.
+
 ## 1.4.0
 
 - Autonomous dispatch: the proactive tick can spawn a goal's owner agent toward its next milestone, runs the work under the origin chat, and rolls completion back up (flag, default off).
