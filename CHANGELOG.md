@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.2
+
+- Deleting a conversation now also stops its autonomous run. Previously a deleted chat could keep working in the background (the run kept being dispatched and came back on refresh); deleting now pauses the run and halts its in-flight work, so removing a chat truly ends it.
+
 ## 1.19.1
 
 - Fixed stopped autonomous runs coming back after a restart even with auto-resume disabled. The cause was the proactive autonomy loop (which dispatches active goals every minute): stopping a run from one of its sub-conversations did not pause the goal that lives at the top of the run, so the loop kept reviving it. Stopping now pauses the goal across the whole run (sub-conversation and the chain above it), and the autonomy loop skips any run whose conversation was just stopped.

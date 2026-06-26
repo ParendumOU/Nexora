@@ -458,6 +458,14 @@ async def delete_chat(
         raise HTTPException(status_code=404, detail="Chat not found")
     chat.is_archived = True
     await db.commit()
+    # Deleting a chat must also STOP its autonomous run — otherwise the goal keeps running
+    # headless (the autonomy tick re-dispatches it) and the work continues invisibly. Cancel
+    # the whole tree (pauses the goal incl. ancestors, fails in-flight tasks, sets stop flags).
+    try:
+        from src.services.chat_cancel import cancel_chat_tree
+        await cancel_chat_tree(chat_id, reason="Chat deleted")
+    except Exception:
+        pass
     await pubsub.broadcast(f"user:{current_user.id}", {
         "type": "chat_deleted", "chat_id": chat_id,
     })
@@ -481,7 +489,23 @@ async def bulk_delete_chats(
         .where(Chat.id.in_(ids), Chat.user_id == current_user.id)
         .values(is_archived=True)
     )
+    # Also pause any active autonomous goal hosted in the deleted chats so they don't keep
+    # running headless (the autonomy tick would otherwise re-dispatch them). One UPDATE.
+    try:
+        from src.models.goal import Goal
+        await db.execute(
+            _sql_update(Goal).where(Goal.chat_id.in_(ids), Goal.status == "active").values(status="paused")
+        )
+    except Exception:
+        pass
     await db.commit()
+    # Set stop flags so any in-flight turn in those chats halts promptly.
+    try:
+        from src.services.chat_cancel import _set_cancel_flag
+        for cid in ids:
+            await _set_cancel_flag(cid)
+    except Exception:
+        pass
     for cid in ids:
         await pubsub.broadcast(f"user:{current_user.id}", {"type": "chat_deleted", "chat_id": cid})
     return {"deleted": int(result.rowcount or 0)}
