@@ -45,6 +45,34 @@ async def recover_on_startup() -> None:
             .where(TaskStep.status == "running")
             .values(status="failed", error="Interrupted by server restart")
         )
+
+        # 1b. Fail ORPHANED in-flight tasks whose run was stopped — their goal is no longer
+        # active (paused/cancelled/completed) or their chat was archived/deleted. These dead
+        # tasks otherwise show as "agents working" forever in the chat and get wrongly
+        # re-dispatched below. Subquery-scoped UPDATEs (no full table loads).
+        try:
+            from src.models.goal import Goal
+            from src.models.chat import Chat as _Chat
+            _active_statuses = ["pending", "queued", "in_progress"]
+            await db.execute(
+                update(Task)
+                .where(
+                    Task.status.in_(_active_statuses),
+                    Task.goal_id.isnot(None),
+                    Task.goal_id.in_(select(Goal.id).where(Goal.status != "active")),
+                )
+                .values(status="failed", last_error="Run stopped")
+            )
+            await db.execute(
+                update(Task)
+                .where(
+                    Task.status.in_(_active_statuses),
+                    Task.chat_id.in_(select(_Chat.id).where(_Chat.is_archived.is_(True))),
+                )
+                .values(status="failed", last_error="Chat deleted")
+            )
+        except Exception as exc:
+            logger.warning(f"[recovery] orphan-task cleanup failed (non-fatal): {exc}")
         await db.commit()
 
         # 2. Find tasks stuck in_progress / queued with an assigned agent

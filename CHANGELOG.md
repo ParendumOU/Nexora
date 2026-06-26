@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.3
+
+- Fixed a conversation showing "agents working" forever (and after every refresh) even though nothing was running. The cause was leftover tasks stuck in an in-progress state after a run was stopped or the server restarted; the chat rebuilt them as active on load. Stopping a run, pausing all autonomy, and deleting a chat now also clear those tasks, and on startup any in-progress task belonging to a stopped/paused run or a deleted chat is cleaned up instead of being shown as active or re-dispatched.
+
 ## 1.19.2
 
 - Deleting a conversation now also stops its autonomous run. Previously a deleted chat could keep working in the background (the run kept being dispatched and came back on refresh); deleting now pauses the run and halts its in-flight work, so removing a chat truly ends it.
