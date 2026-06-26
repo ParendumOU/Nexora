@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.18.2
+
+- Fixed a frontend build failure introduced in 1.18.0 (a missing import broke the production build). No behavior change.
+
 ## 1.18.1
 
 - Fixed the backend becoming unresponsive (502 errors, dropped connections, "Couldn't load data", failed chat deletes) on instances with very large conversation trees. The query that decides which conversations show a "working" spinner is now depth-guarded so it can never run away on a malformed tree, has a hard time limit, and is cached for a few seconds so a burst of updates can't overload the database.

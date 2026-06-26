@@ -1,5 +1,5 @@
 "use client";
-import { use, useEffect, useRef, useState, useCallback, Fragment } from "react";
+import { use, useEffect, useRef, useState, useCallback, useMemo, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { chatsApi, tasksApi, projectsApi, plansApi, chatFilesApi, approvalsApi } from "@/lib/api";
