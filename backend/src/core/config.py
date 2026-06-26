@@ -240,6 +240,12 @@ class Settings(BaseSettings):
     max_empty_retries: int = 2               # retry the SAME provider when it streams nothing (flaky weak models
                                              # return empty completions intermittently); 0 disables. Safe — only
                                              # retries when zero content was yielded, so no duplicate output.
+    # When the whole provider chain exhausts because every account is rate-limited with a
+    # SHORT reset (e.g. an OpenAI per-minute TPM burst: "try again in 68ms"), failing the
+    # task is wrong — failover to a sibling account in the same API org shares the same TPM
+    # pool and can't help. Instead wait the soonest reset and retry the chain, bounded.
+    rate_limit_chain_retries: int = 4              # max wait-and-retry passes over the chain
+    rate_limit_retry_max_wait_seconds: int = 20    # only auto-wait when the reset is at most this
 
     # Anti-spin: max consecutive tool-resume turns with no progress (no file delivered,
     # no task completed, no <final/>) before the orchestrator is halted with an honest

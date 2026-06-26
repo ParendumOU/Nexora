@@ -327,7 +327,10 @@ export const envVarsApi = {
 
 // ─── Chats ──────────────────────────────────────────────────────
 export const chatsApi = {
-  list: (params?: { agent_id?: string }) => api.get("/chats/", { params }),
+  // No parent_id → top-level chats only (fast sidebar load). parent_id=<chat> → that
+  // chat's direct children (lazy, one level), since an autonomous run can spawn thousands
+  // of sub-chats and loading them all made the sidebar crawl.
+  list: (params?: { agent_id?: string; parent_id?: string }) => api.get("/chats/", { params }),
   create: (data: { title?: string; project_id?: string; project_ids?: string[]; agent_id?: string; provider_chain_id?: string }) =>
     api.post("/chats/", data),
   get: (id: string) => api.get(`/chats/${id}`),
@@ -348,7 +351,10 @@ export const chatsApi = {
     api.post(`/chats/${id}/fork`, { before_message_id: beforeMessageId }),
   setMessageExcluded: (chatId: string, messageId: string, excluded: boolean) =>
     api.patch(`/chats/${chatId}/messages/${messageId}/excluded`, { excluded }),
-  hierarchy: (id: string) => api.get(`/chats/${id}/hierarchy`),
+  // active_only (default true) returns only unfinished chats + the paths connecting them
+  // — fast on a run with thousands of sub-chats. Pass false for the full tree ("Show all").
+  hierarchy: (id: string, activeOnly: boolean = true) =>
+    api.get(`/chats/${id}/hierarchy`, { params: { active_only: activeOnly } }),
   cancelAll: (id: string) => api.post(`/chats/${id}/cancel-all`),
   usage: (id: string) => api.get(`/chats/${id}/usage`),
   getNotes: (id: string, page = 1, pageSize = 20) =>

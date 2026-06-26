@@ -268,6 +268,23 @@ async def list_commits(
 
 # ── compare ──────────────────────────────────────────────────────────────────
 
+def _clean_git_error(text: str) -> str:
+    """GitHub/GitLab error bodies are JSON like {"message": "..."}. Surface the message
+    (not the raw JSON, which read as an opaque '{"message":"405 Method Not Allowed"}')."""
+    import json as _json
+    if not text:
+        return "Upstream git error"
+    try:
+        data = _json.loads(text)
+        if isinstance(data, dict):
+            msg = data.get("message") or data.get("error") or data.get("error_description")
+            if msg:
+                return str(msg)[:400]
+    except Exception:
+        pass
+    return text[:400]
+
+
 def _gitlab_diff_file(d: dict) -> dict:
     """Map a GitLab compare `diffs[]` entry to the file shape the web panel expects
     ({path, status, additions, deletions, patch}). GitLab gives no per-file counts, so
@@ -396,15 +413,25 @@ async def merge_branch(
                 json=body,
                 headers=_headers(cred),
             )
-            if r.status_code not in (201, 204):
-                raise HTTPException(status_code=r.status_code, detail=r.text[:400])
-            data = r.json() if r.status_code == 201 else {}
+            if r.status_code == 409:
+                raise HTTPException(status_code=409, detail=(
+                    f"Merge conflict between '{req.head}' and '{req.base}'. The changes are "
+                    "committed on the branch; resolve the conflict (or open a pull request) "
+                    "and merge manually."
+                ))
+            if r.status_code == 204:
+                return {"sha": None, "merged": True, "message": "Already up to date — nothing to merge."}
+            if r.status_code != 201:
+                raise HTTPException(status_code=r.status_code, detail=_clean_git_error(r.text))
+            data = r.json()
             return {"sha": data.get("sha"), "merged": True}
         else:
             encoded = repo.replace("/", "%2F")
-            # GitLab: create MR then immediately merge it
+            mr_base = f"{api_base}/api/v4/projects/{encoded}/merge_requests"
+            # GitLab: create the MR (or reuse an open one for this source/target), wait for
+            # the async mergeability check, then merge.
             mr_r = await client.post(
-                f"{api_base}/api/v4/projects/{encoded}/merge_requests",
+                mr_base,
                 json={
                     "source_branch": req.head,
                     "target_branch": req.base,
@@ -413,15 +440,52 @@ async def merge_branch(
                 },
                 headers=_headers(cred),
             )
-            if mr_r.status_code not in (200, 201):
-                raise HTTPException(status_code=mr_r.status_code, detail=mr_r.text[:400])
-            iid = mr_r.json()["iid"]
-            merge_r = await client.put(
-                f"{api_base}/api/v4/projects/{encoded}/merge_requests/{iid}/merge",
-                headers=_headers(cred),
-            )
+            if mr_r.status_code == 409:
+                # An open MR already exists for this source/target — find and reuse it.
+                ex = await client.get(
+                    mr_base,
+                    params={"source_branch": req.head, "target_branch": req.base, "state": "opened"},
+                    headers=_headers(cred),
+                )
+                open_mrs = ex.json() if ex.status_code == 200 else []
+                if not open_mrs:
+                    raise HTTPException(status_code=409, detail=_clean_git_error(mr_r.text))
+                iid = open_mrs[0]["iid"]
+            elif mr_r.status_code not in (200, 201):
+                raise HTTPException(status_code=mr_r.status_code, detail=_clean_git_error(mr_r.text))
+            else:
+                iid = mr_r.json()["iid"]
+
+            # GitLab computes mergeability asynchronously; merging too early returns 405
+            # ("405 Method Not Allowed"). Poll the MR briefly until it can be merged.
+            import asyncio as _asyncio
+            merge_status = None
+            has_conflicts = False
+            for _ in range(6):
+                info = await client.get(f"{mr_base}/{iid}", headers=_headers(cred))
+                if info.status_code == 200:
+                    j = info.json()
+                    merge_status = j.get("detailed_merge_status") or j.get("merge_status")
+                    has_conflicts = bool(j.get("has_conflicts"))
+                    if has_conflicts or merge_status in ("mergeable", "can_be_merged"):
+                        break
+                    if merge_status in ("broken_status", "cannot_be_merged", "conflict"):
+                        break
+                await _asyncio.sleep(1)
+
+            if has_conflicts or merge_status in ("cannot_be_merged", "conflict", "broken_status"):
+                raise HTTPException(status_code=409, detail=(
+                    f"'{req.head}' cannot be auto-merged into '{req.base}' (conflicts). The "
+                    f"changes are committed on the branch and an MR (!{iid}) is open; resolve "
+                    "the conflict in GitLab and merge it there."
+                ))
+
+            merge_r = await client.put(f"{mr_base}/{iid}/merge", headers=_headers(cred))
             if merge_r.status_code != 200:
-                raise HTTPException(status_code=merge_r.status_code, detail=merge_r.text[:400])
+                raise HTTPException(status_code=merge_r.status_code, detail=(
+                    f"Could not merge MR !{iid} ({_clean_git_error(merge_r.text)}). It is open "
+                    "in GitLab — you can merge it there once it's ready."
+                ))
             return {"sha": merge_r.json().get("merge_commit_sha"), "merged": True}
 
 

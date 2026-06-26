@@ -71,10 +71,11 @@ async def fork_chat(
 @router.get("/{chat_id}/hierarchy")
 async def get_chat_hierarchy(
     chat_id: str,
+    active_only: bool = True,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy import func
+    from sqlalchemy import func, text
     from src.models.task import Task
 
     start_r = await db.execute(select(Chat).where(Chat.id == chat_id))
@@ -97,22 +98,35 @@ async def get_chat_hierarchy(
     ancestor_chain.reverse()  # now: [root, ..., direct_parent]
     true_root_id = ancestor_chain[0].id if ancestor_chain else start_chat.id
 
-    # ── BFS down from start_chat ─────────────────────────────────────────────
-    queue: list[tuple[Chat, int]] = [(start_chat, 0)]
-    bfs_seen: set[str] = set()
-    descendant_chats: list[tuple[Chat, int]] = []
-    while queue:
-        current, depth = queue.pop(0)
-        if current.id in bfs_seen:
-            continue
-        bfs_seen.add(current.id)
-        descendant_chats.append((current, depth))
-        children_r = await db.execute(
-            select(Chat).where(Chat.parent_chat_id == current.id)
-        )
-        for child in children_r.scalars().all():
-            if child.id not in bfs_seen:
-                queue.append((child, depth + 1))
+    # ── Collect the subtree in ONE query (recursive CTE) ─────────────────────
+    # The old per-chat BFS fired one query per node — fatal at ~2k sub-chats. A single
+    # recursive walk returns (id, depth) for the whole subtree; then one fetch for the
+    # Chat rows. Depth-cap guards against any accidental cycle.
+    depth_rows = (await db.execute(
+        text(
+            """
+            WITH RECURSIVE d(id, depth) AS (
+                SELECT id, 0 FROM chats WHERE id = :start
+                UNION ALL
+                SELECT c.id, d.depth + 1 FROM chats c JOIN d ON c.parent_chat_id = d.id
+                WHERE d.depth < 64
+            )
+            SELECT id, MIN(depth) AS depth FROM d GROUP BY id
+            """
+        ),
+        {"start": start_chat.id},
+    )).all()
+    depth_by_id: dict[str, int] = {row[0]: row[1] for row in depth_rows}
+    desc_ids = list(depth_by_id.keys())
+    chat_by_id: dict[str, Chat] = {}
+    if desc_ids:
+        rows = (await db.execute(select(Chat).where(Chat.id.in_(desc_ids)))).scalars().all()
+        chat_by_id = {c.id: c for c in rows}
+    # Order by depth so parents precede children (stable layout).
+    descendant_chats: list[tuple[Chat, int]] = sorted(
+        ((chat_by_id[cid], depth_by_id[cid]) for cid in desc_ids if cid in chat_by_id),
+        key=lambda t: t[1],
+    )
 
     # Ancestors get negative depths so they sit above start_chat (depth=0)
     n_anc = len(ancestor_chain)
@@ -183,6 +197,32 @@ async def get_chat_hierarchy(
             "paused":    counts.get("paused", 0),
         }
 
+    # ── active_only: keep unfinished chats + the paths connecting them ───────
+    # Default view shows only the few chats still in flight (running/failed/stalled/
+    # awaiting) — at ~2k sub-chats, rendering the finished ones is what made the page
+    # crawl. To keep the graph connected, also keep every ancestor (within the loaded
+    # set) of a kept chat, plus the anchor and its ancestor chain. "Show all" (active_only
+    # =false) returns the whole tree. hidden_count tells the client how many were pruned.
+    hidden_count = 0
+    status_by_id = {chat.id: _compute_status(chat) for chat, _ in all_chats_depth}
+    if active_only:
+        parent_of = {chat.id: chat.parent_chat_id for chat, _ in all_chats_depth}
+        loaded = set(parent_of.keys())
+        _ACTIVE = {"running", "failed", "stalled", "awaiting", "queued", "pending", "paused"}
+        keep: set[str] = {start_chat.id} | {c.id for c in ancestor_chain}
+        for chat, depth in all_chats_depth:
+            if depth >= 0 and status_by_id.get(chat.id) in _ACTIVE:
+                # keep this chat and walk up to the anchor so the edge path survives
+                cur_id = chat.id
+                guard = 0
+                while cur_id and cur_id in loaded and cur_id not in keep and guard < 128:
+                    keep.add(cur_id)
+                    cur_id = parent_of.get(cur_id)
+                    guard += 1
+        hidden_count = sum(1 for chat, _ in all_chats_depth if chat.id not in keep)
+        all_chats_depth = [(c, d) for c, d in all_chats_depth if c.id in keep]
+        all_seen_ids = {c.id for c, _ in all_chats_depth}
+
     nodes = []
     edges = []
 
@@ -202,7 +242,7 @@ async def get_chat_hierarchy(
             "depth":          depth,
             "node_type":      node_type,
             "task_counts":    _task_counts(chat),
-            "status":         _compute_status(chat),
+            "status":         status_by_id.get(chat.id, "idle"),
         })
 
     # Ancestor-chain edges
@@ -211,9 +251,18 @@ async def get_chat_hierarchy(
     if ancestor_chain:
         edges.append({"source": ancestor_chain[-1].id, "target": start_chat.id})
 
-    # Descendant edges (skip start_chat itself)
-    for chat, _ in descendant_chats[1:]:
+    # Descendant edges (only among kept nodes; skip start_chat itself)
+    for chat, depth in all_chats_depth:
+        if depth <= 0:
+            continue
         if chat.parent_chat_id and chat.parent_chat_id in all_seen_ids:
             edges.append({"source": chat.parent_chat_id, "target": chat.id})
 
-    return {"root_id": true_root_id, "anchor_id": start_chat.id, "nodes": nodes, "edges": edges}
+    return {
+        "root_id": true_root_id,
+        "anchor_id": start_chat.id,
+        "nodes": nodes,
+        "edges": edges,
+        "active_only": active_only,
+        "hidden_count": hidden_count,
+    }

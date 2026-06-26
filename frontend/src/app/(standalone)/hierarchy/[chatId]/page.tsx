@@ -78,6 +78,8 @@ interface HierarchyResponse {
   anchor_id: string;
   nodes: ApiNode[];
   edges: { source: string; target: string }[];
+  active_only?: boolean;
+  hidden_count?: number;
 }
 
 type ChatFlowNode = Node<ChatNodeData, "chatNode">;
@@ -442,7 +444,12 @@ function HierarchyContent({ chatId }: { chatId: string }) {
   const [error, setError]               = useState<string | null>(null);
   const [rootId, setRootId]             = useState<string | null>(null);
   const [searchQuery, setSearchQuery]   = useState("");
-  const [hideFinished, setHideFinished] = useState(false);
+  // Default to the few unfinished conversations (server-side active_only) — a run with
+  // thousands of sub-chats was unusably slow when the whole tree loaded up front. "Show
+  // all" flips to the full tree on demand.
+  const [showAll, setShowAll]           = useState(false);
+  const [hiddenCount, setHiddenCount]   = useState(0);
+  const showAllRef = useRef(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [allApiNodes, setAllApiNodes]   = useState<ApiNode[]>([]);
   const [collapsed, setCollapsed]       = useState<Set<string>>(new Set());
@@ -458,12 +465,16 @@ function HierarchyContent({ chatId }: { chatId: string }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const { setCenter, fitView }           = useReactFlow();
 
-  // Load
+  // Load (re-runs when toggling Show all ↔ Active only)
   useEffect(() => {
-    chatsApi.hierarchy(chatId).then((r) => {
+    showAllRef.current = showAll;
+    setLoading(true);
+    initialLoaded.current = false;
+    chatsApi.hierarchy(chatId, !showAll).then((r) => {
       const data: HierarchyResponse = r.data;
       setRootId(data.root_id);
       setAllApiNodes(data.nodes);
+      setHiddenCount(data.hidden_count ?? 0);
 
       const flowNodes = computeLayout(data.nodes, "compact").map((n) => ({
         ...n,
@@ -484,7 +495,7 @@ function HierarchyContent({ chatId }: { chatId: string }) {
     })
     .catch(() => setError("Failed to load hierarchy."))
     .finally(() => setLoading(false));
-  }, [chatId]);
+  }, [chatId, showAll]);
 
   // Sync isSelected
   useEffect(() => {
@@ -497,10 +508,9 @@ function HierarchyContent({ chatId }: { chatId: string }) {
   const filteredApiNodes = useMemo(() => {
     const allById = new Map(allApiNodes.map((n) => [n.id, n]));
 
-    // Step 1: basic status + search filter
+    // Step 1: search filter (status filtering is now server-side via active_only).
     let result = allApiNodes.filter((n) => {
       if (n.node_type === "ancestor" || n.node_type === "current") return true;
-      if (hideFinished && ["completed", "failed"].includes(n.status)) return false;
       if (searchQuery.trim()) {
         return n.title.toLowerCase().includes(searchQuery.toLowerCase());
       }
@@ -510,7 +520,7 @@ function HierarchyContent({ chatId }: { chatId: string }) {
     // Step 2: reinsert any intermediary nodes needed to keep the tree connected.
     // For each surviving node, walk parent_chat_id up through allApiNodes;
     // if a parent is missing from the result set, add it back as a bridge.
-    if (hideFinished || searchQuery.trim()) {
+    if (searchQuery.trim()) {
       const resultIds = new Set(result.map((n) => n.id));
       const toAdd: ApiNode[] = [];
 
@@ -533,7 +543,7 @@ function HierarchyContent({ chatId }: { chatId: string }) {
     }
 
     return result;
-  }, [allApiNodes, hideFinished, searchQuery]);
+  }, [allApiNodes, searchQuery]);
 
   const visibleIds = useMemo(
     () => new Set(filteredApiNodes.map((n) => n.id)),
@@ -547,7 +557,7 @@ function HierarchyContent({ chatId }: { chatId: string }) {
   useEffect(() => {
     positionCache.current = new Map();
     shouldFitRef.current = true;
-  }, [hideFinished, searchQuery, layoutMode]);
+  }, [showAll, searchQuery, layoutMode]);
 
   // Re-compute layout & edges when filter changes (or when allApiNodes updates from poll)
   useEffect(() => {
@@ -620,8 +630,9 @@ function HierarchyContent({ chatId }: { chatId: string }) {
     pollCallbackRef.current = async () => {
       if (!initialLoaded.current) return;
       try {
-        const r = await chatsApi.hierarchy(chatId);
+        const r = await chatsApi.hierarchy(chatId, !showAllRef.current);
         const data: HierarchyResponse = r.data;
+        setHiddenCount(data.hidden_count ?? 0);
 
         // Merge new edges into allEdgesRef
         const existingEdgeIds = new Set(allEdgesRef.current.map((e) => e.id));
@@ -838,19 +849,20 @@ function HierarchyContent({ chatId }: { chatId: string }) {
             </div>
           </div>
 
-          {/* Show/hide toggle */}
+          {/* Active-only ↔ Show all (server-side; default shows only unfinished chats) */}
           <button
-            onClick={() => setHideFinished((h) => !h)}
+            onClick={() => setShowAll((s) => !s)}
+            title={showAll ? "Showing the full tree — click for active only" : "Showing only unfinished conversations — click to load all"}
             className={`flex items-center justify-between px-3 py-2 text-xs border-b border-border transition-colors shrink-0 w-full ${
-              hideFinished ? "text-foreground bg-accent/60" : "text-muted-foreground hover:bg-accent/40"
+              !showAll ? "text-foreground bg-accent/60" : "text-muted-foreground hover:bg-accent/40"
             }`}
           >
             <div className="flex items-center gap-2">
-              {hideFinished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>{hideFinished ? "Active only" : "Showing all"}</span>
+              {!showAll ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              <span>{showAll ? "Showing all" : "Active only"}</span>
             </div>
             <span className="text-[10px] font-mono bg-background border border-border px-1.5 py-0.5 rounded">
-              {visibleDescend.length}/{descendants.length}
+              {!showAll && hiddenCount > 0 ? `+${hiddenCount} hidden` : `${descendants.length}`}
             </span>
           </button>
 

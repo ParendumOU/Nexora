@@ -480,6 +480,19 @@ async def stream_openai_compat(provider: Provider, messages: list[dict], **kw) -
                     # FreeUsageLimitError: daily free tier — default 24h
                     # GoUsageLimitError without time info: default 5h
                     cooldown_hint = 86400 if err_type == "FreeUsageLimitError" else 5 * 3600
+        # OpenAI per-minute TPM/RPM bursts put the reset in the MESSAGE body
+        # ("Please try again in 68ms" / "1.2s" / "2m"), not a Retry-After header. Parse
+        # it so the cooldown is the real (often sub-second) value instead of the long
+        # default — the router then briefly waits and retries instead of failing the task.
+        if cooldown_hint is None:
+            import re as _re2
+            _msg = err_body.get("error", {}).get("message", "") or (e.message if hasattr(e, "message") else str(e))
+            _m = _re2.search(r"try again in\s*([\d.]+)\s*(ms|s|m)\b", _msg, _re2.IGNORECASE)
+            if _m:
+                _val = float(_m.group(1)); _unit = _m.group(2).lower()
+                _secs = _val / 1000 if _unit == "ms" else (_val * 60 if _unit == "m" else _val)
+                # round sub-second up to a small floor so the retry actually clears the window
+                cooldown_hint = max(_secs, 0.5)
         # A Retry-After / ratelimit-reset header (when present) is the most accurate
         # signal; fall back to the parsed provider-specific usage-limit hint.
         raise RateLimitError(
@@ -744,7 +757,11 @@ async def stream_response(
     callers (titles, telegram, sub-agents) leave it False so the sentinel never leaks
     into accumulated text.
     """
+    # Internal: how many times we've already waited-and-retried the whole chain after a
+    # short rate-limit exhaustion (popped so it never reaches the provider adapters).
+    _rl_retries = kwargs.pop("_rl_retries", 0)
     last_error = None
+    _min_rl_cd: float | None = None  # soonest rate-limit reset seen this pass (for wait-and-retry)
     _tried_any = False  # becomes True after the first attempt → later picks are "failovers"
 
     # Native tool calling (#214): resolve the agent's schema-backed tools once and
@@ -917,6 +934,14 @@ async def stream_response(
             await set_cooling(provider.id, cooldown)
             record_provider_failure(provider.id, str(e), rate_limited=True, cooldown_seconds=cooldown)
             last_error = e
+            # Track the soonest reset so an all-rate-limited chain can wait-and-retry
+            # rather than failing the turn (a per-minute TPM burst clears in seconds).
+            try:
+                _cd = float(cooldown or 0)
+                if _cd > 0:
+                    _min_rl_cd = _cd if _min_rl_cd is None else min(_min_rl_cd, _cd)
+            except (TypeError, ValueError):
+                pass
         except ProviderError as e:
             logger.warning(f"Provider error on {provider.name}: {e}")
             _s = _status(f"{provider.name} failed — failing over")
@@ -927,6 +952,31 @@ async def stream_response(
             # just auth errors): consecutive non-rate failures eventually mark the
             # account exhausted so it's skipped for a while.
             record_provider_failure(provider.id, str(e), rate_limited=False)
+
+    # Whole chain exhausted. If every viable account was rate-limited with a SHORT reset,
+    # waiting and retrying beats failing the turn — failover can't escape a per-API-org TPM
+    # limit shared by sibling accounts, but the window clears in seconds. Bounded.
+    from src.core.config import get_settings as _gs_rl
+    _rl_cfg = _gs_rl()
+    if (
+        _min_rl_cd is not None
+        and _rl_retries < _rl_cfg.rate_limit_chain_retries
+        and _min_rl_cd <= _rl_cfg.rate_limit_retry_max_wait_seconds
+    ):
+        _wait = min(_min_rl_cd, float(_rl_cfg.rate_limit_retry_max_wait_seconds)) + 0.1
+        logger.info(
+            "[router] all accounts rate-limited (soonest reset ~%.2fs) — waiting then retrying "
+            "chain (attempt %d/%d)", _min_rl_cd, _rl_retries + 1, _rl_cfg.rate_limit_chain_retries
+        )
+        _s = _status(f"All accounts rate-limited — waiting {_wait:.1f}s then retrying")
+        if _s:
+            yield _s
+        await asyncio.sleep(_wait)
+        async for _chunk in stream_response(
+            providers, messages, status_events=status_events, _rl_retries=_rl_retries + 1, **kwargs
+        ):
+            yield _chunk
+        return
 
     msg = str(last_error) if last_error else "No available providers"
     raise AllProvidersExhausted(msg)

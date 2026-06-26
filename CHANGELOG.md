@@ -10,6 +10,13 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.16.0
+
+- The chat sidebar loads fast again on instances with very large conversation trees: it now loads only top-level conversations and pulls sub-conversations on demand, instead of loading every sub-chat up front (a single autonomous run had grown to nearly 2000).
+- The conversation hierarchy view now opens showing only the conversations still in progress, with a "Show all" toggle to load the full tree on demand, and it builds the tree in one query instead of one per node, so it opens quickly even with thousands of sub-chats.
+- A rate limit no longer fails a turn when it will clear in moments: if every account is rate-limited with a short reset (such as an OpenAI per-minute token burst), the platform waits for the soonest reset and retries the chain instead of giving up. Short resets reported in the provider's message are now read accurately.
+- Accept/Reject in the repository panel no longer shows a raw "405 Method Not Allowed". Merge waits for the host to finish its mergeability check, reuses an already-open merge request, and reports a clear message when a branch genuinely cannot be auto-merged.
+
 ## 1.15.6
 
 - The main conversation and every conversation above a working sub-agent now show a "Sub-agents working…" indicator while a deeply nested sub-agent is active, instead of looking idle. The indicator clears on its own shortly after the deep work stops.

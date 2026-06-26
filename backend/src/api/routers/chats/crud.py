@@ -23,10 +23,23 @@ router = APIRouter()
 @router.get("/", response_model=list[ChatResponse])
 async def list_chats(
     agent_id: str | None = None,
+    parent_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Performance: the sidebar loads only TOP-LEVEL chats (parent_chat_id IS NULL) by
+    # default — an autonomous run can spawn thousands of sub-chats, and loading them all
+    # (plus their aggregates) made the sidebar crawl. Children load on demand, one level at
+    # a time, via ?parent_id=<chat> (the in-chat agent hierarchy already shows the full
+    # tree). parent_id="" / "root" is treated as top-level.
+    _children_of = parent_id if (parent_id and parent_id not in ("", "root", "null")) else None
+
     org_project_ids = await _get_active_org_project_ids(current_user, db)
+
+    def _scope(q):
+        if _children_of is not None:
+            return q.where(Chat.parent_chat_id == _children_of)
+        return q.where(Chat.parent_chat_id.is_(None))
 
     # Own chats: project-less personal chats OR chats in active org's projects
     own_q = select(Chat).where(Chat.user_id == current_user.id, Chat.is_archived == False)  # noqa: E712
@@ -34,6 +47,7 @@ async def list_chats(
         own_q = own_q.where(or_(Chat.project_id.is_(None), Chat.project_id.in_(org_project_ids)))
     else:
         own_q = own_q.where(Chat.project_id.is_(None))
+    own_q = _scope(own_q)
     own_result = await db.execute(own_q.order_by(desc(Chat.updated_at)))
     own_chats = own_result.scalars().all()
 
@@ -41,12 +55,11 @@ async def list_chats(
     shared_chats: list[Chat] = []
     if org_project_ids:
         shared_result = await db.execute(
-            select(Chat)
-            .where(
+            _scope(select(Chat).where(
                 Chat.project_id.in_(org_project_ids),
                 Chat.user_id != current_user.id,
                 Chat.is_archived == False,  # noqa: E712
-            )
+            ))
             .order_by(desc(Chat.updated_at))
         )
         shared_chats = shared_result.scalars().all()
@@ -119,35 +132,40 @@ async def list_chats(
             for row in stat_r.all()
         }
 
-    # Running flag: a chat (or anything in its subtree) has an active task. Lets the
-    # sidebar show a spinner on chats with work in flight (incl. autonomous runs).
+    # Running flag: a listed chat shows a spinner if it — or anything in its whole subtree
+    # — has work in flight. Since the list no longer loads sub-chats, walk DOWN with a
+    # recursive CTE rooted at the loaded chats to find any active task in the subtree (this
+    # is what reflects an autonomous run on its top-level chat). Plus the chat's own live
+    # turn (stream_buffer). Depth is bounded by max_subdelegation_depth.
     running_ids: set[str] = set()
     if all_ids:
-        act_r = await db.execute(
-            text(
-                "SELECT DISTINCT chat_id FROM tasks"
-                " WHERE chat_id = ANY(:ids) AND status IN ('pending','queued','in_progress')"
-            ),
-            {"ids": all_ids},
-        )
-        running_ids = {row[0] for row in act_r.all() if row[0]}
-        # Also: chats with a live turn in progress (set at stream start, short TTL) —
-        # so the spinner shows from the first moment, before any task exists.
+        try:
+            act_r = await db.execute(
+                text(
+                    """
+                    WITH RECURSIVE subtree AS (
+                        SELECT id AS root, id AS node FROM chats WHERE id = ANY(:ids)
+                        UNION ALL
+                        SELECT s.root, c.id FROM chats c JOIN subtree s ON c.parent_chat_id = s.node
+                    )
+                    SELECT DISTINCT s.root
+                    FROM subtree s
+                    JOIN tasks t ON t.chat_id = s.node
+                    WHERE t.status IN ('pending','queued','in_progress')
+                    """
+                ),
+                {"ids": all_ids},
+            )
+            running_ids = {row[0] for row in act_r.all() if row[0]}
+        except Exception:
+            running_ids = set()
+        # The chat's own live turn (set at stream start, short TTL) — so the spinner shows
+        # from the first moment, before any task exists.
         try:
             from src.core.stream_buffer import active_chats
             running_ids |= await active_chats(all_ids)
         except Exception:
             pass
-        # Propagate up to ancestors within the loaded set so a parent shows active
-        # while a descendant sub-chat is working.
-        _parent_of = {c.id: c.parent_chat_id for c in all_chats}
-        for _cid in list(running_ids):
-            _p = _parent_of.get(_cid)
-            _seen = set()
-            while _p and _p not in _seen:
-                _seen.add(_p)
-                running_ids.add(_p)
-                _p = _parent_of.get(_p)
 
     result_list = []
     for chat in all_chats:
