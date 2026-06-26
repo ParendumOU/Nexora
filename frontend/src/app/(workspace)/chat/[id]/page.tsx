@@ -78,6 +78,11 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   // forever — see the watchdog effect below.
   const lastWsActivityRef = useRef<number>(Date.now());
   const isStreamingRef = useRef(false);
+  // Deep-descendant activity: a sub-agent several levels below this chat broadcasts a
+  // heartbeat. We keep a TTL deadline (refreshed per heartbeat) and show "Sub-agents
+  // working…" while it's fresh — so the root + intermediate chats reflect deep work. No
+  // decrement to track; it auto-clears when heartbeats stop (see the watchdog effect).
+  const descendantBusyUntilRef = useRef<number>(0);
   const userClosedActivitiesRef = useRef(false);
   const uiStateLoadedRef = useRef(false);
   type RightPanel = "tasks" | "logs" | "files" | "attachments" | "usage" | "notes" | "plan" | "webhook" | "graph" | null;
@@ -355,7 +360,19 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         setIsStreaming(false);
         setAgentStatus(null);
         activeSubAgentsRef.current = 0;
+        descendantBusyUntilRef.current = 0;
         setStreamingContent((c) => (c && c.trim() ? c : null));
+      }
+      // Deep-descendant heartbeats stopped → clear the bubbled "Sub-agents working…"
+      // status (only if it isn't this chat's own turn / direct sub-agents).
+      if (
+        descendantBusyUntilRef.current &&
+        Date.now() > descendantBusyUntilRef.current &&
+        !isStreamingRef.current &&
+        activeSubAgentsRef.current === 0
+      ) {
+        descendantBusyUntilRef.current = 0;
+        setAgentStatus((s) => (s && s.label === "Sub-agents working…" ? null : s));
       }
     }, 20000);
     return () => clearInterval(iv);
@@ -827,6 +844,16 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           setAgentStatus({ label: data.label || data.tool, tool: data.tool });
         } else if (data.status === "running") {
           setAgentStatus({ label: data.label || "Agent is working…" });
+        }
+      } else if (data.type === "descendant_active") {
+        // A sub-agent several levels below is working. Refresh the TTL deadline and, unless
+        // this chat is itself streaming or already shows its own direct sub-agents, surface
+        // a generic "Sub-agents working…" status so deep activity is visible up the tree.
+        // We drive only the status line (not isStreaming) so the input/stop affordances of
+        // this chat are unaffected; the watchdog clears it when heartbeats stop.
+        descendantBusyUntilRef.current = Date.now() + 120000;
+        if (!isStreamingRef.current && activeSubAgentsRef.current === 0) {
+          setAgentStatus((s) => s ?? { label: "Sub-agents working…" });
         }
       } else if (data.type === "sub_agent_start") {
         // Ignore an event for THIS chat itself — a chat never lists itself as its

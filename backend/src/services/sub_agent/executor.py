@@ -19,6 +19,42 @@ logger = logging.getLogger(__name__)
 import re as _re
 
 
+async def _resolve_ancestor_chain(parent_chat_id: str) -> list[str]:
+    """Chat ids strictly ABOVE the direct parent (its parent → root). The direct parent
+    already receives sub_agent_start; these are the ancestors that otherwise stay blind to
+    deep activity. Depth is bounded by max_subdelegation_depth, so this is a cheap walk."""
+    chain: list[str] = []
+    try:
+        seen: set[str] = set()
+        async with AsyncSessionLocal() as db:
+            cur = (await db.execute(
+                select(Chat.parent_chat_id).where(Chat.id == parent_chat_id)
+            )).scalar_one_or_none()
+            while cur and cur not in seen:
+                seen.add(cur)
+                chain.append(cur)
+                cur = (await db.execute(
+                    select(Chat.parent_chat_id).where(Chat.id == cur)
+                )).scalar_one_or_none()
+    except Exception:
+        pass
+    return chain
+
+
+async def _bubble_descendant_active(ancestor_ids: list[str]) -> None:
+    """Tell each ancestor that a descendant sub-agent is working. The client treats this as
+    a TTL heartbeat (shows 'Sub-agents working…', auto-clears if no refresh), so there is no
+    paired decrement to lose across the executor's many exit paths."""
+    if not ancestor_ids:
+        return
+    try:
+        from src.core.pubsub import broadcast as _bc
+        for anc in ancestor_ids:
+            await _bc(anc, {"type": "descendant_active"})
+    except Exception:
+        pass
+
+
 def _clean_marker_text(s: str | None) -> str:
     """Strip protocol scaffolding (<final/>, thinking, tool-call fences/XML) from a
     sub-agent message so we never store/propagate a bare marker as the result."""
@@ -397,7 +433,19 @@ async def _execute_sub_agent_task(
         await _broadcast(parent_chat_id, sub_agent_start_event)
         await _broadcast(sub_chat_id, sub_agent_start_event)
 
+        # Bubble a "work is happening below you" signal to every ancestor ABOVE the direct
+        # parent, so the root + intermediate conversations show "Sub-agents working…" even
+        # when the active agent is several levels deep (the direct parent already gets
+        # sub_agent_start). TTL-style on the client (cleared if no refresh arrives), so no
+        # decrement is needed — self-healing, can never get stuck.
+        _anc_chain = await _resolve_ancestor_chain(parent_chat_id)
+        await _bubble_descendant_active(_anc_chain)
+
         for _iter in range(_MAX_ITERATIONS):
+            # Heartbeat the ancestors each iteration so the indicator stays alive through a
+            # long multi-turn task (the client deadline is refreshed on every event).
+            if _iter > 0:
+                await _bubble_descendant_active(_anc_chain)
             if await is_interrupted(task_id):
                 reassign_to = await get_reassign_target(task_id)
                 await clear_interrupt(task_id)

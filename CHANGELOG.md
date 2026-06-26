@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.15.6
+
+- The main conversation and every conversation above a working sub-agent now show a "Sub-agents working…" indicator while a deeply nested sub-agent is active, instead of looking idle. The indicator clears on its own shortly after the deep work stops.
+
 ## 1.15.5
 
 - The Docker tools an agent can use (list containers, view logs, build an image, run a command) now actually work. They were listed but had no implementation, so an agent that tried them got stuck repeating a failing "tool not available" call. They run against Docker directly, and the run command keeps the safety guard that blocks anything that could take down the platform.
