@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.0
+
+- Agents now follow a strict communication-discipline rule that cuts wasted tokens: no preamble or filler, short status lines, no meetings/pitches/status ceremony unless asked, and terse one or two line messages between agents. This reduces both the output agents generate and the input other agents receive from them.
+- The shared thread-memory block injected into every agent turn is now capped (the rest stays queryable on demand), so a long-running conversation no longer keeps inflating the per-turn prompt size.
+
 ## 1.18.2
 
 - Fixed a frontend build failure introduced in 1.18.0 (a missing import broke the production build). No behavior change.

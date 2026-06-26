@@ -363,6 +363,8 @@ async def get_platform_context(
     # info + provider guardrails. No repo tree, no memories, no delegate list.
     if suppress_delegation_protocol:
         lean: list[str] = []
+        lean.extend(get_prompt("comm_discipline").splitlines())
+        lean.append("")
         lean.extend(get_prompt("platform_tools_header").splitlines())
         lean.append("")
         lean.extend(tool_lines)
@@ -388,13 +390,15 @@ async def get_platform_context(
             lean.append("")
             lean.append(f"root_chat_id: `{_root_chat_id_for_thread}`  — use `memory_manage` with `scope='thread'` to save/read/delete.")
             lean.append("")
-            for _tm in thread_memories[:50]:
+            # Cap injected lines — this grows over a run and is re-sent EVERY turn, so an
+            # uncapped list silently inflates per-turn input tokens. The rest stays queryable.
+            for _tm in thread_memories[:15]:
                 _key_str = f"[{_tm.key}] " if _tm.key else ""
                 _tag_str = f" [{', '.join(_tm.tags)}]" if _tm.tags else ""
                 _agent_str = f" _(by {_tm.agent_name})_" if _tm.agent_name else ""
                 lean.append(f"- {_key_str}[{_tm.type}]{_tag_str} {_tm.content}{_agent_str}  _(id: `{_tm.id}`)_")
-            if len(thread_memories) > 50:
-                lean.append(f"  … {len(thread_memories) - 50} more — use `memory_manage action='read' scope='thread'` to query.")
+            if len(thread_memories) > 15:
+                lean.append(f"  … {len(thread_memories) - 15} more — use `memory_manage action='read' scope='thread'` to query.")
             lean.append("")
         else:
             lean.append("## Thread Memory")
@@ -429,6 +433,8 @@ async def get_platform_context(
     lines: list[str] = []
 
     lines.extend(get_prompt("platform_intro").splitlines())
+    lines.append("")
+    lines.extend(get_prompt("comm_discipline").splitlines())
     lines.append("")
 
     lines.extend(get_prompt("platform_tools_header").splitlines())
