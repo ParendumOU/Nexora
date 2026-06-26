@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -19,6 +20,7 @@ from src.api.routers.chats.schemas import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=list[ChatResponse])
@@ -90,48 +92,69 @@ async def list_chats(
     msg_stats: dict[str, dict] = {}
 
     if all_ids:
-        sub_r = await db.execute(
-            text(
-                "SELECT parent_chat_id, COUNT(*)::int"
-                " FROM chats WHERE parent_chat_id = ANY(:ids)"
-                " GROUP BY parent_chat_id"
-            ),
-            {"ids": all_ids},
-        )
-        subchat_counts = {row[0]: row[1] for row in sub_r.all()}
+        # Sub-chat counts (cheap) — still guarded so a transient DB hiccup can't sink the list.
+        try:
+            sub_r = await db.execute(
+                text(
+                    "SELECT parent_chat_id, COUNT(*)::int"
+                    " FROM chats WHERE parent_chat_id = ANY(:ids)"
+                    " GROUP BY parent_chat_id"
+                ),
+                {"ids": all_ids},
+            )
+            subchat_counts = {row[0]: row[1] for row in sub_r.all()}
+        except Exception as exc:
+            logger.warning("[list_chats] subchat counts failed (non-fatal): %s", exc)
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
-        # NUL-safe: a poison message whose JSON metadata holds a NUL escape makes
-        # ->> extraction throw "unsupported Unicode escape sequence", which would abort
-        # this whole batched aggregation (one poison row -> the entire chat sidebar 500s).
-        # Strip the escape from each row's metadata text before extracting, and guard the
-        # numeric cast so a non-integer value can't crash it either.
-        stat_r = await db.execute(
-            text(
-                r"""
-                SELECT chat_id,
-                  COALESCE(SUM(CASE WHEN in_t ~ '^[0-9]+$' THEN in_t::bigint ELSE 0 END), 0)::bigint,
-                  COALESCE(SUM(CASE WHEN out_t ~ '^[0-9]+$' THEN out_t::bigint ELSE 0 END), 0)::bigint,
-                  COALESCE(SUM(CASE WHEN tc ~ '^[0-9]+$' THEN tc::bigint ELSE 0 END), 0)::bigint
-                FROM (
-                  SELECT chat_id,
-                    md->'usage'->>'input_tokens'  AS in_t,
-                    md->'usage'->>'output_tokens' AS out_t,
-                    md->>'tool_call_count'        AS tc
-                  FROM (
-                    SELECT chat_id, replace(metadata::text, E'\\u0000', '')::json AS md
-                    FROM messages
-                    WHERE chat_id = ANY(:ids) AND metadata IS NOT NULL
-                  ) cleaned
-                ) x
-                GROUP BY chat_id
-                """
-            ),
-            {"ids": all_ids},
-        )
-        msg_stats = {
-            row[0]: {"input_tokens": row[1], "output_tokens": row[2], "tool_calls": row[3]}
-            for row in stat_r.all()
-        }
+        # Token/tool aggregation is NON-CRITICAL — it must never 500 the whole sidebar.
+        # NUL-safe: a poison message whose JSON metadata holds a NUL escape makes ->> extraction
+        # throw "unsupported Unicode escape sequence", which would abort this batched aggregation
+        # (one poison row -> the entire chat list 500s -> "Couldn't load data"). We strip the
+        # escape and guard the numeric cast, AND wrap the whole thing: any remaining failure
+        # (another poison form, malformed JSON, pathological volume) degrades to "no stats" with
+        # the chat list still returned. A failed statement aborts the asyncpg transaction, so we
+        # rollback before any later query (e.g. the running-flag CTE) runs on this session.
+        try:
+            stat_r = await asyncio.wait_for(
+                db.execute(
+                    text(
+                        r"""
+                        SELECT chat_id,
+                          COALESCE(SUM(CASE WHEN in_t ~ '^[0-9]+$' THEN in_t::bigint ELSE 0 END), 0)::bigint,
+                          COALESCE(SUM(CASE WHEN out_t ~ '^[0-9]+$' THEN out_t::bigint ELSE 0 END), 0)::bigint,
+                          COALESCE(SUM(CASE WHEN tc ~ '^[0-9]+$' THEN tc::bigint ELSE 0 END), 0)::bigint
+                        FROM (
+                          SELECT chat_id,
+                            md->'usage'->>'input_tokens'  AS in_t,
+                            md->'usage'->>'output_tokens' AS out_t,
+                            md->>'tool_call_count'        AS tc
+                          FROM (
+                            SELECT chat_id, replace(metadata::text, E'\\u0000', '')::json AS md
+                            FROM messages
+                            WHERE chat_id = ANY(:ids) AND metadata IS NOT NULL
+                          ) cleaned
+                        ) x
+                        GROUP BY chat_id
+                        """
+                    ),
+                    {"ids": all_ids},
+                ),
+                timeout=5.0,
+            )
+            msg_stats = {
+                row[0]: {"input_tokens": row[1], "output_tokens": row[2], "tool_calls": row[3]}
+                for row in stat_r.all()
+            }
+        except Exception as exc:
+            logger.warning("[list_chats] message stats failed (non-fatal): %s", exc)
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
     # Running flag: a listed chat shows a spinner if it — or anything in its whole subtree
     # — has work in flight. The subtree walk is a recursive CTE; the sidebar refetches on

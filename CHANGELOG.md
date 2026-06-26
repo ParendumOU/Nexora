@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.6
+
+- Fixed the entire chat sidebar failing to load ("Couldn't load data, check your connection") when a single conversation held a corrupted token-usage record. The per-conversation token and tool-call counters are now computed defensively: if that calculation hits a bad row or runs too long, the chat list still loads (just without those counters for that batch) instead of the whole page erroring.
+
 ## 1.19.5
 
 - Fixed the Conversation Hierarchy keeping stopped and failed runs in the "Active only" view. A conversation whose tasks had all ended (failed, killed, or blocked) was still counted as active, so a cancelled run looked like it was running forever. These now leave the active view the moment their work ends, so "Kill All" and "Pause all autonomy" visibly clear it.
