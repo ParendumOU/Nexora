@@ -172,6 +172,89 @@ async def _task_to_dict(task: Task, db: AsyncSession) -> dict:
     }
 
 
+async def _tasks_to_dicts(tasks: list[Task], db: AsyncSession) -> list[dict]:
+    """Batch serializer for task LISTS. Avoids the per-task N+1 (agent + chat + project +
+    steps queries each) that made the 1s task poll fire hundreds of queries on a busy root
+    chat — saturating the DB pool until requests timed out ("Couldn't load data"). Same
+    output shape as _task_to_dict, but in a fixed number of queries regardless of count."""
+    if not tasks:
+        return []
+    from src.models.agent import Agent
+
+    agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
+    chat_ids = {t.chat_id for t in tasks if t.chat_id}
+    task_ids = [t.id for t in tasks]
+
+    agent_names: dict[str, str] = {}
+    if agent_ids:
+        rows = (await db.execute(select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids)))).all()
+        agent_names = {aid: name for aid, name in rows}
+
+    chat_meta: dict[str, tuple[str | None, str | None]] = {}  # chat_id -> (title, project_id)
+    project_ids: set[str] = set()
+    if chat_ids:
+        rows = (await db.execute(
+            select(Chat.id, Chat.title, Chat.project_id).where(Chat.id.in_(chat_ids))
+        )).all()
+        for cid, title, pid in rows:
+            chat_meta[cid] = (title, pid)
+            if pid:
+                project_ids.add(pid)
+
+    project_names: dict[str, str] = {}
+    if project_ids:
+        rows = (await db.execute(select(Project.id, Project.name).where(Project.id.in_(project_ids)))).all()
+        project_names = {pid: name for pid, name in rows}
+
+    steps_by_task: dict[str, list[dict]] = {}
+    if task_ids:
+        srows = (await db.execute(
+            select(TaskStep).where(TaskStep.task_id.in_(task_ids)).order_by(TaskStep.created_at)
+        )).scalars().all()
+        for s in srows:
+            steps_by_task.setdefault(s.task_id, []).append({
+                "step_id": s.id, "name": s.name, "label": s.label,
+                "status": s.status, "error": s.error,
+            })
+
+    out: list[dict] = []
+    for task in tasks:
+        meta = chat_meta.get(task.chat_id)
+        chat_title = meta[0] if meta else None
+        chat_pid = meta[1] if meta else None
+        out.append({
+            "id": task.id,
+            "org_id": task.org_id,
+            "chat_id": task.chat_id,
+            "chat_title": chat_title,
+            "project_id": task.project_id,
+            "project_name": project_names.get(chat_pid) if chat_pid else None,
+            "parent_id": task.parent_id,
+            "position": task.position,
+            "title": task.title,
+            "description": task.description,
+            "output": task.output,
+            "status": task.status,
+            "assigned_agent_id": task.assigned_agent_id,
+            "assigned_agent_name": agent_names.get(task.assigned_agent_id) if task.assigned_agent_id else None,
+            "model_override": task.model_override,
+            "provider_chain_id": task.provider_chain_id,
+            "checklist": task.checklist or [],
+            "priority": getattr(task, "priority", "medium") or "medium",
+            "blocked_by": getattr(task, "blocked_by", []) or [],
+            "sub_chat_id": task.sub_chat_id,
+            "created_after_message_id": task.created_after_message_id,
+            "retry_count": getattr(task, "retry_count", 0) or 0,
+            "retry_after": task.retry_after.isoformat() if getattr(task, "retry_after", None) else None,
+            "last_error": getattr(task, "last_error", None),
+            "created_at": task.created_at.isoformat(),
+            "updated_at": task.updated_at.isoformat(),
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            "steps": steps_by_task.get(task.id, []),
+        })
+    return out
+
+
 async def _assert_chat_access(chat_id: str, user: User, db: AsyncSession) -> Chat:
     from src.api.access import assert_chat_read_access
     return await assert_chat_read_access(chat_id, user, db)
@@ -192,7 +275,7 @@ async def list_tasks(
         await _assert_chat_access(sub_chat_id, current_user, db)
         result = await db.execute(select(Task).where(Task.sub_chat_id == sub_chat_id))
         tasks = result.scalars().all()
-        return [await _task_to_dict(t, db) for t in tasks]
+        return await _tasks_to_dicts(tasks, db)
     elif chat_id:
         await _assert_chat_access(chat_id, current_user, db)
         # #170: bound the per-chat list too (was unbounded).
@@ -214,7 +297,7 @@ async def list_tasks(
             .offset(offset)
         )
     tasks = result.scalars().all()
-    return [await _task_to_dict(t, db) for t in tasks]
+    return await _tasks_to_dicts(tasks, db)
 
 
 @router.post("", response_model=dict, status_code=201)
