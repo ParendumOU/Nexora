@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.11.3
+
+- The create-repository destination picker is now a fast lazy tree: it loads your accounts and top-level groups instantly and lets you drill into subgroups on demand, in their natural order, instead of slowly listing everything flat.
+
 ## 1.11.2
 
 - Creating a repository from a project now uses a proper picker dialog: search and select the destination personal account, organization, or group, instead of a cramped dropdown.
