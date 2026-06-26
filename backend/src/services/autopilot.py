@@ -103,6 +103,71 @@ async def _load_plan(goal_id: str) -> dict | None:
     return None
 
 
+# ── pause / resume (stop-button + explicit resume) ──────────────────────────
+async def has_resumable_goal(chat_id: str) -> bool:
+    """True if this chat hosts an autopilot goal that was paused (e.g. by Stop/Kill All)
+    and can be resumed. Used by the UI to show the optional Resume affordance."""
+    from src.models.goal import Goal
+    try:
+        async with AsyncSessionLocal() as db:
+            g = (await db.execute(
+                select(Goal).where(Goal.chat_id == chat_id, Goal.status == "paused")
+                .order_by(Goal.updated_at.desc()).limit(1)
+            )).scalar_one_or_none()
+        return g is not None
+    except Exception:
+        return False
+
+
+async def resume_for_chat(chat_id: str) -> dict:
+    """Re-activate the paused autopilot goal(s) hosted in this chat and restart the current
+    milestone where Stop/Kill All left off. Its tasks were marked failed by the cancel, so
+    we re-dispatch the milestone's work fresh from the stored plan (rather than letting the
+    state machine skip past a milestone that never actually completed). No-op if nothing is
+    paused."""
+    from src.models.goal import Goal, Milestone
+
+    resumed: list[tuple[str, str | None, int | None, str | None, str | None]] = []
+    async with AsyncSessionLocal() as db:
+        goals = (await db.execute(
+            select(Goal).where(Goal.chat_id == chat_id, Goal.status == "paused")
+        )).scalars().all()
+        for g in goals:
+            g.status = "active"
+            # current milestone = the first not-done one (in_progress, else next pending)
+            milestones = (await db.execute(
+                select(Milestone).where(Milestone.goal_id == g.id).order_by(Milestone.position)
+            )).scalars().all()
+            current = next((m for m in milestones if m.status in ("in_progress", "pending")), None)
+            resumed.append((
+                g.id, g.org_id,
+                current.position if current else None,
+                current.id if current else None,
+                current.title if current else None,
+            ))
+        if goals:
+            await db.commit()
+
+    for gid, org_id, pos, ms_id, ms_title in resumed:
+        try:
+            if not await is_autopilot_goal(gid):
+                continue
+            if ms_id is None:
+                # every milestone resolved → just finalize
+                await _finalize_goal(gid)
+                continue
+            plan = await _load_plan(gid)
+            ms_plan = None
+            if plan and isinstance(pos, int) and 0 <= pos < len(plan.get("milestones", [])):
+                ms_plan = plan["milestones"][pos]
+            if not ms_plan:
+                ms_plan = {"tasks": [{"title": ms_title or "Continue", "description": ms_title or ""}]}
+            await _dispatch_milestone_tasks(gid, ms_id, ms_plan, org_id, None, chat_id)
+        except Exception as exc:
+            logger.warning("[autopilot] resume re-dispatch failed for goal %s: %s", gid, exc)
+    return {"resumed_goals": len(resumed)}
+
+
 # ── plan parsing (pure, model-agnostic) ──────────────────────────────────────
 def parse_plan(raw: str) -> dict | None:
     """Extract a {goal, success_criteria, milestones:[{title, success_criteria,

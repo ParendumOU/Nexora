@@ -119,12 +119,17 @@ class _FakeRedisPipe:
 async def test_cancel_chat_tree_cancels_whole_subtree(db_factory, monkeypatch):
     from src.models.task import Task
 
+    from src.models.goal import Goal
+
     root, mid, leaf = await _mk_chain(db_factory)
     async with db_factory() as db:
         db.add(Task(id="t-root", org_id="o", chat_id=root, title="a", status="in_progress"))
         db.add(Task(id="t-mid", org_id="o", chat_id=mid, title="b", status="queued"))
         db.add(Task(id="t-leaf", org_id="o", chat_id=leaf, title="c", status="pending"))
         db.add(Task(id="t-done", org_id="o", chat_id=leaf, title="d", status="completed"))
+        # An active autopilot goal hosted in the root chat must be PAUSED by the cancel so
+        # startup recovery can't revive the run on the next redeploy.
+        db.add(Goal(id="g1", org_id="o", title="G", status="active", chat_id=root))
         await db.commit()
 
     fake = _FakeRedisPipe()
@@ -149,3 +154,8 @@ async def test_cancel_chat_tree_cancels_whole_subtree(db_factory, monkeypatch):
     # A cancel flag was set for every chat in the subtree (so each loop's own-flag poll fires).
     assert cc._cancel_key(root) in fake.flags
     assert cc._cancel_key(leaf) in fake.flags
+    # The active goal is now paused (won't be revived by startup recovery).
+    from src.models.goal import Goal as _Goal
+    async with db_factory() as db:
+        g = await db.get(_Goal, "g1")
+    assert g.status == "paused"

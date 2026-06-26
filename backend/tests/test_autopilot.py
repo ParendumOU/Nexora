@@ -189,6 +189,47 @@ async def test_reconcile_defers_when_a_task_is_open(engine, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resume_reactivates_and_redispatches_current_milestone(engine, monkeypatch):
+    """Stop/Kill All pauses the goal + fails its tasks; resume re-activates it and
+    re-dispatches the current milestone (not skip past it)."""
+    from src.models.goal import Goal, Milestone
+    from src.models.task import Task
+
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(ap, "AsyncSessionLocal", factory)
+
+    gid, mid = str(uuid.uuid4()), str(uuid.uuid4())
+    async with factory() as s:
+        s.add(Goal(id=gid, org_id="o", title="G", status="paused", chat_id="c1"))
+        s.add(Milestone(id=mid, goal_id=gid, position=0, title="M", status="in_progress"))
+        s.add(Task(id=str(uuid.uuid4()), org_id="o", chat_id="c1", goal_id=gid, milestone_id=mid, title="a", status="failed"))
+        await s.commit()
+
+    dispatched = {}
+
+    async def _fake_dispatch(goal_id, milestone_id, ms_plan, org_id, user_id, host_chat_id):
+        dispatched["call"] = (goal_id, milestone_id)
+        return 1
+
+    async def _fake_is_ap(goal_id):
+        return True
+
+    async def _fake_plan(goal_id):
+        return {"milestones": [{"title": "M", "tasks": [{"title": "redo", "description": "d"}]}]}
+
+    monkeypatch.setattr(ap, "_dispatch_milestone_tasks", _fake_dispatch)
+    monkeypatch.setattr(ap, "is_autopilot_goal", _fake_is_ap)
+    monkeypatch.setattr(ap, "_load_plan", _fake_plan)
+
+    res = await ap.resume_for_chat("c1")
+    assert res["resumed_goals"] == 1
+    assert dispatched["call"] == (gid, mid)        # current milestone re-dispatched
+    async with factory() as s:
+        g = await s.get(Goal, gid)
+    assert g.status == "active"                     # goal re-activated
+
+
+@pytest.mark.asyncio
 async def test_reconcile_finalizes_when_all_milestones_done(engine, monkeypatch):
     """final advance was interrupted before marking the goal completed."""
     from src.models.goal import Goal, Milestone

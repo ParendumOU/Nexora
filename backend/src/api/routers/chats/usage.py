@@ -27,6 +27,22 @@ async def cancel_all_tasks(
     return await cancel_chat_tree(chat_id, reason="Cancelled by user")
 
 
+@router.post("/{chat_id}/resume", status_code=200)
+async def resume_chat(
+    chat_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Resume a paused autonomous (Autopilot) run hosted in this chat — picks up the
+    current milestone where Stop/Kill All left off. No-op if nothing is paused."""
+    r = await db.execute(select(Chat).where(Chat.id == chat_id))
+    chat = r.scalar_one_or_none()
+    if not chat or not await _can_access_chat(user.id, chat, db):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    from src.services.autopilot import resume_for_chat
+    return await resume_for_chat(chat_id)
+
+
 @router.get("/{chat_id}/usage")
 async def get_chat_usage(
     chat_id: str,

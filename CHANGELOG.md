@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.18.0
+
+- A stopped autonomous run no longer comes back to life after a server restart or rebuild. Stopping (Stop or Kill All) now pauses the run, and startup recovery leaves paused runs alone instead of reviving them (which had also caused a fresh branch to appear on restart).
+- When a run is stopped, the conversation now shows a clear "Execution stopped" note, and if the run can be continued it offers an optional Resume button that picks up the current milestone where it left off. You can also just send a message to carry on.
+
 ## 1.17.0
 
 - Stopping a run (the chat Stop button or "Kill All" in the hierarchy view) is now fast even on a huge conversation tree: cancellation collects the whole tree in one query and signals every conversation in a single batched round-trip instead of one-by-one.

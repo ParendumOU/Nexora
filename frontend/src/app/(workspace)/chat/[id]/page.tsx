@@ -20,7 +20,7 @@ import { ChatFilesPanel, ChatFile } from "@/components/chat/chat-files-panel";
 import { WebhookSettingsPanel } from "@/components/chat/webhook-settings-panel";
 import { ExecutionGraphPanel } from "@/components/chat/execution-graph-panel";
 import { getWsUrl } from "@/lib/utils";
-import { Loader2, ListTodo, Network, Terminal, FolderKanban, FolderCode, Zap, ChevronRight, ChevronDown, ChevronLeft, MessageSquare, CheckCircle, XCircle, Clock, X, Info, NotebookPen, Layers, ClipboardList, Paperclip, Download, Webhook, GitBranch, ShieldCheck, CheckCheck } from "lucide-react";
+import { Loader2, ListTodo, Network, Terminal, FolderKanban, FolderCode, Zap, ChevronRight, ChevronDown, ChevronLeft, MessageSquare, CheckCircle, XCircle, Clock, X, Info, NotebookPen, Layers, ClipboardList, Paperclip, Download, Webhook, GitBranch, ShieldCheck, CheckCheck, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 
@@ -1062,6 +1062,36 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     }
   }, [streamingContent, chatId, qc]);
 
+  const handleResume = useCallback(async () => {
+    setIsStreaming(true);
+    setAgentStatus({ label: "Resuming run…" });
+    try {
+      await chatsApi.resume(chatId);
+    } catch {
+      setIsStreaming(false);
+      setAgentStatus(null);
+      toast.error("Couldn't resume the run");
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["messages", chatId] });
+    qc.invalidateQueries({ queryKey: ["tasks", chatId] });
+    qc.invalidateQueries({ queryKey: ["chats"] });
+  }, [chatId, qc]);
+
+  // Show an optional Resume affordance when the run was stopped and can be picked back up
+  // (the cancel posts an assistant message tagged execution_cancelled + resumable).
+  const canResume = useMemo(() => {
+    if (isStreaming) return false;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const meta = (m.metadata_ ?? {}) as { kind?: string; resumable?: boolean };
+      if (meta.kind === "execution_cancelled") return meta.resumable === true;
+      break; // only the latest assistant message matters
+    }
+    return false;
+  }, [messages, isStreaming]);
+
   const handleEditSubmit = useCallback(async (messageId: string, newContent: string) => {
     try {
       const res = await chatsApi.fork(chatId, messageId);
@@ -1696,6 +1726,22 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
             >
               <ChevronDown className="w-4 h-4" />
             </button>
+          )}
+
+          {/* Resume banner — optional pick-up after a Stop/Kill All paused an autonomous run */}
+          {canResume && (
+            <div className="flex items-center gap-2 px-4 py-2 border-t border-border bg-primary/5 shrink-0">
+              <span className="text-xs text-muted-foreground flex-1 truncate">
+                This run was stopped. You can resume it where it left off, or just send a message to continue.
+              </span>
+              <button
+                onClick={handleResume}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors shrink-0"
+              >
+                <Sparkles className="w-3 h-3" />
+                Resume
+              </button>
+            </div>
           )}
 
           {/* Agent activity status bar — shown whenever agent is active, tools run, or tasks pending */}

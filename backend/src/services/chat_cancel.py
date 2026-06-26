@@ -156,6 +156,20 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
             )
             .values(status="failed", output=reason, last_error=reason[:300])
         )
+        # Pause any active autopilot/autonomy goal hosted in these chats so it is NOT
+        # revived by startup recovery after a redeploy (the reason a Kill-All'd run came
+        # back on the next build). "paused" is resumable — the user can pick it back up.
+        paused_goals = 0
+        try:
+            from src.models.goal import Goal
+            g_res = await db.execute(
+                sql_update(Goal)
+                .where(Goal.chat_id.in_(visited), Goal.status == "active")
+                .values(status="paused")
+            )
+            paused_goals = int(g_res.rowcount or 0)
+        except Exception as exc:
+            logger.warning(f"[cancel] pausing autopilot goals failed: {exc}")
         await db.commit()
         cancelled_tasks = int(result.rowcount or 0)
 
@@ -193,6 +207,30 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
         *[_bcast(cid) for cid in visited],
         return_exceptions=True,
     )
+
+    # Leave a persistent marker in the root chat so the conversation shows it was stopped
+    # and (when a goal was paused) offers an optional Resume — rather than silently going
+    # idle. Posted once, only when something was actually running.
+    if cancelled_tasks > 0 or paused_goals > 0:
+        try:
+            import uuid as _uuid
+            from src.models.chat import Message as _Message
+            _txt = (
+                "Execution stopped. "
+                + (f"{cancelled_tasks} task(s) cancelled. " if cancelled_tasks else "")
+                + ("This run can be resumed where it left off." if paused_goals else
+                   "Send a message to continue.")
+            )
+            async with AsyncSessionLocal() as db:
+                db.add(_Message(
+                    id=str(_uuid.uuid4()), chat_id=root_chat_id, role="assistant",
+                    content=_txt,
+                    metadata_={"kind": "execution_cancelled", "resumable": bool(paused_goals)},
+                ))
+                await db.commit()
+            await _broadcast(root_chat_id, {"type": "messages_updated"})
+        except Exception as exc:
+            logger.debug(f"[cancel] cancelled-marker post failed: {exc}")
 
     logger.info(
         f"[cancel] cancelled chat tree rooted at {root_chat_id}: "
