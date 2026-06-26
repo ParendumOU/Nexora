@@ -102,6 +102,39 @@ async def list_goals(
     return [_goal_dict(g) for g in goals]
 
 
+@router.post("/pause-all")
+async def pause_all_goals(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pause every active goal in the org at once — the big red 'stop all autonomy' button.
+    Paused goals are skipped by the autonomy tick and startup recovery, so they stay stopped
+    across restarts until resumed. Resumable via /goals/{id} status, /chats/{id}/resume, or
+    /goals/resume-all."""
+    from sqlalchemy import update as _upd
+    org_id = await get_active_org_id(current_user, db)
+    res = await db.execute(
+        _upd(Goal).where(Goal.org_id == org_id, Goal.status == "active").values(status="paused")
+    )
+    await db.commit()
+    return {"paused": int(res.rowcount or 0)}
+
+
+@router.post("/resume-all")
+async def resume_all_goals(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-activate every paused goal in the org (the autonomy tick then continues them)."""
+    from sqlalchemy import update as _upd
+    org_id = await get_active_org_id(current_user, db)
+    res = await db.execute(
+        _upd(Goal).where(Goal.org_id == org_id, Goal.status == "paused").values(status="active")
+    )
+    await db.commit()
+    return {"resumed": int(res.rowcount or 0)}
+
+
 @router.post("", status_code=201)
 async def create_goal(
     req: GoalCreate,

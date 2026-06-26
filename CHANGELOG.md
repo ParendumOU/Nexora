@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.1
+
+- Fixed stopped autonomous runs coming back after a restart even with auto-resume disabled. The cause was the proactive autonomy loop (which dispatches active goals every minute): stopping a run from one of its sub-conversations did not pause the goal that lives at the top of the run, so the loop kept reviving it. Stopping now pauses the goal across the whole run (sub-conversation and the chain above it), and the autonomy loop skips any run whose conversation was just stopped.
+- Added a "Pause all autonomy" button (in the hierarchy view) and matching API to stop every autonomous run in the workspace at once. Paused runs stay stopped across restarts until resumed.
+
 ## 1.19.0
 
 - Agents now follow a strict communication-discipline rule that cuts wasted tokens: no preamble or filler, short status lines, no meetings/pitches/status ceremony unless asked, and terse one or two line messages between agents. This reduces both the output agents generate and the input other agents receive from them.

@@ -159,3 +159,30 @@ async def test_cancel_chat_tree_cancels_whole_subtree(db_factory, monkeypatch):
     async with db_factory() as db:
         g = await db.get(_Goal, "g1")
     assert g.status == "paused"
+
+
+@pytest.mark.asyncio
+async def test_cancel_from_subchat_pauses_goal_at_root(db_factory, monkeypatch):
+    """Stopping from a SUB-chat must still pause the goal hosted at the root — otherwise the
+    autonomy tick keeps reviving it ("killed runs come back after restart")."""
+    from src.models.goal import Goal
+
+    root, mid, leaf = await _mk_chain(db_factory)
+    async with db_factory() as db:
+        # Goal is hosted at the ROOT, but we cancel from the LEAF sub-chat.
+        db.add(Goal(id="g2", org_id="o", title="G", status="active", chat_id=root))
+        await db.commit()
+
+    fake = _FakeRedisPipe()
+    monkeypatch.setattr("src.core.redis.get_redis", lambda: fake)
+    async def _noop(*a, **k):
+        return None
+    monkeypatch.setattr("src.core.pubsub.broadcast", _noop)
+    monkeypatch.setattr("src.core.stream_buffer.clear", _noop)
+    monkeypatch.setattr("src.services.interrupt_store.signal_interrupt", _noop)
+
+    await cc.cancel_chat_tree(leaf)  # cancel from the deepest sub-chat
+
+    async with db_factory() as db:
+        g = await db.get(Goal, "g2")
+    assert g.status == "paused"  # goal at the root got paused via the ancestor walk

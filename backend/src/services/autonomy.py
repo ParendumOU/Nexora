@@ -66,6 +66,19 @@ async def autonomy_tick() -> dict:
             select(Goal).where(Goal.status == "active")
             .order_by(Goal.priority.desc()).limit(settings.autonomy_tick_max_goals)
         )).scalars().all()
+        # Defense: never dispatch a goal whose host chat (or an ancestor) was just stopped —
+        # covers the brief window between a Stop/Kill All and the goal's pause settling, so
+        # the tick can't re-spawn a run the user just killed.
+        from src.services.chat_cancel import is_ancestor_cancelled
+        _live_goals = []
+        for g in goals:
+            try:
+                if g.chat_id and await is_ancestor_cancelled(g.chat_id):
+                    continue
+            except Exception:
+                pass
+            _live_goals.append(g)
+        goals = _live_goals
         payload: list[dict] = []
         for g in goals:
             ms = (await db.execute(

@@ -119,6 +119,7 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
     # Collect this chat + all descendants in ONE query (recursive CTE). The old per-chat
     # BFS fired a query per node — at ~2k sub-chats that alone took seconds.
     visited: set[str] = {root_chat_id}
+    ancestors: set[str] = set()
     async with AsyncSessionLocal() as db:
         try:
             rows = (await db.execute(
@@ -140,6 +141,24 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
         except Exception as exc:
             logger.warning(f"[cancel] subtree CTE failed ({exc}); cancelling root only")
 
+        # Also collect the ANCESTOR chain — a goal/autopilot run is hosted at the TOP of the
+        # tree, so stopping from a sub-chat must still pause the goal above it (otherwise the
+        # autonomy tick keeps re-dispatching it every minute → "killed runs come back").
+        try:
+            from src.models.chat import Chat as _Chat
+            _cur = root_chat_id
+            _seen: set[str] = set()
+            while _cur and _cur not in _seen:
+                _seen.add(_cur)
+                _p = (await db.execute(
+                    select(_Chat.parent_chat_id).where(_Chat.id == _cur)
+                )).scalar_one_or_none()
+                if _p:
+                    ancestors.add(_p)
+                _cur = _p
+        except Exception:
+            pass
+
         # Snapshot active tasks (for per-task interrupt signals)
         r_active = await db.execute(
             select(Task.id).where(
@@ -158,15 +177,17 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
             )
             .values(status="failed", output=reason, last_error=reason[:300])
         )
-        # Pause any active autopilot/autonomy goal hosted in these chats so it is NOT
-        # revived by startup recovery after a redeploy (the reason a Kill-All'd run came
-        # back on the next build). "paused" is resumable — the user can pick it back up.
+        # Pause any active autopilot/autonomy goal hosted anywhere in this tree — the
+        # subtree AND the ancestor chain (the goal sits at the top of the run). Otherwise
+        # the autonomy tick re-dispatches it every minute and it survives restarts, so a
+        # run "stopped" from a sub-chat keeps coming back. "paused" is resumable.
         paused_goals = 0
         try:
             from src.models.goal import Goal
+            _goal_chats = visited | ancestors
             g_res = await db.execute(
                 sql_update(Goal)
-                .where(Goal.chat_id.in_(visited), Goal.status == "active")
+                .where(Goal.chat_id.in_(_goal_chats), Goal.status == "active")
                 .values(status="paused")
             )
             paused_goals = int(g_res.rowcount or 0)

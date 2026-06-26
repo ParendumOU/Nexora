@@ -722,6 +722,15 @@ export const workspacesApi = {
   remove: (name: string) => api.delete(`/workspaces/${encodeURIComponent(name)}`),
 };
 
+// ─── Goals / autonomy ───────────────────────────────────────────
+export const goalsApi = {
+  list: (status?: string) => api.get("/goals", { params: status ? { status } : undefined }),
+  // Big red button: pause every active autonomous run in the org so the autonomy tick
+  // stops dispatching them (they stay stopped across restarts until resumed).
+  pauseAll: () => api.post("/goals/pause-all"),
+  resumeAll: () => api.post("/goals/resume-all"),
+};
+
 // ─── Tool approvals (human-in-the-loop, #235) ───────────────────
 export const approvalsApi = {
   list: (status = "pending") => api.get("/approvals", { params: { status } }),

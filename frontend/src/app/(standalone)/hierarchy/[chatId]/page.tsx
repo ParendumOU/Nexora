@@ -15,7 +15,7 @@ import {
 } from "@xyflow/react";
 import type { Node, Edge, NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { chatsApi } from "@/lib/api";
+import { chatsApi, goalsApi } from "@/lib/api";
 import {
   Loader2,
   Network,
@@ -792,6 +792,28 @@ function HierarchyContent({ chatId }: { chatId: string }) {
           >
             <StopCircle className="w-3 h-3" />
             {killing ? "Cancelling…" : "Kill All"}
+          </button>
+          <button
+            onClick={async () => {
+              if (!window.confirm("Pause EVERY autonomous run in this workspace? They stop dispatching and stay stopped across restarts until you resume them.")) return;
+              setKilling(true);
+              try {
+                const r = await goalsApi.pauseAll();
+                const n = (r?.data as { paused?: number })?.paused ?? 0;
+                window.alert(`Paused ${n} autonomous run(s). The autonomy loop will no longer dispatch them.`);
+              } catch {
+                window.alert("Couldn't pause runs — check your connection.");
+              } finally {
+                setKilling(false);
+                pollCallbackRef.current?.();
+              }
+            }}
+            disabled={killing}
+            title="Stop ALL autonomous runs in the workspace (not just this tree)"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+          >
+            <StopCircle className="w-3 h-3" />
+            Pause all autonomy
           </button>
         </div>
       </div>
