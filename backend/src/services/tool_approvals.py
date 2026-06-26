@@ -38,9 +38,17 @@ async def set_yolo(chat_id: str, on: bool) -> None:
 
 
 async def is_yolo(chat_id: str) -> bool:
+    """True if YOLO is set on this chat OR any ancestor (so a sub-agent's tools inherit
+    the root conversation's YOLO — the user toggles it once on the top chat)."""
     from src.core.redis import get_redis
     try:
-        return bool(await get_redis().get(_yolo_key(chat_id)))
+        r = get_redis()
+        if await r.get(_yolo_key(chat_id)):
+            return True
+        root = await _root_chat_id(chat_id)
+        if root != chat_id and await r.get(_yolo_key(root)):
+            return True
+        return False
     except Exception:
         return False
 
@@ -181,9 +189,16 @@ async def record_pending_approval(
         aid = appr.id
     try:
         from src.core.pubsub import broadcast
-        await broadcast(chat_id, {"type": "approval_pending", "approval_id": aid,
-                                  "tool": tool_name, "tier": tier, "message_id": message_id,
-                                  "args": tool_args})
+        _payload = {"type": "approval_pending", "approval_id": aid,
+                    "tool": tool_name, "tier": tier, "message_id": message_id,
+                    "args": tool_args, "origin_chat_id": chat_id, "agent_name": agent_name}
+        await broadcast(chat_id, _payload)
+        # Bubble the request up to the ROOT conversation so a user watching the top-level
+        # chat can approve every descendant sub-agent's command without opening each
+        # sub-chat. The root renders it as an orphan card (no anchor message there).
+        root = await _root_chat_id(chat_id)
+        if root != chat_id:
+            await broadcast(root, {**_payload, "message_id": None})
     except Exception:
         pass
     logger.info("[approval] pending %s tool=%s tier=%s chat=%s", aid, tool_name, tier, chat_id)
@@ -231,8 +246,12 @@ async def approve(approval_id: str, decided_by: str, remember_similar: bool = Fa
     # The raw output lives in the approval card (collapsible, console-formatted).
     try:
         from src.core.pubsub import broadcast
-        await broadcast(chat_id, {"type": "approval_decided", "approval_id": approval_id,
-                                  "status": "approved", "result": result})
+        _dec = {"type": "approval_decided", "approval_id": approval_id,
+                "status": "approved", "result": result}
+        await broadcast(chat_id, _dec)
+        root = await _root_chat_id(chat_id)
+        if root != chat_id:
+            await broadcast(root, _dec)  # resolve the bubbled card on the root too
     except Exception:
         pass
 
@@ -271,7 +290,11 @@ async def deny(approval_id: str, decided_by: str) -> dict:
         await db.commit()
     try:
         from src.core.pubsub import broadcast
-        await broadcast(chat_id, {"type": "approval_decided", "approval_id": approval_id, "status": "denied"})
+        _dec = {"type": "approval_decided", "approval_id": approval_id, "status": "denied"}
+        await broadcast(chat_id, _dec)
+        root = await _root_chat_id(chat_id)
+        if root != chat_id:
+            await broadcast(root, _dec)
     except Exception:
         pass
     return {"status": "denied"}

@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { agentsApi, providersApi, chatFilesApi } from "@/lib/api";
+import { agentsApi, providersApi, chatFilesApi, chatsApi } from "@/lib/api";
 import { ProviderSelector } from "@/components/chat/provider-selector";
 import { ChatFile } from "@/components/chat/chat-files-panel";
 import * as Popover from "@radix-ui/react-popover";
@@ -284,6 +284,36 @@ export function ChatInput({
   useEffect(() => {
     const saved = localStorage.getItem(`chat:model:${chatId}`);
     if (saved) setModelOverride(saved);
+  }, [chatId]);
+
+  // Restore persisted YOLO / Autopilot toggles for this chat (survive refresh + chat
+  // switch; sub-chats inherit the root's state via the backend).
+  useEffect(() => {
+    let cancelled = false;
+    chatsApi.getFlags(chatId)
+      .then((r) => {
+        if (cancelled) return;
+        setYolo(!!r.data?.yolo);
+        setAutopilot(!!r.data?.autopilot);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [chatId]);
+
+  // Persist a toggle the moment it flips (not only when a message is sent).
+  const toggleYolo = useCallback(() => {
+    setYolo((v) => {
+      const next = !v;
+      chatsApi.setFlags(chatId, { yolo: next }).catch(() => {});
+      return next;
+    });
+  }, [chatId]);
+  const toggleAutopilot = useCallback(() => {
+    setAutopilot((v) => {
+      const next = !v;
+      chatsApi.setFlags(chatId, { autopilot: next }).catch(() => {});
+      return next;
+    });
   }, [chatId]);
 
   useEffect(() => {
@@ -682,16 +712,18 @@ export function ChatInput({
                       </div>
                       <button
                         type="button"
-                        onClick={() => setYolo((v) => !v)}
+                        role="switch"
+                        aria-checked={yolo}
+                        onClick={toggleYolo}
                         className={cn(
-                          "relative h-5 w-9 shrink-0 rounded-full transition-colors",
-                          yolo ? "bg-red-500" : "bg-muted"
+                          "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+                          yolo ? "bg-red-500" : "bg-input border border-border"
                         )}
                         title={yolo ? "YOLO on — tools run without approval" : "YOLO off — risky tools need approval"}
                       >
                         <span className={cn(
-                          "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
-                          yolo ? "translate-x-4" : "translate-x-0.5"
+                          "inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform",
+                          yolo ? "translate-x-[18px]" : "translate-x-0.5"
                         )} />
                       </button>
                     </div>
@@ -704,16 +736,18 @@ export function ChatInput({
                       </div>
                       <button
                         type="button"
-                        onClick={() => setAutopilot((v) => !v)}
+                        role="switch"
+                        aria-checked={autopilot}
+                        onClick={toggleAutopilot}
                         className={cn(
-                          "relative h-5 w-9 shrink-0 rounded-full transition-colors",
-                          autopilot ? "bg-primary" : "bg-muted"
+                          "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+                          autopilot ? "bg-primary" : "bg-input border border-border"
                         )}
                         title={autopilot ? "Autopilot on — your next message becomes a project the agents build autonomously" : "Autopilot off"}
                       >
                         <span className={cn(
-                          "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
-                          autopilot ? "translate-x-4" : "translate-x-0.5"
+                          "inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform",
+                          autopilot ? "translate-x-[18px]" : "translate-x-0.5"
                         )} />
                       </button>
                     </div>

@@ -161,6 +161,42 @@ async def list_chats(
     return result_list
 
 
+@router.get("/{chat_id}/flags")
+async def get_chat_flags(
+    chat_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-chat runtime toggles (YOLO, Autopilot) so the UI can restore them on open /
+    refresh / chat switch. Resolved via the root chat so a sub-chat shows the inherited
+    state."""
+    if not await _can_access_chat(chat_id, current_user, db):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    from src.services.tool_approvals import is_yolo
+    from src.services.autopilot import is_autopilot
+    return {"yolo": await is_yolo(chat_id), "autopilot": await is_autopilot(chat_id)}
+
+
+@router.post("/{chat_id}/flags")
+async def set_chat_flags(
+    chat_id: str,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist a runtime toggle immediately when the user flips it (so it survives a
+    refresh / chat switch even before the next message is sent)."""
+    if not await _can_access_chat(chat_id, current_user, db):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    from src.services.tool_approvals import set_yolo
+    from src.services.autopilot import set_autopilot
+    if "yolo" in body:
+        await set_yolo(chat_id, bool(body.get("yolo")))
+    if "autopilot" in body:
+        await set_autopilot(chat_id, bool(body.get("autopilot")))
+    return {"ok": True}
+
+
 @router.post("/", response_model=ChatResponse, status_code=201)
 async def create_chat(
     req: ChatCreate,

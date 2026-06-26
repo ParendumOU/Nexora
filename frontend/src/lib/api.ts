@@ -332,6 +332,10 @@ export const chatsApi = {
     api.post("/chats/", data),
   get: (id: string) => api.get(`/chats/${id}`),
   messages: (id: string) => api.get(`/chats/${id}/messages`),
+  // Per-chat runtime toggles (YOLO, Autopilot) — persisted so they survive refresh/switch.
+  getFlags: (id: string) => api.get(`/chats/${id}/flags`),
+  setFlags: (id: string, body: { yolo?: boolean; autopilot?: boolean }) =>
+    api.post(`/chats/${id}/flags`, body),
   updateTitle: (id: string, title: string) => api.patch(`/chats/${id}/title`, { title }),
   delete: (id: string) => api.delete(`/chats/${id}`),
   setProviderChain: (id: string, chainId: string | null) =>

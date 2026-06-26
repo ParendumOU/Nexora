@@ -10,6 +10,12 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.14.0
+
+- Approval requests for risky commands now appear in the top-level conversation, so you can approve or deny every sub-agent's action from one place without opening each sub-chat.
+- The YOLO and Autopilot toggles now stick: they are remembered per conversation across refreshes and chat switches, apply to all of a conversation's sub-agents, and save the moment you flip them.
+- Fixed the look of the YOLO and Autopilot toggle switches.
+
 ## 1.13.1
 
 - A tool call that keeps failing with the same arguments is now blocked after two identical failures, so a weaker model can no longer get stuck repeating the same failing action in a loop.

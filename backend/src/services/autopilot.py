@@ -54,9 +54,18 @@ async def set_autopilot(chat_id: str, on: bool) -> None:
 
 
 async def is_autopilot(chat_id: str) -> bool:
+    """True if Autopilot is set on this chat OR any ancestor (sub-chats inherit the
+    root conversation's state, so the toggle shows consistently everywhere)."""
     from src.core.redis import get_redis
     try:
-        return bool(await get_redis().get(_flag_key(chat_id)))
+        r = get_redis()
+        if await r.get(_flag_key(chat_id)):
+            return True
+        from src.services.tool_approvals import _root_chat_id
+        root = await _root_chat_id(chat_id)
+        if root != chat_id and await r.get(_flag_key(root)):
+            return True
+        return False
     except Exception:
         return False
 
