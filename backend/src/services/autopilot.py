@@ -544,12 +544,33 @@ async def _reconcile_goal(goal_id: str) -> bool:
         if not ms_plan:
             ms_plan = {"tasks": [{"title": current_title, "description": current_title}]}
         logger.info("[autopilot] recovery: goal %s milestone %s had no tasks — dispatching", goal_id, current_id)
+        await _post_resume_notice(host_chat_id, current_title)
         await _dispatch_milestone_tasks(goal_id, current_id, ms_plan, org_id, None, host_chat_id)
         return True
 
     # tasks exist and none are open → all resolved but the milestone was never advanced
     # (the restart hit between the last task completing and the advance hook). Push it.
     logger.info("[autopilot] recovery: goal %s milestone %s tasks all resolved — advancing", goal_id, current_id)
+    await _post_resume_notice(host_chat_id, current_title)
     await advance_on_task_complete(goal_id, current_id)
     return True
+
+
+async def _post_resume_notice(host_chat_id: str | None, milestone_title: str | None) -> None:
+    """Tell the conversation the autonomous run self-healed after a restart, so the resume
+    is visible in the chat (not just the logs). Best-effort, never blocks recovery."""
+    if not host_chat_id:
+        return
+    try:
+        from src.models.chat import Message
+        from src.core.pubsub import broadcast
+        detail = f" — continuing milestone: {milestone_title}" if milestone_title else ""
+        async with AsyncSessionLocal() as db:
+            db.add(Message(id=str(uuid.uuid4()), chat_id=host_chat_id, role="assistant",
+                           content=f"Resuming the autonomous run after a server restart{detail}.",
+                           metadata_={"kind": "autopilot_resume"}))
+            await db.commit()
+        await broadcast(host_chat_id, {"type": "messages_updated"})
+    except Exception:
+        pass
 

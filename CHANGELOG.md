@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.14.3
+
+- When an autonomous run is resumed after a server restart, the conversation now posts a short note saying it is continuing, so the self-recovery is visible in the chat instead of only in the logs.
+
 ## 1.14.2
 
 - An autonomous Autopilot run now survives a backend restart or redeploy: on startup the platform resumes any in-progress goal, re-dispatching the current milestone's remaining work or advancing to the next milestone, so a deploy no longer kills a run that was in progress.
