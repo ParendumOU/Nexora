@@ -760,9 +760,19 @@ async def stream_response(
     # Internal: how many times we've already waited-and-retried the whole chain after a
     # short rate-limit exhaustion (popped so it never reaches the provider adapters).
     _rl_retries = kwargs.pop("_rl_retries", 0)
+    # Last-resort pass: when EVERY provider got skipped for cooling and nothing was tried, we
+    # retry once ignoring cooldowns (a cooldown is advisory — better to attempt and surface a
+    # real response/error than fail with a blank "no providers").
+    _ignore_cooldown = kwargs.pop("_ignore_cooldown", False)
     last_error = None
     _min_rl_cd: float | None = None  # soonest rate-limit reset seen this pass (for wait-and-retry)
     _tried_any = False  # becomes True after the first attempt → later picks are "failovers"
+    # Why-nothing-ran accounting, so a no-attempt outcome can explain itself instead of the
+    # cryptic "No available providers".
+    _provider_count = len(providers)
+    _skipped_inactive = 0
+    _skipped_cooling = 0
+    _skipped_unknown = 0
 
     # Native tool calling (#214): resolve the agent's schema-backed tools once and
     # pass their keys to the adapters (which convert structured calls back into the
@@ -785,12 +795,16 @@ async def stream_response(
 
     for provider, step_model in providers:
         if not provider.is_active:
+            _skipped_inactive += 1
             continue
         # Skip a cooling/exhausted account: fast ephemeral Redis gate OR the durable
         # DB cooling_until (so a cooldown survives a Redis flush/restart). Failover
         # then advances to the next account of the same type, then the next type.
-        if await is_cooling(provider.id) or _is_durably_cooling(provider):
+        # The last-resort pass (_ignore_cooldown) bypasses this so a lone cooling account
+        # is still attempted rather than leaving the user with no response at all.
+        if not _ignore_cooldown and (await is_cooling(provider.id) or _is_durably_cooling(provider)):
             logger.info(f"Provider {provider.name} cooling, skipping")
+            _skipped_cooling += 1
             _s = _status(f"{provider.name} cooling down — skipping")
             if _s:
                 yield _s
@@ -799,6 +813,7 @@ async def stream_response(
         stream_fn = PROVIDER_STREAMS.get(provider.provider_type)
         if not stream_fn:
             logger.warning(f"Unknown provider type: {provider.provider_type}")
+            _skipped_unknown += 1
             continue
 
         effective = copy.copy(provider)
@@ -978,5 +993,35 @@ async def stream_response(
             yield _chunk
         return
 
-    msg = str(last_error) if last_error else "No available providers"
+    # Last resort: nothing was even attempted because every provider was skipped for cooling.
+    # A cooldown is advisory, not a hard block — when there is no other option, run the chain
+    # once IGNORING cooldowns so the user gets a real response (or a real, actionable error)
+    # instead of the blank "No available providers". Bounded: a single extra pass.
+    if not _tried_any and _skipped_cooling > 0 and not _ignore_cooldown:
+        logger.info(
+            "[router] all %d provider(s) cooling and none tried — last-resort pass ignoring cooldowns",
+            _provider_count,
+        )
+        _s = _status("All accounts cooling — trying anyway")
+        if _s:
+            yield _s
+        async for _chunk in stream_response(
+            providers, messages, status_events=status_events,
+            _rl_retries=_rl_retries, _ignore_cooldown=True, **kwargs
+        ):
+            yield _chunk
+        return
+
+    if last_error:
+        raise AllProvidersExhausted(str(last_error))
+
+    # Nothing was attempted — say WHY so the user can fix it, not a blank "No available providers".
+    if _provider_count == 0:
+        msg = "No AI provider is set for this chat. Add an account in Settings, Accounts, or pick a fallback chain."
+    elif _skipped_inactive and not _skipped_cooling and not _skipped_unknown:
+        msg = "All configured providers are inactive. Enable or fix one in Settings, Accounts."
+    elif _skipped_unknown and not _skipped_inactive and not _skipped_cooling:
+        msg = "The configured provider type isn't supported by this build."
+    else:
+        msg = "No available providers - every account is inactive or cooling down. Check Settings, Accounts."
     raise AllProvidersExhausted(msg)

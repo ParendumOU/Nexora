@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.8
+
+- Fixed a chat replying "No available providers" when its only AI account had been temporarily flagged as cooling down (for example after a burst of rate-limit or connection errors during a heavy run), even though the account itself was fine. Nexora now makes a last-resort attempt on a cooling account when there is no other option, so one hiccup no longer dead-ends the conversation.
+- When there genuinely is no usable account, the failure message now explains why (no account set for the chat, all accounts inactive, or all cooling down) and points to Settings, Accounts, instead of the opaque "No available providers".
+
 ## 1.19.7
 
 - Fixed conversations failing to open with a "Couldn't load data" error. When a chat opens, the app reads its saved YOLO and Autopilot toggles; that internal access check had its arguments in the wrong order, so it always returned a server error (500). Opening conversations and reading or saving those toggles works again.
