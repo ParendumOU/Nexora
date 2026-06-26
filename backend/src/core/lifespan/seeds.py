@@ -18,6 +18,15 @@ async def startup_seeds():
     except Exception as exc:
         logger.warning(f"Startup recovery failed (non-fatal): {exc}")
 
+    # Resume autopilot goals frozen between milestones (no in-flight task for the task-level
+    # recovery above to find) — so an autonomous run survives a redeploy. Runs AFTER it.
+    try:
+        from src.services.autopilot import recover_autopilot_goals
+        await recover_autopilot_goals()
+        logger.info("Autopilot goal recovery complete")
+    except Exception as exc:
+        logger.warning(f"Autopilot goal recovery failed (non-fatal): {exc}")
+
     try:
         from src.seeding.seed_schedules import seed_schedules
         await seed_schedules()

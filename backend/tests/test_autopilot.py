@@ -97,3 +97,118 @@ async def test_advance_waits_for_all_milestone_tasks(engine, monkeypatch):
         g = await s.get(Goal, gid)
         assert m.status == "done"
         assert g.status == "completed"  # no more milestones → goal complete
+
+
+# ── recovery: resume a goal frozen between milestones by a restart/redeploy ─────
+
+@pytest.mark.asyncio
+async def test_reconcile_dispatches_milestone_with_no_tasks(engine, monkeypatch):
+    """advance crashed mid-dispatch → a milestone is current but has zero tasks."""
+    from src.models.goal import Goal, Milestone
+
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(ap, "AsyncSessionLocal", factory)
+
+    gid, mid = str(uuid.uuid4()), str(uuid.uuid4())
+    async with factory() as s:
+        s.add(Goal(id=gid, org_id="o", title="G", status="active", chat_id="c"))
+        s.add(Milestone(id=mid, goal_id=gid, position=0, title="Scaffold", status="in_progress"))
+        await s.commit()
+
+    calls = {}
+
+    async def _fake_dispatch(goal_id, milestone_id, ms_plan, org_id, user_id, host_chat_id):
+        calls["dispatch"] = (goal_id, milestone_id, ms_plan)
+        return 1
+
+    async def _fake_plan(goal_id):
+        return {"milestones": [{"title": "Scaffold", "tasks": [{"title": "init", "description": "d"}]}]}
+
+    monkeypatch.setattr(ap, "_dispatch_milestone_tasks", _fake_dispatch)
+    monkeypatch.setattr(ap, "_load_plan", _fake_plan)
+
+    acted = await ap._reconcile_goal(gid)
+    assert acted is True
+    assert calls["dispatch"][1] == mid
+    assert calls["dispatch"][2]["tasks"][0]["title"] == "init"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_advances_when_all_tasks_resolved(engine, monkeypatch):
+    """restart hit between the last task completing and the advance hook firing."""
+    from src.models.goal import Goal, Milestone
+    from src.models.task import Task
+
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(ap, "AsyncSessionLocal", factory)
+
+    gid, mid = str(uuid.uuid4()), str(uuid.uuid4())
+    async with factory() as s:
+        s.add(Goal(id=gid, org_id="o", title="G", status="active", chat_id="c"))
+        s.add(Milestone(id=mid, goal_id=gid, position=0, title="M", status="in_progress"))
+        s.add(Task(id=str(uuid.uuid4()), org_id="o", chat_id="c", goal_id=gid, milestone_id=mid, title="a", status="completed"))
+        s.add(Task(id=str(uuid.uuid4()), org_id="o", chat_id="c", goal_id=gid, milestone_id=mid, title="b", status="failed"))
+        await s.commit()
+
+    seen = {}
+
+    async def _fake_advance(goal_id, milestone_id):
+        seen["advance"] = (goal_id, milestone_id)
+
+    monkeypatch.setattr(ap, "advance_on_task_complete", _fake_advance)
+
+    acted = await ap._reconcile_goal(gid)
+    assert acted is True
+    assert seen["advance"] == (gid, mid)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_defers_when_a_task_is_open(engine, monkeypatch):
+    """an in-flight task is recover_on_startup's job — reconcile must not double-dispatch."""
+    from src.models.goal import Goal, Milestone
+    from src.models.task import Task
+
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(ap, "AsyncSessionLocal", factory)
+
+    gid, mid = str(uuid.uuid4()), str(uuid.uuid4())
+    async with factory() as s:
+        s.add(Goal(id=gid, org_id="o", title="G", status="active", chat_id="c"))
+        s.add(Milestone(id=mid, goal_id=gid, position=0, title="M", status="in_progress"))
+        s.add(Task(id=str(uuid.uuid4()), org_id="o", chat_id="c", goal_id=gid, milestone_id=mid, title="a", status="in_progress"))
+        await s.commit()
+
+    async def _boom(*a, **k):
+        raise AssertionError("must not dispatch/advance while a task is still open")
+
+    monkeypatch.setattr(ap, "_dispatch_milestone_tasks", _boom)
+    monkeypatch.setattr(ap, "advance_on_task_complete", _boom)
+
+    acted = await ap._reconcile_goal(gid)
+    assert acted is False
+
+
+@pytest.mark.asyncio
+async def test_reconcile_finalizes_when_all_milestones_done(engine, monkeypatch):
+    """final advance was interrupted before marking the goal completed."""
+    from src.models.goal import Goal, Milestone
+
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(ap, "AsyncSessionLocal", factory)
+
+    gid = str(uuid.uuid4())
+    async with factory() as s:
+        s.add(Goal(id=gid, org_id="o", title="G", status="active", chat_id="c"))
+        s.add(Milestone(id=str(uuid.uuid4()), goal_id=gid, position=0, title="M", status="done"))
+        await s.commit()
+
+    seen = {}
+
+    async def _fake_final(goal_id):
+        seen["final"] = goal_id
+
+    monkeypatch.setattr(ap, "_finalize_goal", _fake_final)
+
+    acted = await ap._reconcile_goal(gid)
+    assert acted is True
+    assert seen["final"] == gid

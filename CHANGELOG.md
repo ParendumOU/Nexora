@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.14.2
+
+- An autonomous Autopilot run now survives a backend restart or redeploy: on startup the platform resumes any in-progress goal, re-dispatching the current milestone's remaining work or advancing to the next milestone, so a deploy no longer kills a run that was in progress.
+- Moving from one milestone to the next is now guarded so it cannot happen twice at once, preventing duplicate follow-up tasks when two tasks finish at the same moment.
+
 ## 1.14.1
 
 - Agents can no longer run a shell command that takes down the platform itself (stopping, killing, removing or restarting containers, rebooting, or mass-killing processes); they can still bring their own project up with docker compose. This fixes the backend restarting in the middle of an autonomous run.

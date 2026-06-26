@@ -34,6 +34,7 @@ _GOAL_PREFIX = "autopilot:goal:"          # marks a goal as autopilot-managed
 _AUTOPILOT_TTL = 7 * 24 * 3600
 _MAX_MILESTONES = 12
 _MAX_TASKS_PER_MS = 10
+_RECOVERY_WINDOW_HOURS = 7 * 24           # how far back startup recovery looks for goals
 
 
 # ── per-chat toggle (mirrors tool_approvals YOLO) ────────────────────────────
@@ -362,17 +363,28 @@ async def advance_on_task_complete(goal_id: str, milestone_id: str) -> None:
     from src.models.goal import Goal, Milestone
     from src.models.task import Task
     from src.services.goals import set_milestone_status, recompute_goal_progress
-    from src.core.pubsub import broadcast
+
+    # Cheap early bail (no lock) while the milestone still has running tasks.
+    async with AsyncSessionLocal() as db:
+        if await _open_task_count(db, milestone_id) > 0:
+            return  # milestone not finished yet
+
+    # Serialize the milestone -> done transition. Two near-simultaneous task completions,
+    # or a startup-recovery advance racing a live executor hook, must NOT both dispatch the
+    # next milestone (that would double its tasks). nx lock + an already-done recheck.
+    try:
+        from src.core.redis import get_redis
+        if not await get_redis().set(f"autopilot:advance:{milestone_id}", "1", nx=True, ex=60):
+            return  # another caller owns this transition
+    except Exception:
+        pass
 
     async with AsyncSessionLocal() as db:
-        open_siblings = (await db.execute(
-            select(func.count()).select_from(Task).where(
-                Task.milestone_id == milestone_id,
-                Task.status.in_(["pending", "queued", "in_progress", "paused"]),
-            )
-        )).scalar() or 0
-        if open_siblings > 0:
-            return  # milestone not finished yet
+        ms = (await db.execute(select(Milestone).where(Milestone.id == milestone_id))).scalar_one_or_none()
+        if ms is None or ms.status == "done":
+            return  # already advanced
+        if await _open_task_count(db, milestone_id) > 0:
+            return  # a task got re-dispatched between the two checks
 
         await set_milestone_status(db, milestone_id, "done")
         await recompute_goal_progress(db, goal_id)
@@ -387,31 +399,12 @@ async def advance_on_task_complete(goal_id: str, milestone_id: str) -> None:
         )).scalar_one_or_none()
         host_chat_id = goal.chat_id
         org_id = goal.org_id
-        goal_done = nxt is None
         next_ms_id = nxt.id if nxt else None
         next_ms_pos = nxt.position if nxt else None
         next_ms_title = nxt.title if nxt else None
 
-    if goal_done:
-        async with AsyncSessionLocal() as db:
-            goal = (await db.execute(select(Goal).where(Goal.id == goal_id))).scalar_one_or_none()
-            if goal and goal.status != "completed":
-                from datetime import datetime, timezone
-                goal.status = "completed"
-                goal.completed_at = datetime.now(timezone.utc)
-                await db.commit()
-        if host_chat_id:
-            try:
-                from src.models.chat import Message
-                async with AsyncSessionLocal() as db:
-                    db.add(Message(id=str(uuid.uuid4()), chat_id=host_chat_id, role="assistant",
-                                   content="Autopilot complete — all milestones done.",
-                                   metadata_={"kind": "autopilot_done"}))
-                    await db.commit()
-                await broadcast(host_chat_id, {"type": "messages_updated"})
-            except Exception:
-                pass
-        logger.info("[autopilot] goal %s complete", goal_id)
+    if next_ms_id is None:
+        await _finalize_goal(goal_id)
         return
 
     # Dispatch the next milestone using its REAL micro-tasks from the stored plan
@@ -423,4 +416,140 @@ async def advance_on_task_complete(goal_id: str, milestone_id: str) -> None:
     if not ms_plan:
         ms_plan = {"tasks": [{"title": next_ms_title, "description": next_ms_title}]}
     await _dispatch_milestone_tasks(goal_id, next_ms_id, ms_plan, org_id, None, host_chat_id)
+
+
+async def _open_task_count(db, milestone_id: str) -> int:
+    """Count a milestone's tasks that are still running / not yet resolved."""
+    from src.models.task import Task
+    return (await db.execute(
+        select(func.count()).select_from(Task).where(
+            Task.milestone_id == milestone_id,
+            Task.status.in_(["pending", "queued", "in_progress", "paused"]),
+        )
+    )).scalar() or 0
+
+
+async def _finalize_goal(goal_id: str) -> None:
+    """Mark an autopilot goal complete and post the done message. Idempotent — a second
+    call (e.g. recovery racing the live hook) is a no-op and never double-posts."""
+    from src.models.goal import Goal
+    from src.core.pubsub import broadcast
+
+    host_chat_id = None
+    async with AsyncSessionLocal() as db:
+        goal = (await db.execute(select(Goal).where(Goal.id == goal_id))).scalar_one_or_none()
+        if not goal or goal.status == "completed":
+            return  # gone or already finalized — don't double-post
+        from datetime import datetime, timezone
+        goal.status = "completed"
+        goal.completed_at = datetime.now(timezone.utc)
+        goal.progress = 100
+        host_chat_id = goal.chat_id
+        await db.commit()
+
+    if host_chat_id:
+        try:
+            from src.models.chat import Message
+            async with AsyncSessionLocal() as db:
+                db.add(Message(id=str(uuid.uuid4()), chat_id=host_chat_id, role="assistant",
+                               content="Autopilot complete — all milestones done.",
+                               metadata_={"kind": "autopilot_done"}))
+                await db.commit()
+            await broadcast(host_chat_id, {"type": "messages_updated"})
+        except Exception:
+            pass
+    logger.info("[autopilot] goal %s complete", goal_id)
+
+
+# ── startup recovery: resume goals frozen by a backend restart/redeploy ──────
+async def recover_autopilot_goals() -> None:
+    """Resume autopilot goals whose state machine was frozen by a restart/redeploy.
+
+    `startup_recovery.recover_on_startup` re-dispatches in-flight *tasks*, but it can't
+    see a goal whose current milestone has NO open task — e.g. the last task completed
+    but `advance_on_task_complete` never fired, or advance marked one milestone done and
+    the container died before dispatching the next. This reconciles exactly those goals,
+    so an autonomous run survives `docker compose up --build`. Runs AFTER recover_on_startup
+    (so any task it re-dispatched is already 'pending'/'queued' and counts as open here,
+    preventing a premature advance). One worker only (Redis lock)."""
+    try:
+        from src.core.redis import get_redis
+        if not await get_redis().set("autopilot_recovery_lock", "1", nx=True, ex=120):
+            return  # another worker handles it
+    except Exception:
+        pass
+
+    from datetime import datetime, timezone, timedelta
+    from src.models.goal import Goal
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_RECOVERY_WINDOW_HOURS)
+    async with AsyncSessionLocal() as db:
+        goals = (await db.execute(
+            select(Goal).where(Goal.status == "active", Goal.updated_at >= cutoff)
+        )).scalars().all()
+
+    resumed = 0
+    for g in goals:
+        try:
+            if await is_autopilot_goal(g.id) and await _reconcile_goal(g.id):
+                resumed += 1
+        except Exception as exc:
+            logger.warning("[autopilot] recovery failed for goal %s: %s", g.id, exc)
+    if resumed:
+        logger.info("[autopilot] resumed %d frozen autopilot goal(s) on startup", resumed)
+
+
+async def _reconcile_goal(goal_id: str) -> bool:
+    """Push one autopilot goal forward if its state machine is frozen. Acts only when the
+    current milestone has NO open task (in-flight tasks are recover_on_startup's job, and
+    their completion will fire advance). Returns True if it took an action."""
+    from src.models.goal import Goal, Milestone
+    from src.models.task import Task
+
+    async with AsyncSessionLocal() as db:
+        goal = (await db.execute(select(Goal).where(Goal.id == goal_id))).scalar_one_or_none()
+        if not goal or goal.status != "active":
+            return False
+        host_chat_id = goal.chat_id
+        org_id = goal.org_id
+        milestones = (await db.execute(
+            select(Milestone).where(Milestone.goal_id == goal_id).order_by(Milestone.position)
+        )).scalars().all()
+        current = next((m for m in milestones if m.status in ("pending", "in_progress")), None)
+        if current is None:
+            # every milestone resolved but the goal is still active → a final advance was
+            # interrupted before finalizing. Complete it.
+            await _finalize_goal(goal_id)
+            return True
+        current_id = current.id
+        current_pos = current.position
+        current_title = current.title
+        open_tasks = await _open_task_count(db, current_id)
+        total_tasks = (await db.execute(
+            select(func.count()).select_from(Task).where(Task.milestone_id == current_id)
+        )).scalar() or 0
+
+    if open_tasks > 0:
+        # In-flight — recover_on_startup re-dispatches the tasks; their completion fires
+        # advance_on_task_complete. Leave it alone (avoids double dispatch).
+        return False
+
+    if total_tasks == 0:
+        # The milestone never got its micro-tasks (advance crashed mid-dispatch, or the
+        # very first dispatch was lost). Dispatch them now from the stored plan.
+        plan = await _load_plan(goal_id)
+        ms_plan = None
+        if plan and isinstance(current_pos, int) and 0 <= current_pos < len(plan.get("milestones", [])):
+            ms_plan = plan["milestones"][current_pos]
+        if not ms_plan:
+            ms_plan = {"tasks": [{"title": current_title, "description": current_title}]}
+        logger.info("[autopilot] recovery: goal %s milestone %s had no tasks — dispatching", goal_id, current_id)
+        await _dispatch_milestone_tasks(goal_id, current_id, ms_plan, org_id, None, host_chat_id)
+        return True
+
+    # tasks exist and none are open → all resolved but the milestone was never advanced
+    # (the restart hit between the last task completing and the advance hook). Push it.
+    logger.info("[autopilot] recovery: goal %s milestone %s tasks all resolved — advancing", goal_id, current_id)
+    await advance_on_task_complete(goal_id, current_id)
+    return True
 
