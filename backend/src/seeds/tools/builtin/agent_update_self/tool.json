@@ -5,5 +5,73 @@
   "category": "platform",
   "is_builtin": true,
   "always_allowed": false,
-  "platform_executor": true
+  "platform_executor": true,
+  "args": [
+    {
+      "name": "system_prompt_append",
+      "type": "string",
+      "required": false,
+      "description": "Text to append to your own system prompt."
+    },
+    {
+      "name": "system_prompt_replace",
+      "type": "string",
+      "required": false,
+      "description": "Replace your entire system prompt."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "New description."
+    },
+    {
+      "name": "temperature",
+      "type": "number",
+      "required": false,
+      "description": "New LLM temperature 0.0-1.0."
+    },
+    {
+      "name": "max_tokens",
+      "type": "integer",
+      "required": false,
+      "description": "New max tokens per response."
+    },
+    {
+      "name": "model_pref",
+      "type": "string",
+      "required": false,
+      "description": "Preferred model identifier."
+    },
+    {
+      "name": "soul",
+      "type": "object",
+      "required": false,
+      "description": "Personality fields to merge (tone, style, values, ...)."
+    },
+    {
+      "name": "skills_add",
+      "type": "array",
+      "required": false,
+      "description": "Skill keys to add."
+    },
+    {
+      "name": "skills_remove",
+      "type": "array",
+      "required": false,
+      "description": "Skill keys to remove."
+    },
+    {
+      "name": "tools_add",
+      "type": "array",
+      "required": false,
+      "description": "Tool keys to add."
+    },
+    {
+      "name": "tools_remove",
+      "type": "array",
+      "required": false,
+      "description": "Tool keys to remove."
+    }
+  ]
 }

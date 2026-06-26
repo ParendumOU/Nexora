@@ -132,10 +132,11 @@ class Settings(BaseSettings):
     run_queue_enabled: bool = False
     # Event-driven sub-agent delegation (GitLab #218). When true, a delegating
     # parent waits on a Redis pub/sub child-done signal (waking promptly, ~no DB
-    # load) instead of polling Postgres once per second for up to 300s. Default off
-    # keeps the existing 1s busy-poll. The semaphore-bypass for children + the slot
-    # the parent holds while waiting are unchanged (slot release is the runner phase).
-    event_driven_delegation: bool = False
+    # load) instead of polling Postgres once per second for up to 300s. The
+    # semaphore-bypass for children + the slot the parent holds while waiting are
+    # unchanged (slot release is the runner phase). Default ON since v1.9.0 (Redis
+    # is always present); set false to restore the legacy 1s busy-poll.
+    event_driven_delegation: bool = True
     run_queue_stream: str = "nexora:runs"
     run_queue_group: str = "runners"
     runner_concurrency: int = 4              # concurrent runs per runner worker
@@ -150,29 +151,31 @@ class Settings(BaseSettings):
     circuit_breaker_threshold: int = 3       # consecutive failures before circuit opens (5 min TTL)
     heartbeat_timeout_minutes: int = 5       # minutes before a stale heartbeat triggers task recovery
 
-    # Native tool calling (GitLab #214) — OFF by default. When on, API adapters
-    # that support it (Anthropic, OpenAI-compatible) send the agent's schema-backed
-    # tools to the provider's native function-calling API and convert the structured
-    # tool calls back into the existing ```tool_calls fence, so the rest of the
-    # pipeline (parser, executor, frontend) is unchanged. Tools without a declared
-    # schema stay on the text-fence path.
-    native_tools_enabled: bool = False
+    # Native tool calling (GitLab #214). When on, API adapters that support it
+    # (Anthropic, OpenAI-compatible) send the agent's schema-backed tools to the
+    # provider's native function-calling API and convert the structured tool calls
+    # back into the existing ```tool_calls fence, so the rest of the pipeline
+    # (parser, executor, frontend) is unchanged. Tools without a declared schema
+    # stay on the text-fence path. Default ON since v1.9.0; set false to force the
+    # legacy text-fence path for every tool/provider.
+    native_tools_enabled: bool = True
 
     # Prompt caching (GitLab #220). When true, the platform-context builder inserts
     # a cache breakpoint after the large static tool/intro block, and the Anthropic
     # adapter marks that stable prefix with cache_control: ephemeral so it is reused
-    # across tool-resume turns instead of re-billed every iteration. Default off →
-    # byte-identical prompt + no cache_control split (current behavior). The
-    # breakpoint sentinel is stripped from every non-caching provider so it can
-    # never leak into a prompt.
-    prompt_cache_enabled: bool = False
+    # across tool-resume turns instead of re-billed every iteration. The breakpoint
+    # sentinel is stripped from every non-caching provider so it can never leak into
+    # a prompt — a no-op for non-Anthropic paths. Default ON since v1.9.0; set false
+    # for a byte-identical prompt with no cache_control split.
+    prompt_cache_enabled: bool = True
 
     # Parallel read-tier tool execution (GitLab #229). When true, side-effect-free
     # read-tier tool calls in a single turn (file_read, board_read, knowledge_search,
     # github/gitlab read, …) are computed concurrently up-front and consumed by the
     # normal sequential loop, cutting latency on read-heavy turns. Events, ordering,
-    # and gating are unchanged. Default off → fully sequential as before.
-    parallel_tool_calls_enabled: bool = False
+    # and gating are unchanged. Default ON since v1.9.0; set false for the fully
+    # sequential path.
+    parallel_tool_calls_enabled: bool = True
 
     # Tool permissions (GitLab #222)
     tools_default_deny: bool = False         # when true, an agent with NO configured tools is
@@ -186,6 +189,12 @@ class Settings(BaseSettings):
     # Streaming
     provider_stream_idle_timeout_seconds: int = 300  # abort a turn if the provider emits no
                                              # chunk for this long (hung stream guard, #223). 0 = off.
+    cancel_poll_interval_seconds: float = 2.0  # max time a chunkless provider call ignores a user
+                                             # cancel (#223). The stream consumer races each chunk
+                                             # against this slice and checks the cancel flag between
+                                             # slices, so cancel takes effect within ~this many
+                                             # seconds even mid-call. 0 = legacy (cancel only checked
+                                             # every Nth chunk, so a chunkless call ignores it).
     pubsub_queue_maxsize: int = 2000         # per-subscriber pub/sub queue cap; a stuck/slow
                                              # consumer drops OLDEST events instead of growing
                                              # memory unbounded (GitLab #225). 0 = unbounded.

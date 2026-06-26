@@ -6,5 +6,91 @@
   "group": "platform_create",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": true,
+      "description": "The project to update."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": false,
+      "description": "New name."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "New description."
+    },
+    {
+      "name": "repo_url",
+      "type": "string",
+      "required": false,
+      "description": "New repo URL."
+    },
+    {
+      "name": "repo_type",
+      "type": "string",
+      "required": false,
+      "description": "github | gitlab | git."
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": false,
+      "description": "active | archived."
+    },
+    {
+      "name": "provider_chain_id",
+      "type": "string",
+      "required": false,
+      "description": "Provider chain id."
+    },
+    {
+      "name": "pm_agent_id",
+      "type": "string",
+      "required": false,
+      "description": "PM agent id."
+    },
+    {
+      "name": "tools",
+      "type": "array",
+      "required": false,
+      "description": "Project-level tool keys."
+    },
+    {
+      "name": "mcps",
+      "type": "array",
+      "required": false,
+      "description": "Project-level MCP server ids."
+    },
+    {
+      "name": "env_vars",
+      "type": "object",
+      "required": false,
+      "description": "Project environment variables."
+    },
+    {
+      "name": "repo_branch",
+      "type": "string",
+      "required": false,
+      "description": "Default branch."
+    },
+    {
+      "name": "repo_credential_id",
+      "type": "string",
+      "required": false,
+      "description": "Git credential id."
+    },
+    {
+      "name": "is_private",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether the repo is private."
+    }
+  ]
 }

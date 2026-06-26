@@ -49,8 +49,13 @@ def test_split_system_without_sentinel_caches_whole():
 
 @pytest.mark.asyncio
 async def test_builder_omits_sentinel_when_flag_off(monkeypatch):
-    # Default-off path must never contain the sentinel.
-    from src.services.agent_context import platform_context as pc
-    # No org → returns "" quickly; exercise the flag default instead.
+    # With the flag explicitly off, the split is a single uncached-prefix block and
+    # the sentinel never survives into a provider prompt (strip is a true no-op).
     from src.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "prompt_cache_enabled", False)
     assert get_settings().prompt_cache_enabled is False
+    # A prompt that never had a sentinel inserted splits to one whole-prompt block.
+    blocks = split_system_for_cache("no sentinel here")
+    assert len(blocks) == 1
+    msgs = [{"role": "system", "content": "plain"}, {"role": "user", "content": "hi"}]
+    assert strip_sentinel_messages(msgs) is msgs

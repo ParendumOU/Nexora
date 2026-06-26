@@ -8,10 +8,20 @@ Sub-agent execution dispatcher — three-layer concurrency control.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from typing import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
+
+# Per-run handle to the slots this dispatch() acquired, so a sub-agent that parks
+# to wait for its children (#218) can release its global-sem + per-agent-sem + org
+# slot while parked — letting the children acquire them normally instead of having
+# to bypass the pool — and re-acquire before it resumes. Mirrors run_queue's slot
+# contextvar. None outside a dispatch()-wrapped run (e.g. the root chat agent).
+_current_dispatch: contextvars.ContextVar = contextvars.ContextVar(
+    "nexora_dispatch_slot", default=None
+)
 
 # Layer 1: lazily created so the event loop is guaranteed to exist
 _global_semaphore: asyncio.Semaphore | None = None
@@ -57,6 +67,23 @@ async def _release_org_slot(org_id: str) -> None:
         await redis.set(key, 0)
 
 
+async def _wait_org_slot(org_id: str, task_id: str) -> bool:
+    """Layer 3 acquire: wait up to 5 min for a per-org Redis slot. Fails open."""
+    for attempt in range(300):
+        if await _acquire_org_slot(org_id):
+            return True
+        if attempt == 0:
+            logger.info(
+                f"[dispatcher] org {org_id} at capacity, task {task_id} waiting for org slot"
+            )
+        await asyncio.sleep(1)
+    logger.warning(
+        f"[dispatcher] org {org_id} org-slot wait timed out for task {task_id}, "
+        "proceeding without limit enforcement"
+    )
+    return False
+
+
 async def dispatch(
     task_id: str,
     org_id: str,
@@ -69,41 +96,70 @@ async def dispatch(
     Execute a sub-agent task respecting all three concurrency layers.
     Always fire via asyncio.create_task(); the task should already be
     marked 'queued' in the DB before calling this.
+
+    Slots are acquired explicitly (not via `async with`) and tracked in a per-run
+    handle so the run can release them while parked waiting for children (#218) and
+    re-acquire before resuming. The `finally` releases whatever is still held, so
+    an early return / exception can never leak a slot.
     """
-    async def _run_with_org_slot() -> None:
-        # Layer 3: per-org Redis slot — wait up to 5 min
-        slot_acquired = False
-        for attempt in range(300):
-            if await _acquire_org_slot(org_id):
-                slot_acquired = True
-                break
-            if attempt == 0:
-                logger.info(
-                    f"[dispatcher] org {org_id} at capacity, "
-                    f"task {task_id} waiting for org slot"
-                )
-            await asyncio.sleep(1)
+    agent_semaphore = _agent_sem(agent_id, agent_max_concurrency) if agent_id else None
+    gsem = _global_sem()
+    # Mutable record of what is currently held; release/reacquire flip these.
+    held = {"agent": False, "global": False, "org": False}
 
-        if not slot_acquired:
-            logger.warning(
-                f"[dispatcher] org {org_id} org-slot wait timed out for task {task_id}, "
-                "proceeding without limit enforcement"
-            )
+    async def _acquire_all() -> None:
+        # Order: per-agent (L2) → global (L1) → org (L3). Reacquire uses the same order.
+        if agent_semaphore is not None and not held["agent"]:
+            await agent_semaphore.acquire()
+            held["agent"] = True
+        if not held["global"]:
+            await gsem.acquire()
+            held["global"] = True
+        if not held["org"]:
+            held["org"] = await _wait_org_slot(org_id, task_id)
 
-        try:
-            await coro_factory()
-        finally:
-            if slot_acquired:
-                await _release_org_slot(org_id)
+    async def _release_all() -> None:
+        # Reverse order. Org slot first (it's the scarcest, cross-worker resource).
+        if held["org"]:
+            await _release_org_slot(org_id)
+            held["org"] = False
+        if held["global"]:
+            gsem.release()
+            held["global"] = False
+        if held["agent"] and agent_semaphore is not None:
+            agent_semaphore.release()
+            held["agent"] = False
 
-    async def _run_with_global_sem() -> None:
-        # Layer 1: global per-worker semaphore
-        async with _global_sem():
-            await _run_with_org_slot()
+    token = _current_dispatch.set({"release": _release_all, "reacquire": _acquire_all})
+    try:
+        await _acquire_all()
+        await coro_factory()
+    finally:
+        _current_dispatch.reset(token)
+        await _release_all()
 
-    # Layer 2: per-agent semaphore (only when agent_id is known)
-    if agent_id:
-        async with _agent_sem(agent_id, agent_max_concurrency):
-            await _run_with_global_sem()
-    else:
-        await _run_with_global_sem()
+
+def current_dispatch_slot():
+    """The active dispatch slot handle, or None outside a dispatch()-wrapped run."""
+    return _current_dispatch.get()
+
+
+async def release_current_dispatch_slot() -> bool:
+    """Release the in-process concurrency slots held by the current run (if any).
+
+    Returns True if a slot was released (so the caller knows to reacquire). A no-op
+    returning False when the current run was not dispatched through dispatch() —
+    e.g. the root chat agent, which holds no pool slot.
+    """
+    handle = _current_dispatch.get()
+    if not handle:
+        return False
+    await handle["release"]()
+    return True
+
+
+async def reacquire_current_dispatch_slot() -> None:
+    """Re-acquire the slots released by release_current_dispatch_slot()."""
+    handle = _current_dispatch.get()
+    if handle:
+        await handle["reacquire"]()

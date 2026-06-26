@@ -6,5 +6,73 @@
   "group": "platform_create",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "name",
+      "type": "string",
+      "required": true,
+      "description": "Project display name."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "What the project is."
+    },
+    {
+      "name": "repo_url",
+      "type": "string",
+      "required": false,
+      "description": "Full HTTPS repo URL (github/gitlab)."
+    },
+    {
+      "name": "repo_type",
+      "type": "string",
+      "required": false,
+      "description": "github | gitlab | git (inferred from repo_url if omitted)."
+    },
+    {
+      "name": "repo_branch",
+      "type": "string",
+      "required": false,
+      "description": "Default branch."
+    },
+    {
+      "name": "repo_credential_id",
+      "type": "string",
+      "required": false,
+      "description": "Git credential id for private repos."
+    },
+    {
+      "name": "is_private",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether the repo is private."
+    },
+    {
+      "name": "provider_chain_id",
+      "type": "string",
+      "required": false,
+      "description": "Provider chain for this project's agents."
+    },
+    {
+      "name": "pm_agent_id",
+      "type": "string",
+      "required": false,
+      "description": "Agent to manage this project."
+    },
+    {
+      "name": "skip_if_exists",
+      "type": "boolean",
+      "required": false,
+      "description": "Skip creation if a project with this name exists."
+    },
+    {
+      "name": "meta",
+      "type": "object",
+      "required": false,
+      "description": "Extra metadata."
+    }
+  ]
 }

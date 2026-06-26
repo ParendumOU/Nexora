@@ -132,7 +132,8 @@ async def test_consume_idle_timeout_aborts(monkeypatch):
     monkeypatch.setattr(te, "stream_response", _slow)
     import src.core.config as cfg
     monkeypatch.setattr(cfg, "get_settings",
-                        lambda: SimpleNamespace(provider_stream_idle_timeout_seconds=0.2))
+                        lambda: SimpleNamespace(provider_stream_idle_timeout_seconds=0.2,
+                                                cancel_poll_interval_seconds=0))
 
     seen = []
 
@@ -142,6 +143,45 @@ async def test_consume_idle_timeout_aborts(monkeypatch):
     out = await te.consume_provider_stream([], [], on_chunk=on_chunk)
     assert out.timed_out is True and out.stopped is True
     assert seen == ["hi"]  # first chunk delivered, then the hang aborts the turn
+
+
+async def test_consume_preemptive_cancel_during_chunkless_gap(monkeypatch):
+    # A cancel set WHILE the provider is mid-call (emitting no chunk) must be observed
+    # within ~cancel_poll seconds (#223), not only at the next chunk / never.
+    import asyncio
+    from types import SimpleNamespace
+
+    async def _slow(providers, messages, *, status_events=False, **kw):
+        yield "hi"
+        await asyncio.sleep(10)  # long chunkless gap — would block the old cancel check
+        yield "never"
+
+    monkeypatch.setattr(te, "stream_response", _slow)
+    import src.core.config as cfg
+    monkeypatch.setattr(cfg, "get_settings",
+                        lambda: SimpleNamespace(provider_stream_idle_timeout_seconds=0,
+                                                cancel_poll_interval_seconds=0.05))
+
+    seen = []
+
+    async def on_chunk(c):
+        seen.append(c)
+
+    flag = {"cancel": False}
+
+    async def cancel_check():
+        return flag["cancel"]
+
+    async def _arm():
+        await asyncio.sleep(0.15)
+        flag["cancel"] = True
+
+    asyncio.ensure_future(_arm())
+    out = await te.consume_provider_stream(
+        [], [], on_chunk=on_chunk, cancel_check=cancel_check,
+    )
+    assert out.cancelled is True and out.timed_out is False
+    assert seen == ["hi"]  # cancel observed during the gap, before the 2nd chunk
 
 
 async def test_consume_propagates_exhausted(monkeypatch):

@@ -6,5 +6,37 @@
   "group": "platform_create",
   "is_builtin": true,
   "platform_executor": true,
-  "always_allowed": true
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "credential_id",
+      "type": "string",
+      "required": true,
+      "description": "Git credential to import repos with."
+    },
+    {
+      "name": "repos",
+      "type": "array",
+      "required": false,
+      "description": "Explicit list of repos to import (objects)."
+    },
+    {
+      "name": "groups",
+      "type": "array",
+      "required": false,
+      "description": "Only import repos under these groups/orgs."
+    },
+    {
+      "name": "import_all",
+      "type": "boolean",
+      "required": false,
+      "description": "Import every accessible repo (default false)."
+    },
+    {
+      "name": "skip_if_exists",
+      "type": "boolean",
+      "required": false,
+      "description": "Skip repos already imported (default true)."
+    }
+  ]
 }

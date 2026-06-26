@@ -243,7 +243,8 @@ async def test_stream_response_no_tool_keys_when_native_off(_patch_loop, monkeyp
         yield "hi"
 
     monkeypatch.setattr(router, "PROVIDER_STREAMS", {"ok": _ok})
-    # native_tools_enabled is False by default → no injection
+    from src.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "native_tools_enabled", False)  # off → no injection
     providers = [(_fake_provider("a", "ok", "ok#1"), None)]
     await _collect(router.stream_response(
         providers, [{"role": "user", "content": "x"}], agent_id="a1", chat_id="c1",

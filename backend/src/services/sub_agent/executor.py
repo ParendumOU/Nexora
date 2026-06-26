@@ -617,6 +617,14 @@ async def _execute_sub_agent_task(
                     _event_driven = _gs_deleg().event_driven_delegation
                     _done_channel = f"subagent_done:{sub_chat_id}"
 
+                    # When the durable run queue is on, route children through it (runner
+                    # + cross-worker governor) instead of an in-process task that bypasses
+                    # the semaphore. The child-done signal is published by the executor's
+                    # own completion path (works for both spawn modes), so the wait below
+                    # wakes regardless of which runner ran the child.
+                    from src.services import run_queue as _rq
+                    _queue_on = _rq.is_enabled()
+
                     # Event-driven wait (#218): subscribe BEFORE spawning so no child
                     # completion can be missed between spawn and wait.
                     _done_q = None
@@ -625,8 +633,8 @@ async def _execute_sub_agent_task(
                         _done_q = await _ps.subscribe(_done_channel)
 
                     async def _run_child(_ctid: str) -> None:
-                        """Run a child task, then (event mode) publish a done signal so
-                        the waiting parent wakes immediately instead of polling."""
+                        """In-process child run (queue off). Publishes the done signal in
+                        finally; the queue path relies on the executor-completion publish."""
                         try:
                             await _execute_sub_agent_task(
                                 task_id=_ctid,
@@ -645,11 +653,48 @@ async def _execute_sub_agent_task(
                                 except Exception:
                                     pass
 
-                    # Spawn children directly — bypassing the global semaphore to avoid
-                    # deadlock: the parent holds a slot while waiting here, so children
-                    # must not compete for the same pool. (Slot release = runner phase.)
-                    for child_tid in child_task_ids:
-                        asyncio.create_task(_run_child(child_tid))
+                    if _queue_on:
+                        # Enqueue each child as a durable run; a runner executes it under
+                        # the governor. No in-process task, no semaphore bypass.
+                        for child_tid in child_task_ids:
+                            await _rq.enqueue_run(
+                                "subagent",
+                                task_id=child_tid,
+                                parent_chat_id=sub_chat_id,
+                                org_id=org_id,
+                                parent_chat_project_id=parent_chat_project_id,
+                                parent_chat_provider_chain_id=parent_chat_provider_chain_id,
+                                user_id=user_id,
+                                parent_direct_provider_id=parent_direct_provider_id,
+                                agent_id=None,
+                            )
+                    elif _event_driven:
+                        # In-process but BOUNDED (#218): route children through dispatch()
+                        # so they respect the global/per-agent/org concurrency layers. No
+                        # deadlock because this parent releases its own dispatch slot while
+                        # parked (below) — children acquire the freed slots, finish, signal.
+                        from src.services.task_dispatcher import dispatch as _dispatch
+                        for child_tid in child_task_ids:
+                            asyncio.create_task(
+                                _dispatch(child_tid, org_id, (lambda c=child_tid: _run_child(c)))
+                            )
+                    else:
+                        # Legacy (event_driven off): bypass the semaphore (this parent holds
+                        # a slot while waiting, so children must not compete for the pool).
+                        for child_tid in child_task_ids:
+                            asyncio.create_task(_run_child(child_tid))
+
+                    # Release this run's concurrency slot while parked waiting for children
+                    # so children (which need slots) can't deadlock against waiting parents.
+                    # Balanced: always re-acquire before leaving the wait. Queue-on releases
+                    # the Redis governor slot; bounded in-process releases the dispatch slot.
+                    _slot_released = False
+                    _disp_released = False
+                    if _queue_on:
+                        _slot_released = await _rq.release_current_slot()
+                    elif _event_driven:
+                        from src.services import task_dispatcher as _td
+                        _disp_released = await _td.release_current_dispatch_slot()
 
                     _CHILD_WAIT_MAX = 300  # seconds
                     try:
@@ -683,6 +728,14 @@ async def _execute_sub_agent_task(
                         if _done_q is not None:
                             from src.core import pubsub as _ps3
                             await _ps3.unsubscribe(_done_channel, _done_q)
+                        # Re-acquire the slot released for the wait — on EVERY exit path
+                        # (break, the interrupt `return`, timeout, error) so the single
+                        # release stays balanced.
+                        if _slot_released:
+                            await _rq.reacquire_current_slot()
+                        if _disp_released:
+                            from src.services import task_dispatcher as _td
+                            await _td.reacquire_current_dispatch_slot()
 
                     async with AsyncSessionLocal() as db:
                         child_results_r = await db.execute(
@@ -856,6 +909,15 @@ async def _execute_sub_agent_task(
                     "type": "task_updated",
                     "task": _task_to_dict(t, agent_name),
                 })
+
+        # Child-done signal (#218): wake a parent event-driven wait, regardless of
+        # whether this child ran in-process or on a runner. The parent subscribes to
+        # subagent_done:{its sub_chat} == this task's parent_chat_id. Fire-and-forget.
+        try:
+            from src.core import pubsub as _psd
+            await _psd.broadcast(f"subagent_done:{parent_chat_id}", {"task_id": task_id})
+        except Exception:
+            pass
 
         # Auto-reply to an originating agent message (send_message_to_agent): if this
         # task was created by a peer message, mark that message "replied" with the
@@ -1044,6 +1106,14 @@ async def _execute_sub_agent_task(
         await _broadcast(sub_chat_id, idle_event)
 
         await _fail_task(task_id, parent_chat_id, agent_name, str(exc)[:300], sub_chat_id, final_status="dead")
+
+        # Child-done signal on failure too, so a parent's event-driven wait wakes
+        # (it counts children leaving pending/queued/in_progress). Fire-and-forget.
+        try:
+            from src.core import pubsub as _psf
+            await _psf.broadcast(f"subagent_done:{parent_chat_id}", {"task_id": task_id, "failed": True})
+        except Exception:
+            pass
 
         # Resume the orchestrator so it sees the failure and can react (report to user,
         # retry, or decide next steps). Without this, the workflow gets permanently stuck.

@@ -159,7 +159,9 @@ async def consume_provider_stream(
     `AllProvidersExhausted` is NOT caught here — it propagates to the caller.
     """
     from src.core.config import get_settings
-    idle_timeout = get_settings().provider_stream_idle_timeout_seconds or 0
+    _cfg = get_settings()
+    idle_timeout = _cfg.provider_stream_idle_timeout_seconds or 0
+    cancel_poll = _cfg.cancel_poll_interval_seconds or 0
 
     text = ""
     metadata: dict = {}
@@ -168,17 +170,47 @@ async def consume_provider_stream(
         providers, messages, status_events=status_events, **stream_kwargs
     ).__aiter__()
     while True:
-        try:
-            if idle_timeout > 0:
-                chunk = await asyncio.wait_for(agen.__anext__(), timeout=idle_timeout)
-            else:
-                chunk = await agen.__anext__()
-        except StopAsyncIteration:
-            break
-        except asyncio.TimeoutError:
-            logger.warning("[turn] provider stream idle for %ss — aborting turn", idle_timeout)
-            await _aclose(agen)
-            return StreamOutcome(text=text, metadata=metadata, timed_out=True, stopped=True)
+        # Pre-emptive cancel (#223): when a cancel poll interval is set, fetch the next
+        # chunk as a task and race it against short slices, checking the cancel flag (and
+        # the idle deadline) between slices WITHOUT cancelling the fetch — so a chunkless
+        # or slow provider call still observes a user cancel within ~cancel_poll seconds
+        # instead of only at the next chunk (or never). cancel_poll=0 keeps the legacy
+        # single-wait path (cancel seen only every `cancel_every` chunks).
+        if cancel_poll > 0 and cancel_check is not None:
+            nxt = asyncio.ensure_future(agen.__anext__())
+            idle_waited = 0.0
+            while True:
+                done, _ = await asyncio.wait({nxt}, timeout=cancel_poll)
+                if nxt in done:
+                    break
+                idle_waited += cancel_poll
+                if await cancel_check():
+                    nxt.cancel()
+                    await asyncio.gather(nxt, return_exceptions=True)
+                    await _aclose(agen)
+                    return StreamOutcome(text=text, metadata=metadata, cancelled=True)
+                if idle_timeout > 0 and idle_waited >= idle_timeout:
+                    nxt.cancel()
+                    await asyncio.gather(nxt, return_exceptions=True)
+                    logger.warning("[turn] provider stream idle for %ss — aborting turn", idle_timeout)
+                    await _aclose(agen)
+                    return StreamOutcome(text=text, metadata=metadata, timed_out=True, stopped=True)
+            try:
+                chunk = nxt.result()
+            except StopAsyncIteration:
+                break
+        else:
+            try:
+                if idle_timeout > 0:
+                    chunk = await asyncio.wait_for(agen.__anext__(), timeout=idle_timeout)
+                else:
+                    chunk = await agen.__anext__()
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                logger.warning("[turn] provider stream idle for %ss — aborting turn", idle_timeout)
+                await _aclose(agen)
+                return StreamOutcome(text=text, metadata=metadata, timed_out=True, stopped=True)
 
         if status_events and on_status is not None and chunk.startswith(_STATUS_PREFIX):
             try:

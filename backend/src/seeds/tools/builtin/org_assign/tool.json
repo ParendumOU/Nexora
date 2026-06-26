@@ -2,5 +2,40 @@
   "key": "org_assign",
   "name": "Org Assign",
   "description": "Assign a persistent role/ownership to an agent. Fields: agent_id (default: you), title*, area, escalates_to_agent_id, priority.",
-  "category": "platform", "env_vars": [], "is_builtin": true, "always_allowed": true
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true,
+  "args": [
+    {
+      "name": "agent_id",
+      "type": "string",
+      "required": false,
+      "description": "Agent to assign a role to (defaults to the calling agent)."
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": "Role title (e.g. 'Backend Lead')."
+    },
+    {
+      "name": "area",
+      "type": "string",
+      "required": false,
+      "description": "Area of ownership."
+    },
+    {
+      "name": "escalates_to_agent_id",
+      "type": "string",
+      "required": false,
+      "description": "Agent this role escalates to."
+    },
+    {
+      "name": "priority",
+      "type": "integer",
+      "required": false,
+      "description": "Numeric priority (higher first)."
+    }
+  ]
 }

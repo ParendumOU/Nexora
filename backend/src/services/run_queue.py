@@ -18,6 +18,7 @@ reconstructs the call without un-pickling a closure.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 
@@ -27,6 +28,38 @@ from src.core.redis import get_redis
 logger = logging.getLogger(__name__)
 
 RUN_KINDS = frozenset({"subagent", "resume_orchestrator", "resume_tools"})
+
+# The governor slot held by the run currently executing on this task/coroutine.
+# A delegating sub-agent uses this to RELEASE its slot while it waits for its
+# children (so the children — which also need governor slots — don't deadlock
+# against parents that are merely parked waiting), then re-acquire afterwards.
+# Set per-run in dispatch_run; None when not running under the queue.
+_current_slot: contextvars.ContextVar[tuple | None] = contextvars.ContextVar("nexora_run_slot", default=None)
+
+
+def current_slot() -> tuple | None:
+    """(org_id, agent_id) of the slot this run holds, or None."""
+    return _current_slot.get()
+
+
+async def release_current_slot() -> bool:
+    """Release the running coroutine's governor slot (if any). Returns True if released."""
+    slot = _current_slot.get()
+    if slot is None:
+        return False
+    await release_slot(*slot)
+    return True
+
+
+async def reacquire_current_slot() -> None:
+    """Re-acquire the slot released by release_current_slot, waiting if at capacity."""
+    slot = _current_slot.get()
+    if slot is None:
+        return
+    for _ in range(300):
+        if await acquire_slot(*slot):
+            return
+        await asyncio.sleep(1)
 
 
 def is_enabled() -> bool:
@@ -89,6 +122,9 @@ async def dispatch_run(kind: str, data: dict) -> None:
         org_id = data.get("org_id")
         agent_id = data.get("agent_id")
         acquired = await acquire_slot(org_id, agent_id)
+        # Record this run's slot so a delegating sub-agent can release it while it
+        # waits for its own children (#218 deadlock-free nested delegation).
+        _token = _current_slot.set((org_id, agent_id) if acquired else None)
         try:
             # forward exactly the kwargs the in-process dispatch closure used
             await _execute_sub_agent_task(
@@ -101,6 +137,10 @@ async def dispatch_run(kind: str, data: dict) -> None:
                 parent_direct_provider_id=data.get("parent_direct_provider_id"),
             )
         finally:
+            _current_slot.reset(_token)
+            # The executor's delegation wait releases + RE-ACQUIRES in a balanced
+            # try/finally, so the slot is always held again by the time we get here →
+            # release exactly once.
             if acquired:
                 await release_slot(org_id, agent_id)
     elif kind == "resume_orchestrator":

@@ -7,6 +7,7 @@ agent → parent-chat agent → project → the chat user's active org.
 """
 import importlib.util
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
@@ -47,6 +48,14 @@ async def test_send_message_resolves_org_from_user_not_blocked(engine, monkeypat
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     mod = _load("send_message_to_agent")
     monkeypatch.setattr(mod, "AsyncSessionLocal", factory, raising=False)
+    # Async mode proceeds past the cross-org guard into the Redis escalation-chain
+    # check + a fire-and-forget dispatch; stub both so the test stays hermetic (no
+    # live Redis / no real sub-agent run).
+    _fake_redis = AsyncMock()
+    _fake_redis.smembers = AsyncMock(return_value=set())
+    monkeypatch.setattr("src.core.redis.get_redis", lambda: _fake_redis, raising=False)
+    monkeypatch.setattr("src.services.sub_agent._run_delegated_tasks",
+                        AsyncMock(return_value=None), raising=False)
     _, org, recipient, chat = await _seed(factory)
 
     # Sender agent id has no row → org must resolve via the chat user's active org, so

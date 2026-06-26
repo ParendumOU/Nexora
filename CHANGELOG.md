@@ -10,6 +10,12 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.9.0
+
+- Provider-native function calling, system-prompt caching, parallel read-only tools, and event-driven sub-agent delegation are now on by default after production validation; each can still be turned off with its setting.
+- Nested sub-agent delegation is now bounded at every level: a delegating agent frees its concurrency slot while it waits for its children, and the children run within the normal global, per-agent, and per-organization limits instead of off-pool, so deep fan-out can no longer overrun a worker.
+- Cancelling a turn now takes effect within about two seconds even when the model is mid-response and streaming nothing back, not only between chunks.
+
 ## 1.8.0
 
 - Knowledge base and agent memory search now use a real vector index (pgvector) for faster, more accurate semantic results, with an automatic fallback when the extension is not available.
