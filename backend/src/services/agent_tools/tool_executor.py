@@ -489,32 +489,44 @@ async def _store_and_register_file(
         return {"error": f"Failed to store attachment: {exc}"}
 
     content_type = mimetypes.guess_type(display_name)[0] or "application/octet-stream"
-    file_id = str(uuid.uuid4())
     async with AsyncSessionLocal() as db:
-        cf = ChatFile(
-            id=file_id,
-            chat_id=chat_id,
-            root_chat_id=root_id,
-            user_id=owner_id,
-            original_filename=display_name,
-            folder=folder or "",
-            stored_filename=stored_name,
-            content_type=content_type,
-            size_bytes=len(content_bytes),
-        )
-        db.add(cf)
-        await db.commit()
-        await db.refresh(cf)
-        created_iso = cf.created_at.isoformat() if cf.created_at else None
+        # Dedupe by path (root + folder + name): re-writing the same file must UPDATE the
+        # existing entry, not pile up a new ChatFile every time (an agent that rewrites
+        # README.md 30× otherwise spams 30 rows + 30 toasts). Overwrite the stored bytes
+        # in place and broadcast file_updated so the panel refreshes one entry.
+        existing = (await db.execute(
+            select(ChatFile).where(
+                ChatFile.root_chat_id == root_id,
+                ChatFile.folder == (folder or ""),
+                ChatFile.original_filename == display_name,
+            ).limit(1)
+        )).scalar_one_or_none()
+        if existing is not None:
+            existing.stored_filename = stored_name
+            existing.content_type = content_type
+            existing.size_bytes = len(content_bytes)
+            file_id = existing.id
+            await db.commit()
+            event = "file_updated"
+        else:
+            file_id = str(uuid.uuid4())
+            db.add(ChatFile(
+                id=file_id, chat_id=chat_id, root_chat_id=root_id, user_id=owner_id,
+                original_filename=display_name, folder=folder or "",
+                stored_filename=stored_name, content_type=content_type,
+                size_bytes=len(content_bytes),
+            ))
+            await db.commit()
+            event = "file_created"
 
     file_payload = {
         "id": file_id, "name": display_name, "folder": folder or "", "size": len(content_bytes),
-        "content_type": content_type, "chat_id": chat_id, "created_at": created_iso,
+        "content_type": content_type, "chat_id": chat_id,
     }
-    await broadcast(root_id, {"type": "file_created", "file": file_payload})
+    await broadcast(root_id, {"type": event, "file": file_payload})
     if root_id != chat_id:
-        await broadcast(chat_id, {"type": "file_created", "file": file_payload})
-    return {"file_id": file_id, "download_url": f"/api/chats/{chat_id}/files/{file_id}/content"}
+        await broadcast(chat_id, {"type": event, "file": file_payload})
+    return {"file_id": file_id, "download_url": f"/api/chats/{chat_id}/files/{file_id}/content", "updated": event == "file_updated"}
 
 
 async def deliver_inline_file(
@@ -576,13 +588,28 @@ async def auto_deliver_written_file(
     if not owner_id:
         return None
     display_name = Path(path_str).name or "file"
+    # Preserve the file's location within the shared workspace so the Files panel can
+    # render a real folder tree (src/, docs/, …) instead of a flat list of basenames.
+    folder = ""
+    try:
+        from src.services.workspace import resolve_workspace_dir
+        import os as _os
+        ws = await resolve_workspace_dir(chat_id)
+        if ws:
+            rel = _os.path.relpath(_os.path.abspath(path_str), _os.path.abspath(ws))
+            if not rel.startswith(".."):  # inside the workspace
+                folder = _os.path.dirname(rel).replace("\\", "/")
+    except Exception:
+        folder = ""
     stored = await _store_and_register_file(
-        chat_id, root_id, owner_id, display_name, content_bytes, suffix_hint=path_str
+        chat_id, root_id, owner_id, display_name, content_bytes, suffix_hint=path_str, folder=folder
     )
     if "error" in stored:
         return None
-    return {"file_id": stored["file_id"], "name": display_name,
-            "download_url": stored["download_url"], "size_bytes": len(content_bytes)}
+    rel_name = f"{folder}/{display_name}" if folder else display_name
+    return {"file_id": stored["file_id"], "name": rel_name,
+            "download_url": stored["download_url"], "size_bytes": len(content_bytes),
+            "updated": stored.get("updated", False)}
 
 
 async def _run_single_tool(

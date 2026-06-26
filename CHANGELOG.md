@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.11.5
+
+- The Files panel no longer fills with duplicates when an agent rewrites a file: re-writing the same path updates one entry in place, files keep their folder structure so the panel shows a real folder tree of what the agents are building, and the per-file toast spam during generation is gone.
+
 ## 1.11.4
 
 - Fix delegated sub-agent work stalling when the durable run queue is enabled but no runner process is consuming it: the platform now detects whether a runner is alive and otherwise runs the work in-process, so delegation never silently disappears.

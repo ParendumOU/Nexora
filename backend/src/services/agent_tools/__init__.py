@@ -709,12 +709,17 @@ async def _execute_agent_tools(
                         _deliv = None
                         logger.warning(f"[tools] auto-deliver of {_wpath} failed: {_dexc}")
                     if _deliv:
-                        logger.info(f"[tools] auto-delivered written file '{_deliv['name']}'")
+                        _updated = _deliv.get("updated")
+                        logger.info(f"[tools] auto-{'updated' if _updated else 'delivered'} written file '{_deliv['name']}'")
                         tool_results.append({"tool": "file_deliver", "data": {
                             "delivered": True, "name": _deliv["name"],
                             "download_url": _deliv["download_url"], "size_bytes": _deliv["size_bytes"],
-                            "message": f"'{_deliv['name']}' is now downloadable from the Files panel — "
-                                       "already delivered to the user; do NOT re-create it.",
+                            "message": (
+                                f"'{_deliv['name']}' is saved in the workspace and shown in the Files panel. "
+                                + ("It already existed and was UPDATED in place — the panel shows one entry, not a copy. "
+                                   if _updated else "")
+                                + "It is already delivered; do NOT write the same file again unless its contents must change."
+                            ),
                         }})
         except Exception as exc:
             logger.warning(f"[tools] {name} failed: {exc}")

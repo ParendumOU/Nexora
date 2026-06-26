@@ -797,10 +797,11 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         setTasks((prev) => prev.filter((t) => t.id !== data.task_id));
       } else if (data.type === "log_entry") {
         setLiveLogs((prev) => [...prev.slice(-499), data.log as LogEntry]);
-      } else if (data.type === "file_created") {
+      } else if (data.type === "file_created" || data.type === "file_updated") {
+        // Refresh the panel live. No per-file toast — an agent building a project
+        // writes/rewrites many files and the toasts were spammy; the Files panel
+        // (with its live count badge) is the surface for this now.
         qc.invalidateQueries({ queryKey: ["chat-files", chatId] });
-        const fname = (data.file && data.file.name) || "file";
-        toast.success(`File attached: ${fname}`, { icon: "📎" });
       } else if (data.type === "approval_pending") {
         setPendingApprovals((prev) =>
           prev.some((a) => a.id === data.approval_id)
