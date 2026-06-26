@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.11.7
+
+- Clearer error when an agent guesses a non-existent GitHub/GitLab API action such as create: the message now points it to commit_file or the git_local workspace flow, so a model is less likely to loop on it.
+
 ## 1.11.6
 
 - The built-in Infrastructure Manager agent can now use local git, so a delegated agent can clone, branch, commit, and push a project's repository instead of only writing files that never reach the repo.

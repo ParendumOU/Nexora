@@ -479,8 +479,16 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict | None
                 return {"data": {"dispatched": True, "workflow_id": wf, "ref": payload["ref"]}}
 
             else:
+                _hint = ""
+                if action in ("create", "create_repo", "create_project", "create_file",
+                              "write_file", "add_file", "push", "commit"):
+                    _hint = (
+                        " To add code use `commit_file` (single file) or, for real multi-file work, "
+                        "the `git_local` tool (clone -> branch -> file_write -> commit -> push) in "
+                        "the shared workspace. github_api does not create repositories. Don't retry 'create'."
+                    )
                 return {"error": (
-                    f"Unknown action '{action}'. Valid: current_user, list_repos, list_orgs, "
+                    f"Unknown action '{action}'.{_hint} Valid: current_user, list_repos, list_orgs, "
                     "list_org_repos, search, repo_info, list_issues, list_prs, read_file, "
                     "list_branches, list_commits, list_workflows, list_runs, create_issue, "
                     "comment_issue, create_pr, commit_file, trigger_workflow."

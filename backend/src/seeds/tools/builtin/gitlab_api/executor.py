@@ -533,8 +533,17 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict | None
                 return {"data": {"id": body["id"], "status": body["status"], "url": body["web_url"]}}
 
             else:
+                _hint = ""
+                if action in ("create", "create_project", "create_repo", "create_file",
+                              "commit", "push", "write_file", "add_file"):
+                    _hint = (
+                        " gitlab_api does NOT create repos or commit files. To add/commit/push "
+                        "code, use the `git_local` tool (clone -> branch -> file_write -> commit "
+                        "-> push) in the shared workspace; to create a brand-new repository, the "
+                        "user does that from the project's Repository tab. Do not retry 'create' here."
+                    )
                 return {"error": (
-                    f"Unknown action '{action}'. Valid: current_user, list_projects, "
+                    f"Unknown action '{action}'.{_hint} Valid: current_user, list_projects, "
                     "list_groups, list_subgroups, search, repo_info, list_issues, list_mrs, "
                     "read_file, list_branches, list_commits, list_pipelines, list_members, "
                     "create_issue, comment_issue, create_mr, trigger_pipeline, "
