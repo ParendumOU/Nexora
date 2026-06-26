@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.12.0
+
+- Delegated tasks are now routed to a capable agent automatically: when an agent creates a task without naming who should do it, the platform picks the best-fit specialist by skills and tools (with a sensible fallback), so delegation no longer depends on the model knowing agent names.
+
 ## 1.11.7
 
 - Clearer error when an agent guesses a non-existent GitHub/GitLab API action such as create: the message now points it to commit_file or the git_local workspace flow, so a model is less likely to loop on it.

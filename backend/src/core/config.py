@@ -187,6 +187,13 @@ class Settings(BaseSettings):
     # sequential path.
     parallel_tool_calls_enabled: bool = True
 
+    # Auto-assign delegated tasks by capability. When a task_create call names no agent
+    # (and no persona), the platform deterministically routes the task to the best-fit
+    # existing agent (skills/tools/role overlap, with a capable-"doer" fallback) instead
+    # of leaving it unassigned. Lets a weak model just describe the work and have code
+    # pick the worker — orchestration that doesn't depend on model inference. Default on.
+    auto_assign_agents: bool = True
+
     # Tool permissions (GitLab #222)
     tools_default_deny: bool = False         # when true, an agent with NO configured tools is
                                              # deny-all (only always-allowed + its skills/local

@@ -77,6 +77,81 @@ async def _resolve_agent_id(raw: str | None, db) -> str | None:
     return None
 
 
+import re as _re
+
+_TOKEN_RE = _re.compile(r"[a-z0-9]{3,}")
+# Generic words that carry no capability signal — ignored when matching.
+_STOPWORDS = frozenset({
+    "the", "and", "for", "with", "that", "this", "from", "into", "your", "you", "are",
+    "will", "should", "must", "task", "create", "make", "build", "add", "use", "using",
+    "need", "needs", "implement", "set", "all", "any", "new", "project", "file", "files",
+    "code", "page", "data", "user", "users", "system", "first", "each", "able",
+})
+# Tools that mean an agent can actually DO build work (write/run/commit). Used as the
+# capability-aware fallback when no keyword overlap is found.
+_DOER_TOOLS = frozenset({
+    "file_write", "shell_run", "git_local", "git", "code_python", "code_node",
+    "github_api", "gitlab_api", "github_commit_file",
+})
+# Agent roles that orchestrate rather than execute — never auto-route work TO them
+# (would just bounce a task back to another planner instead of a worker).
+_ORCHESTRATOR_TYPES = frozenset({"project_manager", "orchestrator", "manager"})
+
+
+def _cap_tokens(agent) -> set[str]:
+    toks: set[str] = set()
+    toks.update(_TOKEN_RE.findall((agent.name or "").lower()))
+    toks.update(_TOKEN_RE.findall((agent.description or "").lower()))
+    toks.update(_TOKEN_RE.findall((agent.agent_type or "").lower()))
+    for s in (agent.skills or []):
+        toks.update(_TOKEN_RE.findall(str(s).lower()))
+    for t in (agent.tools or []):
+        toks.update(_TOKEN_RE.findall(str(t).lower()))
+    return toks
+
+
+async def _match_agent_to_task(db, org_id, title, description, *, exclude_id=None) -> str | None:
+    """Deterministically pick the best existing agent for an UNASSIGNED task, by overlap
+    of the task text with each agent's name/description/skills/tools/type. No LLM — this
+    is the programmatic routing that lets a weak model just say "do X" and the platform
+    sends it to a capable specialist. Skips orchestrator-type agents (don't bounce work
+    back to a planner). Falls back to the most capable "doer" agent when nothing matches.
+    Returns an agent id or None."""
+    if not org_id:
+        return None
+    task_tokens = {t for t in _TOKEN_RE.findall(f"{title} {description}".lower()) if t not in _STOPWORDS}
+    rows = (await db.execute(
+        select(Agent).where(Agent.org_id == org_id, Agent.is_active.is_(True))
+    )).scalars().all()
+
+    best = None
+    best_score = 0
+    doer = None          # capability-aware fallback
+    doer_rank = -1
+    for a in rows:
+        if exclude_id and a.id == exclude_id:
+            continue
+        if (a.agent_type or "").lower() in _ORCHESTRATOR_TYPES:
+            continue
+        caps = _cap_tokens(a)
+        score = len(task_tokens & caps)
+        if score > best_score:
+            best, best_score = a, score
+        # track the best "doer" (most build-capable tools) for the no-match fallback
+        tool_keys = {str(t).lower() for t in (a.tools or [])}
+        rank = len(tool_keys & _DOER_TOOLS)
+        if rank > doer_rank:
+            doer, doer_rank = a, rank
+
+    if best is not None and best_score > 0:
+        logger.info("[task_create] auto-matched task to agent %s (%s, score=%d)", best.id, best.name, best_score)
+        return best.id
+    if doer is not None and doer_rank > 0:
+        logger.info("[task_create] no keyword match — routing to capable doer %s (%s)", doer.id, doer.name)
+        return doer.id
+    return None
+
+
 async def _bubble_complete_parent(parent_task_id: str) -> None:
     """Walk up the parent_id tree and auto-complete ancestors whose children are all done."""
     from src.models.task import Task as _Task

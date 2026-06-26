@@ -824,6 +824,16 @@ async def _run_single_tool(
                 resolved_agent_id = new_agent.id
                 logger.info(f"[task_create] created on-demand agent '{new_agent.name}' ({new_agent.id})")
 
+            # Auto-assignment by capability: the model named no agent and no persona →
+            # deterministically route the task to a fit specialist instead of leaving it
+            # unassigned (programmatic orchestration, not model inference). Flag-gated.
+            if not resolved_agent_id and not persona and _get_settings().auto_assign_agents:
+                from src.services.agent_tools.task_helpers import _match_agent_to_task
+                resolved_agent_id = await _match_agent_to_task(
+                    db, task_org_id, args.get("title", ""), args.get("description", ""),
+                    exclude_id=agent_id,
+                )
+
             last_msg_result = await db.execute(
                 select(Message.id)
                 .where(Message.chat_id == chat_id)
