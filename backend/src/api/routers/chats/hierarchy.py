@@ -165,20 +165,28 @@ async def get_chat_hierarchy(
         if a:
             agent_map[aid] = a.name
 
+    # "dead" (exhausted-retry / exception kill) and "blocked" (stuck dependency) are
+    # TERMINAL failure states — fold them into the failed bucket everywhere, or a chat
+    # whose tasks all ended that way reads as unfinished and never leaves the active view.
+    def _failed_count(counts: dict) -> int:
+        return counts.get("failed", 0) + counts.get("dead", 0) + counts.get("blocked", 0)
+
     def _compute_status(chat: Chat) -> str:
         counts = counts_map.get(chat.id, {})
         running   = counts.get("in_progress", 0)
-        failed    = counts.get("failed", 0)
+        failed    = _failed_count(counts)
         completed = counts.get("completed", 0)
         pending   = counts.get("pending", 0)
         queued    = counts.get("queued", 0)
         total     = sum(counts.values())
         if running > 0:
             return "running"
-        if failed > 0:
-            return "failed"
+        # Genuinely-unfinished work (queued/pending) outranks a partial failure: the chat
+        # still has tasks to run, so it stays active rather than reading as terminally failed.
         if queued + pending > 0:
             return "stalled"
+        if failed > 0:
+            return "failed"
         if total > 0 and completed == total:
             return "completed"
         if total == 0 and msg_counts.get(chat.id, 0) > 0:
@@ -190,7 +198,7 @@ async def get_chat_hierarchy(
         return {
             "total":     sum(counts.values()),
             "running":   counts.get("in_progress", 0),
-            "failed":    counts.get("failed", 0),
+            "failed":    _failed_count(counts),
             "completed": counts.get("completed", 0),
             "pending":   counts.get("pending", 0),
             "queued":    counts.get("queued", 0),
@@ -208,7 +216,10 @@ async def get_chat_hierarchy(
     if active_only:
         parent_of = {chat.id: chat.parent_chat_id for chat, _ in all_chats_depth}
         loaded = set(parent_of.keys())
-        _ACTIVE = {"running", "failed", "stalled", "awaiting", "queued", "pending", "paused"}
+        # "Active" = still in flight or with work left to run. NOT failed/dead/blocked (those
+        # are terminal — a stopped or crashed run must drop out of the default view, which is
+        # the whole point of "Active only"), and NOT paused (deliberately stopped) or completed.
+        _ACTIVE = {"running", "stalled", "awaiting", "queued", "pending"}
         keep: set[str] = {start_chat.id} | {c.id for c in ancestor_chain}
         for chat, depth in all_chats_depth:
             if depth >= 0 and status_by_id.get(chat.id) in _ACTIVE:

@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.5
+
+- Fixed the Conversation Hierarchy keeping stopped and failed runs in the "Active only" view. A conversation whose tasks had all ended (failed, killed, or blocked) was still counted as active, so a cancelled run looked like it was running forever. These now leave the active view the moment their work ends, so "Kill All" and "Pause all autonomy" visibly clear it.
+- Killed and blocked tasks now count toward a conversation's failed total in the hierarchy instead of going missing, so the "X done / Y failed" figures add up.
+
 ## 1.19.4
 
 - Fixed a conversation that kept showing "agents working" (and a sub-agent stuck on "Analyzing...") even after it was stopped and even though nothing was actually running. The chat was rebuilding that state on every refresh from finished tasks whose status the screen did not recognize as finished (an agent that errored out, or a blocked step), so it drew a spinner forever. Those states now count as done.
