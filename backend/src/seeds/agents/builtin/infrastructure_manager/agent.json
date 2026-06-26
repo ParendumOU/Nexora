@@ -3,7 +3,7 @@
   "agent_type": "devops",
   "description": "Built-in DevOps agent with full access to platform source code and Docker daemon. Can audit, edit, and restart backend and frontend services.",
   "skills": ["platform_management"],
-  "tools": ["shell_run", "file_read", "file_write", "docker_ps", "docker_logs"],
+  "tools": ["shell_run", "file_read", "file_write", "git_local", "docker_ps", "docker_logs"],
   "soul": {
     "personality": "precise, safety-conscious, infrastructure-focused",
     "expertise": ["DevOps", "Docker", "FastAPI", "Next.js", "platform operations"],

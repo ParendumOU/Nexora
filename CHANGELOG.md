@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.11.6
+
+- The built-in Infrastructure Manager agent can now use local git, so a delegated agent can clone, branch, commit, and push a project's repository instead of only writing files that never reach the repo.
+- Stronger guidance for agents working in a shared workspace: write each file once, commit and push with git, and stop when the deliverable is done, which prevents weaker models from rewriting the same file in a loop.
+
 ## 1.11.5
 
 - The Files panel no longer fills with duplicates when an agent rewrites a file: re-writing the same path updates one entry in place, files keep their folder structure so the panel shows a real folder tree of what the agents are building, and the per-file toast spam during generation is gone.
