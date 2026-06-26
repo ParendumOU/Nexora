@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.11.1
+
+- Fix a production frontend build failure introduced in 1.11.0 (the new Workspaces settings tab referenced the wrong toast and store modules).
+
 ## 1.11.0
 
 - Agents can now run real git in the shared workspace: a new local git tool clones, branches, commits and pushes a live working tree, authenticating with the project's stored GitHub/GitLab credential without ever exposing the token.

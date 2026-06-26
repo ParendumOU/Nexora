@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { FolderGit2, Trash2, Loader2, RefreshCw, GitBranch } from "lucide-react";
-import { toast } from "sonner";
+import toast from "react-hot-toast";
 
 import { workspacesApi } from "@/lib/api";
-import { useAuthStore } from "@/lib/store";
+import { useAuthStore } from "@/store/auth";
 import { Button } from "@/components/ui/button";
 
 interface Workspace {
