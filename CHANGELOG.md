@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.7
+
+- Fixed conversations failing to open with a "Couldn't load data" error. When a chat opens, the app reads its saved YOLO and Autopilot toggles; that internal access check had its arguments in the wrong order, so it always returned a server error (500). Opening conversations and reading or saving those toggles works again.
+
 ## 1.19.6
 
 - Fixed the entire chat sidebar failing to load ("Couldn't load data, check your connection") when a single conversation held a corrupted token-usage record. The per-conversation token and tool-call counters are now computed defensively: if that calculation hits a bad row or runs too long, the chat list still loads (just without those counters for that batch) instead of the whole page erroring.

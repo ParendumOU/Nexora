@@ -259,7 +259,8 @@ async def get_chat_flags(
     """Per-chat runtime toggles (YOLO, Autopilot) so the UI can restore them on open /
     refresh / chat switch. Resolved via the root chat so a sub-chat shows the inherited
     state."""
-    if not await _can_access_chat(chat_id, current_user, db):
+    chat = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
+    if not chat or not await _can_access_chat(current_user.id, chat, db):
         raise HTTPException(status_code=404, detail="Chat not found")
     from src.services.tool_approvals import is_yolo
     from src.services.autopilot import is_autopilot
@@ -275,7 +276,8 @@ async def set_chat_flags(
 ):
     """Persist a runtime toggle immediately when the user flips it (so it survives a
     refresh / chat switch even before the next message is sent)."""
-    if not await _can_access_chat(chat_id, current_user, db):
+    chat = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
+    if not chat or not await _can_access_chat(current_user.id, chat, db):
         raise HTTPException(status_code=404, detail="Chat not found")
     from src.services.tool_approvals import set_yolo
     from src.services.autopilot import set_autopilot
