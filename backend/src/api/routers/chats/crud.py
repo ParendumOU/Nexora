@@ -86,15 +86,31 @@ async def list_chats(
         )
         subchat_counts = {row[0]: row[1] for row in sub_r.all()}
 
+        # NUL-safe: a poison message whose JSON metadata holds a NUL escape makes
+        # ->> extraction throw "unsupported Unicode escape sequence", which would abort
+        # this whole batched aggregation (one poison row -> the entire chat sidebar 500s).
+        # Strip the escape from each row's metadata text before extracting, and guard the
+        # numeric cast so a non-integer value can't crash it either.
         stat_r = await db.execute(
             text(
-                "SELECT chat_id,"
-                " COALESCE(SUM((metadata->'usage'->>'input_tokens')::int), 0)::int,"
-                " COALESCE(SUM((metadata->'usage'->>'output_tokens')::int), 0)::int,"
-                " COALESCE(SUM((metadata->>'tool_call_count')::int), 0)::int"
-                " FROM messages"
-                " WHERE chat_id = ANY(:ids) AND metadata IS NOT NULL"
-                " GROUP BY chat_id"
+                r"""
+                SELECT chat_id,
+                  COALESCE(SUM(CASE WHEN in_t ~ '^[0-9]+$' THEN in_t::bigint ELSE 0 END), 0)::bigint,
+                  COALESCE(SUM(CASE WHEN out_t ~ '^[0-9]+$' THEN out_t::bigint ELSE 0 END), 0)::bigint,
+                  COALESCE(SUM(CASE WHEN tc ~ '^[0-9]+$' THEN tc::bigint ELSE 0 END), 0)::bigint
+                FROM (
+                  SELECT chat_id,
+                    md->'usage'->>'input_tokens'  AS in_t,
+                    md->'usage'->>'output_tokens' AS out_t,
+                    md->>'tool_call_count'        AS tc
+                  FROM (
+                    SELECT chat_id, replace(metadata::text, E'\\u0000', '')::json AS md
+                    FROM messages
+                    WHERE chat_id = ANY(:ids) AND metadata IS NOT NULL
+                  ) cleaned
+                ) x
+                GROUP BY chat_id
+                """
             ),
             {"ids": all_ids},
         )

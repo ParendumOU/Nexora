@@ -312,6 +312,14 @@ async def _dispatch_milestone_tasks(goal_id, milestone_id, milestone_plan, org_i
         ms = (await db.execute(select(Milestone).where(Milestone.id == milestone_id))).scalar_one_or_none()
         if not goal or not ms:
             return 0
+        # Resolve the owning user from the host chat when not supplied — advance_on_task_
+        # complete dispatches later milestones with user_id=None, and a sub-agent sub-chat
+        # has a NOT NULL user_id, so the insert would fail ("null value in column user_id").
+        if not user_id and host_chat_id:
+            from src.models.chat import Chat as _Chat
+            user_id = (await db.execute(
+                select(_Chat.user_id).where(_Chat.id == host_chat_id)
+            )).scalar_one_or_none()
         crit = ms.success_criteria or goal.success_criteria
         for t in milestone_plan["tasks"]:
             desc = t.get("description") or ""

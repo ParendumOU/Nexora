@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.15.2
+
+- Fixed the chat sidebar failing to load with a repeated "Couldn't load data" error. A single message whose stored data contained an invalid NUL character made the conversation-list query fail, which blanked the entire sidebar and left conversations stuck loading. The query now tolerates such a message, and messages are stripped of these characters when saved so it cannot recur.
+- Fixed autonomous runs not starting later milestones because their tasks were created without an owner (a not-null constraint failed). The owner is now resolved from the conversation, so multi-milestone Autopilot runs proceed past the first milestone.
+
 ## 1.15.1
 
 - Fixed repeated "Couldn't load data" errors and chats not loading on a busy conversation. The task list was running several database queries per task, so the once-per-second refresh on a conversation with hundreds of tasks could exhaust the database connection pool and make every request time out. Task lists are now loaded in a fixed number of queries regardless of how many tasks there are.

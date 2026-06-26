@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, DateTime, ForeignKey, Text, JSON, Boolean, Integer
+from sqlalchemy import event as _sa_event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
@@ -67,6 +68,29 @@ class Message(Base):
 
     chat: Mapped["Chat"] = relationship("Chat", back_populates="messages")
     sender: Mapped["User | None"] = relationship("User", foreign_keys=[user_id])  # noqa: F821
+
+
+def _strip_nul(value):
+    """Recursively strip NUL (\\x00) from strings. Postgres text/json columns cannot hold
+    a NUL, and a single message whose JSON metadata carries one breaks batched ->>
+    aggregations platform-wide (it surfaced as the chat sidebar failing to load). Some
+    providers (seen with gpt-4o-mini) occasionally emit a NUL inside tool output."""
+    if isinstance(value, str):
+        return value.replace("\x00", "") if "\x00" in value else value
+    if isinstance(value, dict):
+        return {k: _strip_nul(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_nul(v) for v in value]
+    return value
+
+
+@_sa_event.listens_for(Message, "before_insert")
+@_sa_event.listens_for(Message, "before_update")
+def _scrub_message_nul(mapper, connection, target):  # noqa: ANN001 — central NUL guard on write
+    if isinstance(target.content, str) and "\x00" in target.content:
+        target.content = target.content.replace("\x00", "")
+    if target.metadata_:
+        target.metadata_ = _strip_nul(target.metadata_)
 
 
 class ChatParticipant(Base):
