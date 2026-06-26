@@ -2,11 +2,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   MessageSquare, FolderKanban, Bot, Settings, ChevronLeft, ChevronDown,
   LogOut, User, Trash2, Zap, ListTodo, Sparkles, Server, Network, Wrench, Fingerprint, LayoutGrid, Plus, Search,
   Users, CircleDot, UserCircle, Clock, Lightbulb, X, CreditCard, ShoppingBag, BookOpen, Radio, BrainCircuit, Loader2, ShieldCheck,
+  CheckSquare, Square,
 } from "lucide-react";
 import { cn, truncate } from "@/lib/utils";
 import { useSidebarStore } from "@/store/sidebar";
@@ -131,6 +132,9 @@ function ProjectGroup({
   expandedChats,
   toggleChat,
   isPersonalGroup,
+  selectMode = false,
+  selectedIds,
+  onToggleSelect,
 }: {
   project: Project | null;
   chats: Chat[];
@@ -144,6 +148,9 @@ function ProjectGroup({
   expandedChats: Record<string, boolean>;
   toggleChat: (chatId: string) => void;
   isPersonalGroup?: boolean;
+  selectMode?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
 }) {
   if (collapsed) return null;
 
@@ -171,22 +178,27 @@ function ProjectGroup({
           {chats.map((chat) => {
             const isActive = pathname === `/chat/${chat.id}`;
             const isRunning = chat.stats?.running === true;
+            const isSelected = selectedIds?.has(chat.id) === true;
 
             return (
               <div key={chat.id} className="mb-1 w-full">
                 <div
                   className={cn(
                     "group relative flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors",
-                    isActive ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60"
+                    isSelected ? "bg-primary/15" : isActive ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60"
                   )}
-                  onClick={() => router(`/chat/${chat.id}`)}
+                  onClick={() => (selectMode && onToggleSelect ? onToggleSelect(chat.id) : router(`/chat/${chat.id}`))}
                 >
-                  {/* Running chats (or with active work in their subtree) show a spinner. */}
-                  {isRunning
-                    ? <Loader2 className="w-3.5 h-3.5 shrink-0 text-primary animate-spin" />
-                    : chat.is_shared
-                      ? <Users className="w-3.5 h-3.5 shrink-0 text-primary/70" />
-                      : <MessageSquare className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                  {/* In select mode, the leading icon becomes a checkbox. */}
+                  {selectMode
+                    ? (isSelected
+                        ? <CheckSquare className="w-3.5 h-3.5 shrink-0 text-primary" />
+                        : <Square className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />)
+                    : isRunning
+                      ? <Loader2 className="w-3.5 h-3.5 shrink-0 text-primary animate-spin" />
+                      : chat.is_shared
+                        ? <Users className="w-3.5 h-3.5 shrink-0 text-primary/70" />
+                        : <MessageSquare className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
                   }
                   <span className="flex-1 min-w-0 text-xs truncate text-sidebar-foreground">
                     {truncate(chat.title || "New Chat", 18)}
@@ -343,11 +355,60 @@ export function Sidebar() {
 
   const deleteChat = useMutation({
     mutationFn: (id: string) => chatsApi.delete(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["chats"] });
-      toast.success("Chat deleted");
-      if (pathname.startsWith("/chat/")) router.push("/chat");
+    // Remove the chat from the list instantly; roll back if the server rejects.
+    onMutate: async (id: string) => {
+      await qc.cancelQueries({ queryKey: ["chats"] });
+      const prev = qc.getQueryData(["chats"]);
+      qc.setQueryData(["chats"], (old: unknown) =>
+        Array.isArray(old) ? old.filter((c) => (c as { id?: string })?.id !== id) : old
+      );
+      if (pathname === `/chat/${id}`) router.push("/chat");
+      return { prev };
     },
+    onError: (_e, _id, ctx) => {
+      if (ctx?.prev !== undefined) qc.setQueryData(["chats"], ctx.prev);
+      toast.error("Couldn't delete chat");
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["chats"] }),
+  });
+
+  // ── Multi-select bulk delete ────────────────────────────────────────────────
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+  const bulkDelete = useMutation({
+    mutationFn: (ids: string[]) => chatsApi.bulkDelete(ids),
+    onMutate: async (ids: string[]) => {
+      await qc.cancelQueries({ queryKey: ["chats"] });
+      const prev = qc.getQueryData(["chats"]);
+      const idSet = new Set(ids);
+      qc.setQueryData(["chats"], (old: unknown) =>
+        Array.isArray(old) ? old.filter((c) => !idSet.has((c as { id?: string })?.id ?? "")) : old
+      );
+      if (pathname.startsWith("/chat/") && ids.some((id) => pathname === `/chat/${id}`)) {
+        router.push("/chat");
+      }
+      return { prev };
+    },
+    onError: (_e, _ids, ctx) => {
+      if (ctx?.prev !== undefined) qc.setQueryData(["chats"], ctx.prev);
+      toast.error("Couldn't delete chats");
+    },
+    onSuccess: (res) => {
+      const n = (res?.data as { deleted?: number })?.deleted ?? 0;
+      toast.success(`${n} chat${n === 1 ? "" : "s"} deleted`);
+    },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ["chats"] }); exitSelectMode(); },
   });
 
   const handleLogout = () => {
@@ -580,6 +641,38 @@ export function Sidebar() {
               </button>
             </div>
           )}
+          {/* Select / bulk-delete toolbar */}
+          {!collapsed && (
+            selectMode ? (
+              <div className="mx-2 mb-1 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-[11px]">
+                <span className="flex-1 min-w-0 truncate text-foreground">
+                  {selectedIds.size} selected
+                </span>
+                <button
+                  onClick={() => selectedIds.size > 0 && bulkDelete.mutate(Array.from(selectedIds))}
+                  disabled={selectedIds.size === 0 || bulkDelete.isPending}
+                  className="flex items-center gap-1 text-destructive hover:bg-destructive/10 rounded px-1.5 py-0.5 transition-colors disabled:opacity-40"
+                  title="Delete selected chats"
+                >
+                  <Trash2 className="w-3 h-3" /> Delete
+                </button>
+                <button
+                  onClick={exitSelectMode}
+                  className="text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setSelectMode(true)}
+                className="mx-2 mb-1 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground transition-colors self-start"
+                title="Select multiple chats to delete"
+              >
+                <CheckSquare className="w-3 h-3" /> Select
+              </button>
+            )
+          )}
           {!collapsed && (
             <ScrollArea className="flex-1 px-2">
               <div className="py-2 pr-2 overflow-x-hidden">
@@ -604,6 +697,9 @@ export function Sidebar() {
                         expandedChats={expandedChats}
                         toggleChat={toggleChat}
                         isPersonalGroup={true}
+                        selectMode={selectMode}
+                        selectedIds={selectedIds}
+                        onToggleSelect={toggleSelected}
                       />
                     )}
                     
@@ -628,6 +724,9 @@ export function Sidebar() {
                           expandedChats={expandedChats}
                           toggleChat={toggleChat}
                           isPersonalGroup={false}
+                          selectMode={selectMode}
+                          selectedIds={selectedIds}
+                          onToggleSelect={toggleSelected}
                         />
                       );
                     })}

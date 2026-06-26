@@ -341,6 +341,7 @@ export const chatsApi = {
     api.post(`/chats/${id}/flags`, body),
   updateTitle: (id: string, title: string) => api.patch(`/chats/${id}/title`, { title }),
   delete: (id: string) => api.delete(`/chats/${id}`),
+  bulkDelete: (ids: string[]) => api.post(`/chats/bulk-delete`, { ids }),
   setProviderChain: (id: string, chainId: string | null) =>
     api.patch(`/chats/${id}/provider-chain`, { provider_chain_id: chainId }),
   setDirectProvider: (id: string, providerId: string | null) =>

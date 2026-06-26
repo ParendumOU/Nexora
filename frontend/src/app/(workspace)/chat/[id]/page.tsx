@@ -1031,18 +1031,36 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
   const handleStop = useCallback(async () => {
     stopRef.current = true;
+    // Clear ALL activity state instantly (don't wait for the server) so the spinner is
+    // replaced by the normal chat bubble the moment Stop is pressed.
     setIsStreaming(false);
     setAgentStatus(null);
+    activeSubAgentsRef.current = 0;
+    descendantBusyUntilRef.current = 0;
+    setSubAgentActivities((prev) => prev.map((a) => ({ ...a, done: true })));
     if (streamingContent) {
       setMessages((msgs) => [...msgs, { id: Date.now().toString(), role: "assistant", content: streamingContent }]);
     }
     setStreamingContent(null);
+    // Optimistically clear this chat's sidebar "running" spinner immediately.
+    qc.setQueryData(["chats"], (old: unknown) => {
+      if (!Array.isArray(old)) return old;
+      return old.map((c) =>
+        (c as { id?: string })?.id === chatId
+          ? { ...(c as object), stats: { ...((c as { stats?: object }).stats ?? {}), running: false } }
+          : c
+      );
+    });
     try {
       await chatsApi.cancelAll(chatId);
     } catch {
       // best-effort
+    } finally {
+      // Reconcile with the server (tasks now failed) so spinners everywhere settle.
+      qc.invalidateQueries({ queryKey: ["chats"] });
+      qc.invalidateQueries({ queryKey: ["tasks", chatId] });
     }
-  }, [streamingContent, chatId]);
+  }, [streamingContent, chatId, qc]);
 
   const handleEditSubmit = useCallback(async (messageId: string, newContent: string) => {
     try {

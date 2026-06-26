@@ -10,6 +10,13 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.17.0
+
+- Stopping a run (the chat Stop button or "Kill All" in the hierarchy view) is now fast even on a huge conversation tree: cancellation collects the whole tree in one query and signals every conversation in a single batched round-trip instead of one-by-one.
+- When you press Stop or Kill All, the working spinner is replaced by the normal chat view instantly, without waiting for the server to finish cancelling.
+- Deleting a chat from the sidebar now removes it immediately (it reappears only if the server rejects the delete).
+- New multi-select in the chat sidebar: a "Select" button turns chats into checkboxes so you can pick several and delete them all at once.
+
 ## 1.16.0
 
 - The chat sidebar loads fast again on instances with very large conversation trees: it now loads only top-level conversations and pulls sub-conversations on demand, instead of loading every sub-chat up front (a single autonomous run had grown to nearly 2000).

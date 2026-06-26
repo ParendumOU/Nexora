@@ -431,6 +431,30 @@ async def delete_chat(
     })
 
 
+@router.post("/bulk-delete", status_code=200)
+async def bulk_delete_chats(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Archive several of the caller's own chats at once (sidebar multi-select). Only the
+    user's own chats are touched; unknown/foreign ids are silently ignored."""
+    from sqlalchemy import update as _sql_update
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return {"deleted": 0}
+    ids = [str(i) for i in ids][:500]  # cap the batch
+    result = await db.execute(
+        _sql_update(Chat)
+        .where(Chat.id.in_(ids), Chat.user_id == current_user.id)
+        .values(is_archived=True)
+    )
+    await db.commit()
+    for cid in ids:
+        await pubsub.broadcast(f"user:{current_user.id}", {"type": "chat_deleted", "chat_id": cid})
+    return {"deleted": int(result.rowcount or 0)}
+
+
 @router.patch("/{chat_id}/restore", status_code=200)
 async def restore_chat(
     chat_id: str,

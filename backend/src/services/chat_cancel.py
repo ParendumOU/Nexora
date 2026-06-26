@@ -104,27 +104,41 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
     Returns {"cancelled_in_chats": N, "cancelled_tasks": M}.
     Safe to call repeatedly — idempotent.
     """
-    from sqlalchemy import select, update as sql_update
+    import asyncio
+    from sqlalchemy import select, update as sql_update, text
     from src.core.database import AsyncSessionLocal
+    from src.core.redis import get_redis
     from src.core.pubsub import broadcast as _broadcast
-    from src.models.chat import Chat
     from src.models.task import Task
     from src.services.interrupt_store import signal_interrupt
 
-    # BFS: collect this chat + all descendants
-    visited: set[str] = set()
-    async with AsyncSessionLocal() as db:
-        queue = [root_chat_id]
-        while queue:
-            cid = queue.pop(0)
-            if cid in visited:
-                continue
-            visited.add(cid)
-            r = await db.execute(select(Chat).where(Chat.parent_chat_id == cid))
-            for child in r.scalars().all():
-                queue.append(child.id)
+    # Set the ROOT flag first, before the slower sweep — so anything polling it stops
+    # immediately instead of after the whole tree is processed.
+    await _set_cancel_flag(root_chat_id)
 
-        # Snapshot active tasks (used to fire per-task interrupt signals)
+    # Collect this chat + all descendants in ONE query (recursive CTE). The old per-chat
+    # BFS fired a query per node — at ~2k sub-chats that alone took seconds.
+    visited: set[str] = {root_chat_id}
+    async with AsyncSessionLocal() as db:
+        try:
+            rows = (await db.execute(
+                text(
+                    """
+                    WITH RECURSIVE sub(id) AS (
+                        SELECT id FROM chats WHERE id = :root
+                        UNION ALL
+                        SELECT c.id FROM chats c JOIN sub ON c.parent_chat_id = sub.id
+                    )
+                    SELECT id FROM sub
+                    """
+                ),
+                {"root": root_chat_id},
+            )).all()
+            visited = {row[0] for row in rows} or {root_chat_id}
+        except Exception as exc:
+            logger.warning(f"[cancel] subtree CTE failed ({exc}); cancelling root only")
+
+        # Snapshot active tasks (for per-task interrupt signals)
         r_active = await db.execute(
             select(Task.id).where(
                 Task.chat_id.in_(visited),
@@ -133,7 +147,7 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
         )
         active_task_ids = [row[0] for row in r_active.all()]
 
-        # Bulk-fail every pending/queued/in_progress task in the tree
+        # Bulk-fail every pending/queued/in_progress task in the tree (single UPDATE)
         result = await db.execute(
             sql_update(Task)
             .where(
@@ -145,29 +159,40 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
         await db.commit()
         cancelled_tasks = int(result.rowcount or 0)
 
-    # Per-chat cancellation signals + lock cleanup
-    for cid in visited:
-        await _set_cancel_flag(cid)
-        await _clear_locks_for_chat(cid)
+    # Per-chat cancel flags + lock keys in ONE pipelined round-trip (was ~2 sequential
+    # awaits per chat → thousands of round-trips). The flag is what the streaming/tool
+    # loops poll, so setting them all fast is what makes stop feel instant.
+    r = get_redis()
+    try:
+        async with r.pipeline(transaction=False) as pipe:
+            for cid in visited:
+                pipe.setex(_cancel_key(cid), _CANCEL_TTL_SECONDS, "1")
+                pipe.delete(
+                    f"orchestrator:resume:{cid}", f"tool_resume:{cid}",
+                    f"orchestrator:nudge:{cid}", f"wd:nudge:{cid}",
+                )
+            await pipe.execute()
+    except Exception as exc:
+        logger.warning(f"[cancel] pipelined flag/lock set failed ({exc}); falling back")
+        await asyncio.gather(*[_set_cancel_flag(cid) for cid in visited], return_exceptions=True)
 
-    # Per-task interrupts so sub-agent loops bail at the next iteration
-    for tid in active_task_ids:
-        try:
-            await signal_interrupt(tid)
-        except Exception as exc:
-            logger.warning(f"[cancel] signal_interrupt({tid}) failed: {exc}")
+    # Stream-buffer clears, per-task interrupts, and the final cancelled broadcasts run
+    # CONCURRENTLY (gather) instead of sequentially, so a 2k-node tree drains in one shot.
+    from src.core.stream_buffer import clear as _buf_clear
 
-    # Broadcast a final stream_end with cancelled=true to every chat in the tree
-    for cid in visited:
+    async def _bcast(cid: str):
         try:
-            await _broadcast(cid, {
-                "type": "stream_end",
-                "cancelled": True,
-                "content": "",
-            })
+            await _broadcast(cid, {"type": "stream_end", "cancelled": True, "content": ""})
             await _broadcast(cid, {"type": "activity_status", "status": "idle"})
-        except Exception as exc:
-            logger.debug(f"[cancel] broadcast failed for {cid}: {exc}")
+        except Exception:
+            pass
+
+    await asyncio.gather(
+        *[_buf_clear(cid) for cid in visited],
+        *[signal_interrupt(tid) for tid in active_task_ids],
+        *[_bcast(cid) for cid in visited],
+        return_exceptions=True,
+    )
 
     logger.info(
         f"[cancel] cancelled chat tree rooted at {root_chat_id}: "

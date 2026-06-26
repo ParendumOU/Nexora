@@ -773,8 +773,19 @@ function HierarchyContent({ chatId }: { chatId: string }) {
             onClick={async () => {
               if (!window.confirm("Cancel all active tasks in this hierarchy?")) return;
               setKilling(true);
+              // Clear every running/queued node's spinner instantly (don't wait for the
+              // server) — pending/queued/running collapse to "completed" visually.
+              setAllApiNodes((prev) => prev.map((n) =>
+                ["running", "stalled", "awaiting"].includes(n.status)
+                  ? { ...n, status: "completed" as NodeStatus }
+                  : n
+              ));
               try { await chatsApi.cancelAll(rootId ?? chatId); }
-              finally { setKilling(false); }
+              finally {
+                setKilling(false);
+                // Reconcile from the server on the next poll tick.
+                pollCallbackRef.current?.();
+              }
             }}
             disabled={killing}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
