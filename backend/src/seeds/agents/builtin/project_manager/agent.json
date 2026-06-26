@@ -12,6 +12,7 @@
     "task_delete",
     "board_read",
     "issue_manage",
+    "list_available_agents",
     "log_entry"
   ],
   "soul": {

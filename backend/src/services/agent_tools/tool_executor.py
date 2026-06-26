@@ -807,10 +807,29 @@ async def _run_single_tool(
 
             model_profile_id = args.get("model_profile_id") or None
 
+            # Link the task to its chat's project (walk parent_chat_id so a sub-chat
+            # inherits the conversation's project) so the board groups it and delegated
+            # runs get the repo/workspace context. Explicit project_id arg wins.
+            task_project_id = args.get("project_id") or None
+            if not task_project_id:
+                _pc, _pseen = chat_id, set()
+                while _pc and _pc not in _pseen:
+                    _pseen.add(_pc)
+                    _prow = (await db.execute(
+                        select(Chat.project_id, Chat.parent_chat_id).where(Chat.id == _pc)
+                    )).first()
+                    if not _prow:
+                        break
+                    if _prow[0]:
+                        task_project_id = _prow[0]
+                        break
+                    _pc = _prow[1]
+
             task = Task(
                 id=str(uuid.uuid4()),
                 org_id=task_org_id,
                 chat_id=chat_id,
+                project_id=task_project_id,
                 parent_id=args.get("parent_id"),
                 title=args.get("title", "Untitled"),
                 description=args.get("description"),

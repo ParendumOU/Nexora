@@ -66,6 +66,43 @@ def is_enabled() -> bool:
     return get_settings().run_queue_enabled
 
 
+# ── Runner liveness (anti-black-hole) ─────────────────────────────────────────
+# When run_queue_enabled is True but NO runner process is consuming the stream,
+# enqueued runs would sit forever and never spawn (sub-agent delegation, etc. would
+# silently never execute, then get reaped by the stuck-task recovery). Each live
+# runner refreshes a heartbeat key; producers check it and fall back to in-process
+# execution when no runner is alive. Fail-safe: any error → "not alive" → in-process.
+_RUNNER_HEARTBEAT_KEY = "runner:alive"
+
+
+def _heartbeat_ttl() -> int:
+    # Comfortably longer than one consumer loop (xreadgroup block) so a busy/idle
+    # runner never lets it lapse.
+    return max(15, int((get_settings().runner_block_ms / 1000) * 3))
+
+
+async def beat() -> None:
+    """Called by a runner each loop iteration to advertise it is alive."""
+    try:
+        await get_redis().set(_RUNNER_HEARTBEAT_KEY, "1", ex=_heartbeat_ttl())
+    except Exception:
+        pass
+
+
+async def runner_alive() -> bool:
+    """True if at least one runner has refreshed its heartbeat recently."""
+    try:
+        return bool(await get_redis().exists(_RUNNER_HEARTBEAT_KEY))
+    except Exception:
+        return False  # fail-safe: prefer in-process execution over a black hole
+
+
+async def should_queue() -> bool:
+    """Queue a background run only if the queue is enabled AND a runner is alive to
+    consume it. Otherwise callers must run it in-process so work never black-holes."""
+    return is_enabled() and await runner_alive()
+
+
 # ── Producer ─────────────────────────────────────────────────────────────────
 async def enqueue_run(kind: str, **fields) -> str | None:
     """XADD a run to the stream. Returns the stream message id (or None if off)."""
@@ -211,9 +248,11 @@ async def run_consumer(consumer_name: str, stop: asyncio.Event) -> None:
     s = get_settings()
     r = get_redis()
     await ensure_group()
+    await beat()  # advertise immediately so producers don't fall back during startup
     logger.info("[runner:%s] consuming %s/%s", consumer_name, s.run_queue_stream, s.run_queue_group)
     while not stop.is_set():
         try:
+            await beat()  # refresh liveness each loop (keeps should_queue() true)
             # 1. reclaim entries abandoned by a dead runner
             try:
                 claimed = await r.xautoclaim(

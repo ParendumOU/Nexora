@@ -285,11 +285,13 @@ async def _run_delegated_tasks(
         logger.info("[_run_delegated_tasks] chat %s (or ancestor) cancelled — not dispatching %d task(s)", chat_id, len(task_dispatch_info))
         return
 
-    # When the durable run queue is enabled (#219), enqueue each sub-agent run so a
-    # dedicated runner executes it (cross-worker governor, durable across restarts).
-    # Otherwise keep the in-process dispatch (default).
+    # When the durable run queue is enabled (#219) AND a runner is actually alive to
+    # consume it, enqueue each sub-agent run so a dedicated runner executes it
+    # (cross-worker governor, durable across restarts). If the queue is on but NO
+    # runner is running, fall back to in-process dispatch so delegation never
+    # black-holes (queued-but-never-consumed → reaped by recovery).
     from src.services import run_queue
-    _queue_on = run_queue.is_enabled()
+    _queue_on = await run_queue.should_queue()
 
     for i, (tid, a_id, a_max_c) in enumerate(task_dispatch_info):
         if i > 0:

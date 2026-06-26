@@ -234,7 +234,7 @@ async def dispatch_milestone(goal_id: str, milestone_id: str, org_id: str | None
     # budget + risk all apply). Use the durable run queue when enabled.
     import asyncio
     from src.services import run_queue
-    if run_queue.is_enabled():
+    if await run_queue.should_queue():
         await run_queue.enqueue_run(
             "subagent", task_id=task_id, parent_chat_id=host_chat_id, org_id=org,
             parent_chat_project_id=None, parent_chat_provider_chain_id=None,

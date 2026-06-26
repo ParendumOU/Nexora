@@ -623,7 +623,9 @@ async def _execute_sub_agent_task(
                     # own completion path (works for both spawn modes), so the wait below
                     # wakes regardless of which runner ran the child.
                     from src.services import run_queue as _rq
-                    _queue_on = _rq.is_enabled()
+                    # Only route children to the queue if a runner is alive to consume
+                    # them; otherwise run in-process so nested delegation never stalls.
+                    _queue_on = await _rq.should_queue()
 
                     # Event-driven wait (#218): subscribe BEFORE spawning so no child
                     # completion can be missed between spawn and wait.

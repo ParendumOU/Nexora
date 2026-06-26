@@ -8,6 +8,58 @@ incr/decr is patched).
 import pytest
 
 import src.services.run_queue as rq
+from src.core.config import get_settings
+
+
+class _FakeRedis:
+    def __init__(self, *, has_beat=False):
+        self.store = {"runner:alive": "1"} if has_beat else {}
+    async def set(self, k, v, ex=None):
+        self.store[k] = v
+    async def exists(self, k):
+        return 1 if k in self.store else 0
+
+
+@pytest.mark.asyncio
+async def test_should_queue_false_when_disabled(monkeypatch):
+    monkeypatch.setattr(get_settings(), "run_queue_enabled", False)
+    monkeypatch.setattr(rq, "get_redis", lambda: _FakeRedis(has_beat=True))
+    # disabled → never queue, even with a live runner
+    assert await rq.should_queue() is False
+
+
+@pytest.mark.asyncio
+async def test_should_queue_false_when_enabled_but_no_runner(monkeypatch):
+    monkeypatch.setattr(get_settings(), "run_queue_enabled", True)
+    monkeypatch.setattr(rq, "get_redis", lambda: _FakeRedis(has_beat=False))
+    # enabled but NO runner heartbeat → fall back to in-process (don't black-hole)
+    assert await rq.runner_alive() is False
+    assert await rq.should_queue() is False
+
+
+@pytest.mark.asyncio
+async def test_should_queue_true_when_enabled_and_runner_alive(monkeypatch):
+    monkeypatch.setattr(get_settings(), "run_queue_enabled", True)
+    monkeypatch.setattr(rq, "get_redis", lambda: _FakeRedis(has_beat=True))
+    assert await rq.runner_alive() is True
+    assert await rq.should_queue() is True
+
+
+@pytest.mark.asyncio
+async def test_runner_alive_failsafe_on_redis_error(monkeypatch):
+    def _boom():
+        raise RuntimeError("no redis")
+    monkeypatch.setattr(rq, "get_redis", _boom)
+    # any Redis error → treat as no runner → in-process (never black-hole)
+    assert await rq.runner_alive() is False
+
+
+@pytest.mark.asyncio
+async def test_beat_sets_heartbeat(monkeypatch):
+    fake = _FakeRedis(has_beat=False)
+    monkeypatch.setattr(rq, "get_redis", lambda: fake)
+    await rq.beat()
+    assert fake.store.get("runner:alive") == "1"
 
 
 @pytest.mark.asyncio

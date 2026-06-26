@@ -10,6 +10,12 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.11.4
+
+- Fix delegated sub-agent work stalling when the durable run queue is enabled but no runner process is consuming it: the platform now detects whether a runner is alive and otherwise runs the work in-process, so delegation never silently disappears.
+- Tasks an agent creates now inherit their conversation's project, so they group on the project board and delegated runs get the right repository and workspace context.
+- The built-in Project Manager can now list the available agents, so it routes each task to a suitable specialist instead of guessing.
+
 ## 1.11.3
 
 - The create-repository destination picker is now a fast lazy tree: it loads your accounts and top-level groups instantly and lets you drill into subgroups on demand, in their natural order, instead of slowly listing everything flat.
