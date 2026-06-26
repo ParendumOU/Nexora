@@ -587,6 +587,32 @@ async def _execute_agent_tools(
                         "and end your turn; the action will run automatically once approved."
                     )})
                     continue
+        # Repeated-failure breaker (model-agnostic anti-loop): if this EXACT tool call
+        # (same name + args) has already failed repeatedly in this chat, refuse to run it
+        # again. A weak model that ignores an error and re-emits the identical failing
+        # call (e.g. gitlab_api action="create" over and over) can't wedge the turn.
+        _fail_sig = None
+        try:
+            import hashlib as _hl
+            from src.core.redis import get_redis as _gr
+            _fail_sig = (f"toolfail:{chat_id}:{name}:"
+                         f"{_hl.sha1(json.dumps(args, sort_keys=True, default=str).encode()).hexdigest()[:12]}")
+            _fc = await _gr().get(_fail_sig)
+            _fc = int(_fc) if _fc else 0
+            if _fc >= 2:
+                logger.warning("[tools] blocking repeated failing call %s in chat %s (failed %d×)", name, chat_id, _fc)
+                call["_status"] = "failed"
+                call["_error"] = "blocked: repeated identical failure"
+                tool_results.append({"tool": name, "error": (
+                    f"BLOCKED: you already called '{name}' with these exact arguments and it failed "
+                    f"{_fc} times. Calling it again will fail the same way. Do something DIFFERENT: "
+                    "use another tool/approach, or stop and report what you have. (To add/commit files "
+                    "use git_local, not gitlab_api 'create'.)"
+                )})
+                continue
+        except Exception:
+            _fail_sig = None
+
         label = _label_map.get(name)
 
         if not label:
@@ -660,6 +686,19 @@ async def _execute_agent_tools(
             call["_status"] = "failed" if tool_errored else "success"
             if tool_errored:
                 call["_error"] = str(result.get("error", ""))[:300]
+
+            # Feed the repeated-failure breaker: count identical failures, clear on success.
+            if _fail_sig:
+                try:
+                    from src.core.redis import get_redis as _gr2
+                    _r = _gr2()
+                    if tool_errored:
+                        await _r.incr(_fail_sig)
+                        await _r.expire(_fail_sig, 600)
+                    else:
+                        await _r.delete(_fail_sig)
+                except Exception:
+                    pass
 
             if task_id and parent_chat_id:
                 async with AsyncSessionLocal() as db:
