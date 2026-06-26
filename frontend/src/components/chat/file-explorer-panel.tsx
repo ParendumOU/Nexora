@@ -495,7 +495,7 @@ export function FileExplorerPanel({ project, onClose }: FileExplorerPanelProps) 
                             f.status === "renamed" && "bg-blue-500/20 text-blue-400",
                           )}
                         >
-                          {f.status[0].toUpperCase()}
+                          {(f.status?.[0] ?? "?").toUpperCase()}
                         </span>
                         <span className="font-mono truncate flex-1">{f.path}</span>
                         <span className="text-[10px] text-green-400 shrink-0">+{f.additions}</span>

@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.15.3
+
+- The repository panel inside a conversation no longer crashes the whole app ("Application error: a client-side exception") when it hits unexpected data. It is now wrapped in an error boundary that shows a contained, retryable message with the actual error, and the file tree tolerates malformed entries instead of throwing.
+
 ## 1.15.2
 
 - Fixed the chat sidebar failing to load with a repeated "Couldn't load data" error. A single message whose stored data contained an invalid NUL character made the conversation-list query fail, which blanked the entire sidebar and left conversations stuck loading. The query now tolerates such a message, and messages are stripped of these characters when saved so it cannot recur.

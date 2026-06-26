@@ -12,6 +12,7 @@ import { FlowTaskTree } from "@/components/flow/flow-task-tree";
 import { TaskDetailPanel } from "@/components/flow/task-detail-panel";
 import { LogPanel, LogEntry } from "@/components/chat/log-panel";
 import { FileExplorerPanel } from "@/components/chat/file-explorer-panel";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { NotesPanel } from "@/components/chat/notes-panel";
 import { ConversationUsagePanel } from "@/components/chat/conversation-usage-panel";
 import { PlanPanel, Plan as PlanType, PlanStep } from "@/components/chat/plan-panel";
@@ -1769,17 +1770,23 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           />
         )}
         {rightPanel === "files" && project && (
-          <FileExplorerPanel
-            project={{
-              id: project.id,
-              name: project.name,
-              repo_url: project.repo_url,
-              repo_type: project.repo_type,
-              repo_branch: project.repo_branch,
-              repo_credential_id: project.repo_credential_id,
-            }}
+          <ErrorBoundary
+            fallbackTitle="Repository panel failed to load"
             onClose={() => setRightPanel(null)}
-          />
+            resetKey={project.id}
+          >
+            <FileExplorerPanel
+              project={{
+                id: project.id,
+                name: project.name,
+                repo_url: project.repo_url,
+                repo_type: project.repo_type,
+                repo_branch: project.repo_branch,
+                repo_credential_id: project.repo_credential_id,
+              }}
+              onClose={() => setRightPanel(null)}
+            />
+          </ErrorBoundary>
         )}
         {rightPanel === "webhook" && (
           <WebhookSettingsPanel

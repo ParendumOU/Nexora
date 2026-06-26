@@ -19,8 +19,14 @@ export function buildTree(items: TreeItem[]): TreeNode[] {
   const root: TreeNode[] = [];
   const map: Record<string, TreeNode> = {};
 
+  // Defensive: ignore anything that isn't a well-formed item with a string path. A
+  // malformed or non-array payload would otherwise throw during render and crash the panel.
+  const safe = (Array.isArray(items) ? items : []).filter(
+    (i): i is TreeItem => !!i && typeof i.path === "string" && i.path.length > 0,
+  );
+
   // Sort: dirs first, then alphabetical
-  const sorted = [...items].sort((a, b) => {
+  const sorted = [...safe].sort((a, b) => {
     if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
     return a.path.localeCompare(b.path);
   });
