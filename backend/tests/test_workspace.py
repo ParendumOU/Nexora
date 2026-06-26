@@ -70,3 +70,42 @@ async def test_resolve_path_relative_absolute_and_empty(_on, monkeypatch):
     # empty defaults to the workspace root only when asked
     assert await ws.resolve_path("c", "", default_to_root=True) == wsdir
     assert await ws.resolve_path("c", "") == "."
+
+
+# ── workspace management (#243) ───────────────────────────────────────────────
+
+def test_list_workspaces_parses_kind_and_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "workspace_base", str(tmp_path))
+    (tmp_path / "proj_abc").mkdir()
+    (tmp_path / "proj_abc" / "f.txt").write_text("hello", encoding="utf-8")
+    (tmp_path / "chat_xyz").mkdir()
+    (tmp_path / "proj_git").mkdir()
+    (tmp_path / "proj_git" / ".git").mkdir()
+    (tmp_path / "loose_file.txt").write_text("x", encoding="utf-8")  # not a dir → ignored
+
+    rows = {w["name"]: w for w in ws.list_workspaces()}
+    assert set(rows) == {"proj_abc", "chat_xyz", "proj_git"}
+    assert rows["proj_abc"]["kind"] == "project" and rows["proj_abc"]["key"] == "abc"
+    assert rows["proj_abc"]["file_count"] == 1 and rows["proj_abc"]["size_bytes"] == 5
+    assert rows["chat_xyz"]["kind"] == "chat" and rows["chat_xyz"]["key"] == "xyz"
+    assert rows["proj_git"]["is_git"] is True
+
+
+def test_list_workspaces_empty_when_base_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "workspace_base", str(tmp_path / "nope"))
+    assert ws.list_workspaces() == []
+
+
+def test_delete_workspace_removes_and_guards_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "workspace_base", str(tmp_path))
+    (tmp_path / "proj_del").mkdir()
+    (tmp_path / "proj_del" / "f").write_text("x", encoding="utf-8")
+    # path traversal / unsafe names refused
+    assert ws.delete_workspace("../evil") is False
+    assert ws.delete_workspace("a/b") is False
+    assert ws.delete_workspace("") is False
+    # missing dir → False
+    assert ws.delete_workspace("nope") is False
+    # real one removed
+    assert ws.delete_workspace("proj_del") is True
+    assert not (tmp_path / "proj_del").exists()

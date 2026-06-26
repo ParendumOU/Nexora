@@ -339,10 +339,21 @@ async def get_platform_context(
     _ws_block: list[str] = []
     if chat_id:
         try:
-            from src.services.workspace import resolve_workspace_dir as _resolve_ws
+            from src.services.workspace import resolve_workspace_dir as _resolve_ws, get_repo_context as _repo_ctx
             _wsd = await _resolve_ws(chat_id)
             if _wsd:
                 _ws_block = render_prompt("shared_workspace", workspace_path=_wsd).splitlines()
+                _rc = await _repo_ctx(chat_id)
+                if _rc.get("repo_url"):
+                    _ws_block.append("")
+                    _ws_block.append(f"Project repository: `{_rc['repo_url']}`"
+                                     + ("" if _rc.get("has_credential") else
+                                        " (no credential linked yet — clone/push will fail until one is set on the project)."))
+                    _ws_block.append("Use `git_local` (clone, branch, commit, push) — credentials resolve automatically; never ask for a token.")
+                if _rc.get("rules"):
+                    _ws_block.append("")
+                    _ws_block.append("### Repository rules (follow these for every commit/push)")
+                    _ws_block.extend(_rc["rules"].splitlines())
         except Exception:
             _ws_block = []
 

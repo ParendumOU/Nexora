@@ -27,6 +27,7 @@ import ProviderTypesTab from "@/components/settings/ProviderTypesTab";
 import AutomationsTab from "@/components/settings/AutomationsTab";
 import DevicesTab from "@/components/settings/DevicesTab";
 import BackupTab from "@/components/settings/BackupTab";
+import WorkspacesTab from "@/components/settings/WorkspacesTab";
 import EnvVarsTab from "@/components/settings/EnvVarsTab";
 import MarketplaceUpdatesTab from "@/components/settings/MarketplaceUpdatesTab";
 import { useAuthStore } from "@/store/auth";
@@ -217,9 +218,9 @@ export default function SettingsPage() {
 
       <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
         <Tabs.List className="flex px-6 gap-0.5 border-b border-border shrink-0">
-          {[["usage", "Usage"], ["accounts", "Accounts"], ["models", "Model Profiles"], ["chains", "Fallback Chains"], ["provider-types", "Provider Types"], ["integrations", "Integrations"], ["automations", "Automations"], ["env-vars", "Variables"], ["devices", "Devices"], ["updates", "Updates"], ["seeds", "Seed Library"], ["backup", "Backup"]]
+          {[["usage", "Usage"], ["accounts", "Accounts"], ["models", "Model Profiles"], ["chains", "Fallback Chains"], ["provider-types", "Provider Types"], ["integrations", "Integrations"], ["automations", "Automations"], ["env-vars", "Variables"], ["devices", "Devices"], ["updates", "Updates"], ["seeds", "Seed Library"], ["workspaces", "Workspaces"], ["backup", "Backup"]]
             .filter(([v]) => uiMode === "advanced" || (v !== "provider-types" && v !== "seeds"))
-            .filter(([v]) => v !== "backup" || isSuperuser)
+            .filter(([v]) => (v !== "backup" && v !== "workspaces") || isSuperuser)
             .map(([v, l]) => (
             <Tabs.Trigger key={v} value={v}
               className="px-3 py-2.5 text-xs font-medium text-muted-foreground data-[state=active]:text-foreground data-[state=active]:border-b-2 data-[state=active]:border-primary -mb-px transition-colors"
@@ -303,6 +304,11 @@ export default function SettingsPage() {
         {/* ── Marketplace updates ──────────────────────────────── */}
         <Tabs.Content value="updates" className="flex-1 overflow-y-auto p-6">
           <MarketplaceUpdatesTab />
+        </Tabs.Content>
+
+        {/* ── Workspaces ───────────────────────────────────────── */}
+        <Tabs.Content value="workspaces" className="flex-1 overflow-y-auto p-6">
+          <WorkspacesTab />
         </Tabs.Content>
 
         {/* ── Backup ───────────────────────────────────────────── */}

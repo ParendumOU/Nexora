@@ -47,6 +47,7 @@ class ProjectUpdate(BaseModel):
     repo_type: str | None = None
     repo_branch: str | None = None
     repo_credential_id: str | None = None
+    repo_rules: str | None = None
     is_private: bool | None = None
     tools: list | None = None
     mcps: list | None = None
@@ -102,6 +103,7 @@ async def _enrich_project(project: Project, db: AsyncSession) -> dict:
         "env_vars": project.plain_env_vars,
         "repo_branch": (project.meta or {}).get("repo_branch"),
         "repo_credential_id": (project.meta or {}).get("repo_credential_id"),
+        "repo_rules": (project.meta or {}).get("repo_rules"),
         "is_private": (project.meta or {}).get("is_private", False),
         "created_at": project.created_at.isoformat() if project.created_at else "",
         "updated_at": project.updated_at.isoformat() if project.updated_at else "",
@@ -298,7 +300,7 @@ async def update_project(
     if req.env_vars is not None:
         from src.core.security import encrypt_env_map as _eem; project.env_vars = _eem(req.env_vars)
     # Store repo extras in meta JSON
-    if any(v is not None for v in [req.repo_branch, req.repo_credential_id, req.is_private]):
+    if any(v is not None for v in [req.repo_branch, req.repo_credential_id, req.is_private, req.repo_rules]):
         meta = dict(project.meta or {})
         if req.repo_branch is not None:
             meta["repo_branch"] = req.repo_branch
@@ -306,6 +308,8 @@ async def update_project(
             meta["repo_credential_id"] = req.repo_credential_id
         if req.is_private is not None:
             meta["is_private"] = req.is_private
+        if req.repo_rules is not None:
+            meta["repo_rules"] = req.repo_rules
         project.meta = meta
 
     await db.commit()

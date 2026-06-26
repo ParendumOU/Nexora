@@ -26,6 +26,7 @@ from src.api.routers import device as device_router
 from src.api.routers import platform_backup as platform_backup_router
 from src.api.routers import goals as goals_router
 from src.api.routers import approvals as approvals_router
+from src.api.routers import workspaces as workspaces_router
 from src.api.routers import outcomes as outcomes_router
 from src.api.routers import org_roles as org_roles_router
 from src.api.routers import audit as audit_router
@@ -137,6 +138,7 @@ def create_app() -> FastAPI:
     app.include_router(platform_backup_router.router, prefix=prefix)
     app.include_router(goals_router.router, prefix=prefix)
     app.include_router(approvals_router.router, prefix=prefix)
+    app.include_router(workspaces_router.router, prefix=prefix)
     app.include_router(outcomes_router.router, prefix=prefix)
     app.include_router(org_roles_router.router, prefix=prefix)
     app.include_router(audit_router.router, prefix=prefix)

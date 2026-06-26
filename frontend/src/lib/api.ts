@@ -578,6 +578,11 @@ export const gitProxyApi = {
     api.delete("/git-proxy/branches", { params: { credential_id: credentialId, repo_url: repoUrl, branch } }),
   merge: (data: { credential_id: string; repo_url: string; base: string; head: string; message?: string }) =>
     api.post("/git-proxy/merge", data),
+  // #242 — where can this credential create a repo, and create one
+  namespaces: (credentialId: string) =>
+    api.get("/git-proxy/namespaces", { params: { credential_id: credentialId } }),
+  createRepo: (data: { credential_id: string; name: string; namespace?: string; private?: boolean; description?: string }) =>
+    api.post("/git-proxy/create-repo", data),
 };
 
 export const projectsApi = {
@@ -697,6 +702,12 @@ export const proposalsApi = {
     api.get("/proposals", { params: status ? { status } : undefined }),
   approve: (id: string) => api.post(`/proposals/${id}/approve`),
   reject: (id: string) => api.post(`/proposals/${id}/reject`),
+};
+
+// ─── Agent workspaces (#243, superuser) ─────────────────────────
+export const workspacesApi = {
+  list: () => api.get("/workspaces"),
+  remove: (name: string) => api.delete(`/workspaces/${encodeURIComponent(name)}`),
 };
 
 // ─── Tool approvals (human-in-the-loop, #235) ───────────────────

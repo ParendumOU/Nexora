@@ -10,6 +10,13 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.11.0
+
+- Agents can now run real git in the shared workspace: a new local git tool clones, branches, commits and pushes a live working tree, authenticating with the project's stored GitHub/GitLab credential without ever exposing the token.
+- Projects gain commit and push rules: a short note you write in the project Repository tab is shown to every agent working in that project's workspace, so they follow your branch naming and commit conventions.
+- Create a repository straight from a project: pick a stored credential, choose the GitHub org or GitLab group to put it in, name it, and it is created and linked in one step.
+- New superuser Workspaces settings tab to see every agent workspace with its size and git status, and delete stale ones.
+
 ## 1.10.0
 
 - Risky-command approvals gain an "Always allow similar" action: approving a held command with it stops re-prompting for commands with the same content for the rest of the conversation (sub-agents included), while different commands still ask.

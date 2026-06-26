@@ -1,0 +1,59 @@
+{
+  "key": "git_local",
+  "name": "Git (local workspace)",
+  "description": "Run real git in the shared workspace: clone, branch, add, commit, push, pull, status, log, diff. Credentials are resolved automatically from the project — never pass tokens. Requires the shared workspace.",
+  "category": "git",
+  "group": "git",
+  "is_builtin": true,
+  "platform_executor": true,
+  "risk": "exec",
+  "always_allowed": false,
+  "args": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "clone | init | status | branch | checkout | add | commit | push | pull | fetch | log | diff | current_branch"
+    },
+    {
+      "name": "branch",
+      "type": "string",
+      "description": "[branch/checkout/push/pull] branch name; defaults to the current branch for push/pull"
+    },
+    {
+      "name": "message",
+      "type": "string",
+      "description": "[commit] commit message (required for commit)"
+    },
+    {
+      "name": "add_all",
+      "type": "boolean",
+      "description": "[commit] stage all changes (git add -A) before committing"
+    },
+    {
+      "name": "paths",
+      "type": "array",
+      "description": "[add] paths to stage; defaults to all (.)"
+    },
+    {
+      "name": "path",
+      "type": "string",
+      "description": "[diff] limit the diff to this path"
+    },
+    {
+      "name": "staged",
+      "type": "boolean",
+      "description": "[diff] show staged changes instead of the working tree"
+    },
+    {
+      "name": "repo_url",
+      "type": "string",
+      "description": "[clone] repository URL; defaults to the project's repo"
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "description": "[log] number of commits (default 20, max 100)"
+    }
+  ]
+}

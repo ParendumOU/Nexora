@@ -81,6 +81,41 @@ async def resolve_workspace_dir(chat_id: str) -> str | None:
         return None
 
 
+async def get_repo_context(chat_id: str) -> dict:
+    """Repo info for the project tied to this chat's tree, for prompt injection.
+
+    Returns {} when there is no project. Keys (when present): repo_url, repo_type,
+    rules (the per-repo commit/push/branch rules from Project.meta['repo_rules']),
+    has_credential (whether a credential is linked on the project)."""
+    if not get_settings().shared_workspace_enabled:
+        return {}
+    try:
+        from src.models.project import Project
+        _root, project_id = await _resolve_chain(chat_id)
+        if not project_id:
+            return {}
+        async with AsyncSessionLocal() as db:
+            proj = (await db.execute(
+                select(Project.repo_url, Project.repo_type, Project.meta).where(Project.id == project_id)
+            )).first()
+        if not proj:
+            return {}
+        repo_url, repo_type, meta = proj[0], proj[1], (proj[2] or {})
+        out: dict = {}
+        if repo_url:
+            out["repo_url"] = repo_url
+        if repo_type:
+            out["repo_type"] = repo_type
+        rules = (meta.get("repo_rules") or "").strip()
+        if rules:
+            out["rules"] = rules
+        out["has_credential"] = bool(meta.get("repo_credential_id"))
+        return out
+    except Exception as exc:
+        logger.debug("[workspace] repo context failed for chat %s: %s", chat_id, exc)
+        return {}
+
+
 async def resolve_path(chat_id: str, path_str: str | None, *, default_to_root: bool = False) -> str:
     """Resolve a tool's `path` argument against the shared workspace.
 
@@ -98,3 +133,70 @@ async def resolve_path(chat_id: str, path_str: str | None, *, default_to_root: b
     if os.path.isabs(raw):
         return raw
     return os.path.join(ws, raw)
+
+
+def _dir_size(path: str, *, cap: int = 200_000) -> tuple[int, int]:
+    """(total_bytes, file_count) for a directory, bounded so a huge tree can't stall
+    the request (stops walking after `cap` files)."""
+    total, count = 0, 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+            count += 1
+            if count >= cap:
+                return total, count
+    return total, count
+
+
+def list_workspaces() -> list[dict]:
+    """Every workspace directory under workspace_base, with size + git status.
+
+    Returns [{name, kind, key, path, size_bytes, file_count, is_git, mtime}] sorted by
+    most-recently-modified. kind is 'project'|'chat'|'other' parsed from the dir name.
+    Synchronous filesystem walk — call from a threadpool if it must not block."""
+    base = get_settings().workspace_base or "/workspaces"
+    if not os.path.isdir(base):
+        return []
+    out: list[dict] = []
+    for name in os.listdir(base):
+        path = os.path.join(base, name)
+        if not os.path.isdir(path):
+            continue
+        kind, key = "other", name
+        if name.startswith("proj_"):
+            kind, key = "project", name[len("proj_"):]
+        elif name.startswith("chat_"):
+            kind, key = "chat", name[len("chat_"):]
+        size, files = _dir_size(path)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = 0.0
+        out.append({
+            "name": name, "kind": kind, "key": key, "path": path,
+            "size_bytes": size, "file_count": files,
+            "is_git": os.path.isdir(os.path.join(path, ".git")),
+            "mtime": mtime,
+        })
+    out.sort(key=lambda w: w["mtime"], reverse=True)
+    return out
+
+
+def delete_workspace(name: str) -> bool:
+    """Remove one workspace directory by name. Returns True if it existed and was
+    removed. Refuses path traversal (name must be a single safe segment)."""
+    import shutil
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return False
+    base = get_settings().workspace_base or "/workspaces"
+    path = os.path.join(base, name)
+    # Confine to base (defend against odd inputs).
+    if os.path.commonpath([os.path.abspath(path), os.path.abspath(base)]) != os.path.abspath(base):
+        return False
+    if not os.path.isdir(path):
+        return False
+    shutil.rmtree(path, ignore_errors=True)
+    return not os.path.isdir(path)
