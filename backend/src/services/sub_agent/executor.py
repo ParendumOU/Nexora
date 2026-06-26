@@ -947,11 +947,19 @@ async def _execute_sub_agent_task(
         # Autonomy (#234): a completed task linked to a milestone advances it (and
         # rolls up to goal progress / completion). Best-effort.
         _ms_id = getattr(t, "milestone_id", None) if t else None
+        _goal_id = getattr(t, "goal_id", None) if t else None
         if _ms_id and getattr(t, "status", None) == "completed":
             try:
-                from src.services.goals import set_milestone_status
-                async with AsyncSessionLocal() as _gdb:
-                    await set_milestone_status(_gdb, _ms_id, "done")
+                from src.services import autopilot as _ap
+                # Autopilot goals run a state machine: only mark the milestone done when
+                # ALL its micro-tasks finish, then dispatch the next milestone. Other
+                # goals keep the one-task-per-milestone roll-up.
+                if _goal_id and await _ap.is_autopilot_goal(_goal_id):
+                    await _ap.advance_on_task_complete(_goal_id, _ms_id)
+                else:
+                    from src.services.goals import set_milestone_status
+                    async with AsyncSessionLocal() as _gdb:
+                        await set_milestone_status(_gdb, _ms_id, "done")
             except Exception as exc:
                 logger.warning(f"[sub_agent] milestone roll-up failed for {_ms_id}: {exc}")
 

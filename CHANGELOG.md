@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.13.0
+
+- New Autopilot mode (per-chat toggle): describe a project and the platform plans it once into a roadmap of milestones and small tasks, then builds it autonomously by assigning each task to a capable agent, running them, verifying acceptance, and advancing milestone by milestone until done. The orchestration is driven by code, so it works even with smaller models.
+
 ## 1.12.0
 
 - Delegated tasks are now routed to a capable agent automatically: when an agent creates a task without naming who should do it, the platform picks the best-fit specialist by skills and tools (with a sensible fallback), so delegation no longer depends on the model knowing agent names.

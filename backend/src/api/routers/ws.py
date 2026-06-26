@@ -469,6 +469,14 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                         await _set_yolo(chat_id, bool(data.get("yolo")))
                     except Exception:
                         pass
+                # Per-chat Autopilot toggle: when on, a user message is decomposed once
+                # (structured) and executed deterministically by code (see below).
+                if "autopilot" in data:
+                    try:
+                        from src.services import autopilot as _autopilot
+                        await _autopilot.set_autopilot(chat_id, bool(data.get("autopilot")))
+                    except Exception:
+                        pass
 
                 # Local execution opt-in (CLI clients): proxy filesystem/shell builtins to
                 # the client host for this chat. Bridge sends frames via pubsub.broadcast so
@@ -591,6 +599,30 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 live_chat = await get_live_chat(chat_id, user.id)
                 if not agent_id and live_chat and live_chat.agent_id:
                     agent_id = live_chat.agent_id
+
+                # Autopilot: if engaged, decompose the objective ONCE (structured) and
+                # let code create the goal/milestones/tasks, auto-assign, dispatch, and
+                # iterate to completion — instead of a normal model turn. Runs in the
+                # background so the socket stays responsive; it broadcasts its plan +
+                # progress. Only on a top-level chat (never inside a sub-agent sub-chat).
+                if org_id and live_chat and not live_chat.parent_chat_id:
+                    try:
+                        from src.services import autopilot as _autopilot
+                        if await _autopilot.is_autopilot(chat_id):
+                            await pubsub.broadcast(chat_id, {
+                                "type": "activity_status", "status": "running",
+                                "label": "Autopilot planning…",
+                            })
+                            import asyncio as _aio
+                            def _ap_done(_t):
+                                if not _t.cancelled() and _t.exception():
+                                    logger.warning("[ws] autopilot task error: %s", _t.exception())
+                            _aio.create_task(_autopilot.start_autopilot(
+                                live_chat, org_id, user.id, user_content, agent_id, None,
+                            )).add_done_callback(_ap_done)
+                            continue
+                    except Exception as _apexc:
+                        logger.warning(f"[ws] autopilot start failed: {_apexc}")
 
                 # Resolve sub-agent task context so tool steps get recorded
                 _step_task_id: str | None = None

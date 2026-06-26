@@ -23,6 +23,7 @@ export interface SendOptions {
   enable_agent: boolean;
   file_ids?: string[];
   yolo?: boolean;
+  autopilot?: boolean;
 }
 
 interface ChainStep { position: number; model_name: string | null; provider_type: string; account_count: number }
@@ -250,6 +251,7 @@ export function ChatInput({
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [enableAgent, setEnableAgent] = useState(true);
   const [yolo, setYolo] = useState(false);
+  const [autopilot, setAutopilot] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<ChatFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -433,12 +435,13 @@ export function ChatInput({
       enable_agent: enableAgent,
       file_ids: pendingFiles.map((f) => f.id),
       yolo,
+      autopilot,
     });
     setValue("");
     setPendingFiles([]);
     setMentionQuery(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, isStreaming, disabled, onSend, agentId, mode, modelOverride, enableAgent, yolo, pendingFiles]);
+  }, [value, isStreaming, disabled, onSend, agentId, mode, modelOverride, enableAgent, yolo, autopilot, pendingFiles]);
 
   // ─── Textarea key handler ─────────────────────────────────────
 
@@ -689,6 +692,28 @@ export function ChatInput({
                         <span className={cn(
                           "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
                           yolo ? "translate-x-4" : "translate-x-0.5"
+                        )} />
+                      </button>
+                    </div>
+                    {/* Autopilot: decompose the objective once and let the platform run
+                        the whole roadmap (milestones → micro-tasks → specialists) by code */}
+                    <div className="mt-2 pt-2 border-t border-border flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="text-xs font-medium">Autopilot</span>
+                        <p className="text-[10px] text-muted-foreground leading-tight">Plan once, then auto-build the whole roadmap with a team of agents</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAutopilot((v) => !v)}
+                        className={cn(
+                          "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+                          autopilot ? "bg-primary" : "bg-muted"
+                        )}
+                        title={autopilot ? "Autopilot on — your next message becomes a project the agents build autonomously" : "Autopilot off"}
+                      >
+                        <span className={cn(
+                          "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
+                          autopilot ? "translate-x-4" : "translate-x-0.5"
                         )} />
                       </button>
                     </div>

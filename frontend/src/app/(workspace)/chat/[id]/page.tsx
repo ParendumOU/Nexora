@@ -797,6 +797,9 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         setTasks((prev) => prev.filter((t) => t.id !== data.task_id));
       } else if (data.type === "log_entry") {
         setLiveLogs((prev) => [...prev.slice(-499), data.log as LogEntry]);
+      } else if (data.type === "messages_updated") {
+        // Autopilot (and other server-side message inserts) → refetch the thread.
+        qc.invalidateQueries({ queryKey: ["messages", chatId] });
       } else if (data.type === "file_created" || data.type === "file_updated") {
         // Refresh the panel live. No per-file toast — an agent building a project
         // writes/rewrites many files and the toasts were spammy; the Files panel
@@ -993,6 +996,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       enable_agent: options.enable_agent,
       file_ids: options.file_ids ?? [],
       yolo: options.yolo ?? false,
+      autopilot: options.autopilot ?? false,
       client_message_id: clientMsgId,
     }));
   }, []);
