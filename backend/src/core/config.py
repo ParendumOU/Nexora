@@ -192,7 +192,10 @@ class Settings(BaseSettings):
     # that would take down the platform itself — an agent has the Docker socket, so a
     # `docker compose down` / `docker stop|kill|rm|restart` / reboot would kill its own
     # host. Agents may still bring their project UP (docker compose up/build/ps/logs).
-    shell_run_timeout_seconds: int = 60
+    # 60s was too short for real installs/builds (pnpm install, docker build) an
+    # autonomous run does; they were killed mid-flight. 300s leaves room while still
+    # killing a genuinely hung foreground process (agents are told to background with &).
+    shell_run_timeout_seconds: int = 300
     shell_guard_host: bool = True
 
     # Auto-assign delegated tasks by capability. When a task_create call names no agent

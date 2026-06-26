@@ -10,6 +10,12 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.14.4
+
+- Fixed an error that made updating a task or completing a plan step fail with "cannot access local variable timezone"; these now work reliably during autonomous runs.
+- Agents can now create agents and issues without hitting a database type error: numeric and text fields the model fills in (an agent's max tokens or temperature, an issue's title or project) are normalized to the right type instead of being rejected.
+- Raised the shell command timeout from 60 to 300 seconds so real installs and builds (pnpm install, docker build) are no longer killed partway through.
+
 ## 1.14.3
 
 - When an autonomous run is resumed after a server restart, the conversation now posts a short note saying it is continuing, so the self-recovery is visible in the chat instead of only in the logs.

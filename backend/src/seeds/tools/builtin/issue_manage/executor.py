@@ -37,12 +37,15 @@ async def _resolve_org_from_context(chat_rec, agent_id, db):
 
 
 async def _action_create(args, chat_id, agent_id, agent_name, db, chat_rec):
-    title = args.get("title")
+    # Coerce scalar args — a weak model may send an int for a string column (title,
+    # project_id) which asyncpg rejects ("expected str, got int").
+    from src.services.agent_tools.coerce import to_str, to_list
+    title = to_str(args.get("title"))
     if not title:
         return {"error": "title is required"}
 
     org_id, resolved_project_id = await _resolve_org_from_context(chat_rec, agent_id, db)
-    project_id = args.get("project_id") or resolved_project_id
+    project_id = to_str(args.get("project_id")) or resolved_project_id
 
     if not org_id or not project_id:
         return {"error": "Could not resolve org_id/project_id. Provide project_id explicitly."}
@@ -59,9 +62,9 @@ async def _action_create(args, chat_id, agent_id, agent_name, db, chat_rec):
         org_id=org_id,
         project_id=project_id,
         title=title,
-        description=args.get("description"),
+        description=to_str(args.get("description")),
         priority=priority,
-        labels=args.get("labels", []),
+        labels=to_list(args.get("labels")),
         assigned_agent_id=resolved_agent_id,
         reporter_agent_id=agent_id,
     )
@@ -85,10 +88,11 @@ async def _action_update(args, chat_id, agent_id, agent_name, db):
     if not issue:
         return {"error": f"Issue {issue_id} not found"}
 
+    from src.services.agent_tools.coerce import to_str, to_list
     if "title" in args and args["title"]:
-        issue.title = args["title"]
+        issue.title = to_str(args["title"])
     if "description" in args:
-        issue.description = args["description"]
+        issue.description = to_str(args["description"])
     if "status" in args:
         status = args["status"]
         if status in ISSUE_STATUSES:
@@ -100,7 +104,7 @@ async def _action_update(args, chat_id, agent_id, agent_name, db):
     if "priority" in args and args["priority"] in ISSUE_PRIORITIES:
         issue.priority = args["priority"]
     if "labels" in args:
-        issue.labels = args["labels"]
+        issue.labels = to_list(args["labels"])
     if "assigned_agent_id" in args:
         from src.services.agent_tools import _resolve_agent_id
         issue.assigned_agent_id = await _resolve_agent_id(args["assigned_agent_id"], db)

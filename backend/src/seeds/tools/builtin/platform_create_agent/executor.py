@@ -98,18 +98,24 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict | None
         if _q:
             return {"error": _q}
 
+        # Coerce numeric/scalar args — a weak model often sends "8192" (str) for the
+        # Integer max_tokens column or "0.7" for the Float temperature, which asyncpg
+        # rejects. (max_tokens is an Integer column — the old str() wrapper was the bug.)
+        from src.services.agent_tools.coerce import to_int, to_float, to_str, to_list
         new_agent = Agent(
-            id=str(uuid.uuid4()), org_id=org_id, name=agent_name_arg,
-            agent_type=args.get("agent_type", "custom"),
-            description=args.get("description"),
-            soul=args.get("soul", {}),
+            id=str(uuid.uuid4()), org_id=org_id, name=to_str(agent_name_arg),
+            agent_type=to_str(args.get("agent_type"), "custom"),
+            description=to_str(args.get("description")),
+            soul=args.get("soul") if isinstance(args.get("soul"), dict) else {},
             system_prompt=system_prompt,
-            skills=args.get("skills", []),
-            tools=args.get("tools", []),
-            temperature=args.get("temperature", 0.3),
-            max_tokens=str(args.get("max_tokens", 8192)),
-            env_vars=args.get("env_vars", {}),
-            mcps=args.get("mcps", []),
+            skills=to_list(args.get("skills")),
+            tools=to_list(args.get("tools")),
+            temperature=to_float(args.get("temperature"), 0.3),
+            max_tokens=to_int(args.get("max_tokens"), 8192),
+            max_subagents=to_int(args.get("max_subagents"), 5),
+            max_concurrency=to_int(args.get("max_concurrency"), 2),
+            env_vars=args.get("env_vars") if isinstance(args.get("env_vars"), dict) else {},
+            mcps=to_list(args.get("mcps")),
             is_active=True,
         )
         db.add(new_agent)

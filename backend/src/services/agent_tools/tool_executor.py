@@ -1072,7 +1072,6 @@ async def _run_single_tool(
 
     elif name == "plan_step_complete":
         from src.models.plan import Plan, PlanStep
-        from datetime import timezone
         step_id = args.get("step_id")
         note = args.get("note", "")
         if not step_id:
@@ -1108,7 +1107,6 @@ async def _run_single_tool(
 
     elif name == "plan_complete":
         from src.models.plan import Plan, PlanStep
-        from datetime import timezone
         plan_id = args.get("plan_id")
         if not plan_id:
             return {"tool": "plan_complete", "error": "plan_id is required"}
