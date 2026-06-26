@@ -18,6 +18,10 @@ from src.services.agent_tools import is_executable_tool
     "file_read",        # executor.py
     "read_url",         # skill executor.py
     "schedule_manage",  # skill executor.py
+    "docker_ps",        # executor.py (read-only docker CLI)
+    "docker_logs",      # executor.py
+    "docker_build",     # executor.py
+    "docker_run",       # executor.py (host-guarded)
 ])
 def test_real_tools_are_executable(key):
     assert is_executable_tool(key) is True
@@ -25,7 +29,6 @@ def test_real_tools_are_executable(key):
 
 @pytest.mark.parametrize("key", [
     "git_status", "git_clone",        # real functionality lives in the `git` action tool
-    "docker_run", "docker_ps",        # covered by shell_run; no executor
     "code_python",                    # no executor
     "web_search", "web_scrape",       # no executor
     "playwright_navigate",            # no executor

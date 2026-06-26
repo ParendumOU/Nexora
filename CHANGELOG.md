@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.15.5
+
+- The Docker tools an agent can use (list containers, view logs, build an image, run a command) now actually work. They were listed but had no implementation, so an agent that tried them got stuck repeating a failing "tool not available" call. They run against Docker directly, and the run command keeps the safety guard that blocks anything that could take down the platform.
+
 ## 1.15.4
 
 - Fixed the repository panel's changed-files list showing rows of "?" with no names or counts. The compare endpoint now returns each changed file with its path, status, and added/removed line counts (for both GitHub and GitLab) instead of just a filename, so the list, diff view, and per-file stats render correctly.
