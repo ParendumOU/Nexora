@@ -545,6 +545,14 @@ async def recover_autopilot_goals() -> None:
     so an autonomous run survives `docker compose up --build`. Runs AFTER recover_on_startup
     (so any task it re-dispatched is already 'pending'/'queued' and counts as open here,
     preventing a premature advance). One worker only (Redis lock)."""
+    from src.core.config import get_settings as _gs
+    _cfg = _gs()
+    # Kill-switch: AUTOPILOT_RECOVERY_ENABLED=false stops a rebuild from reviving runs
+    # (use when many goals are thrashing the backend). Stop/Kill All also pauses goals so
+    # they're skipped here regardless.
+    if not getattr(_cfg, "autopilot_recovery_enabled", True):
+        logger.info("[autopilot] startup recovery disabled by config — skipping")
+        return
     try:
         from src.core.redis import get_redis
         if not await get_redis().set("autopilot_recovery_lock", "1", nx=True, ex=120):
@@ -555,10 +563,15 @@ async def recover_autopilot_goals() -> None:
     from datetime import datetime, timezone, timedelta
     from src.models.goal import Goal
 
+    # Cap how many goals a single startup revives, so a backlog of active goals can't
+    # thunder-herd the backend on boot (the rest stay active and get picked up later /
+    # by the autonomy tick). Oldest-updated first.
+    _cap = max(1, int(getattr(_cfg, "autopilot_recovery_max_goals", 5) or 5))
     cutoff = datetime.now(timezone.utc) - timedelta(hours=_RECOVERY_WINDOW_HOURS)
     async with AsyncSessionLocal() as db:
         goals = (await db.execute(
             select(Goal).where(Goal.status == "active", Goal.updated_at >= cutoff)
+            .order_by(Goal.updated_at.desc()).limit(_cap)
         )).scalars().all()
 
     resumed = 0

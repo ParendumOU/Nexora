@@ -124,10 +124,12 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
             rows = (await db.execute(
                 text(
                     """
-                    WITH RECURSIVE sub(id) AS (
-                        SELECT id FROM chats WHERE id = :root
+                    WITH RECURSIVE sub(id, depth) AS (
+                        SELECT id, 0 FROM chats WHERE id = :root
                         UNION ALL
-                        SELECT c.id FROM chats c JOIN sub ON c.parent_chat_id = sub.id
+                        SELECT c.id, sub.depth + 1
+                        FROM chats c JOIN sub ON c.parent_chat_id = sub.id
+                        WHERE sub.depth < 64
                     )
                     SELECT id FROM sub
                     """

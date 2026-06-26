@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.18.1
+
+- Fixed the backend becoming unresponsive (502 errors, dropped connections, "Couldn't load data", failed chat deletes) on instances with very large conversation trees. The query that decides which conversations show a "working" spinner is now depth-guarded so it can never run away on a malformed tree, has a hard time limit, and is cached for a few seconds so a burst of updates can't overload the database.
+- Added a safeguard and an off switch for auto-resuming autonomous runs after a restart: at most a few runs resume per startup, and AUTOPILOT_RECOVERY_ENABLED=false disables auto-resume entirely (useful if many runs are overloading an instance). Stopping a run still keeps it stopped.
+
 ## 1.18.0
 
 - A stopped autonomous run no longer comes back to life after a server restart or rebuild. Stopping (Stop or Kill All) now pauses the run, and startup recovery leaves paused runs alone instead of reviving them (which had also caused a fresh branch to appear on restart).

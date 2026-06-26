@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     # autonomy_tick_enabled too. OFF by default — opt-in for unattended runs.
     autonomy_dispatch_enabled: bool = False
     autonomy_max_dispatch_per_tick: int = 1  # milestones launched per sweep
+    # Resume paused-by-restart Autopilot goals on startup (so a redeploy doesn't kill a
+    # live run). Kill-switch: set AUTOPILOT_RECOVERY_ENABLED=false to stop a rebuild from
+    # reviving runs (e.g. when many goals are thrashing the backend). Capped per startup.
+    autopilot_recovery_enabled: bool = True
+    autopilot_recovery_max_goals: int = 5
 
     # Governance: tool risk policy (GitLab #235, Autonomy epic #238). Each tool is
     # classified into a risk tier (read | write | external | exec); these flags let an

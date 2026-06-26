@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -133,39 +134,70 @@ async def list_chats(
         }
 
     # Running flag: a listed chat shows a spinner if it — or anything in its whole subtree
-    # — has work in flight. Since the list no longer loads sub-chats, walk DOWN with a
-    # recursive CTE rooted at the loaded chats to find any active task in the subtree (this
-    # is what reflects an autonomous run on its top-level chat). Plus the chat's own live
-    # turn (stream_buffer). Depth is bounded by max_subdelegation_depth.
+    # — has work in flight. The subtree walk is a recursive CTE; the sidebar refetches on
+    # every stream event, so on a big autonomous run (thousands of sub-chats + a storm of
+    # events) running this CTE on every call exhausted the DB pool and dropped connections.
+    # Cache the computed running-set per user in Redis for a few seconds: a refetch storm
+    # then reuses it and the CTE fires at most ~once per window. Spinner lag ≤ window.
     running_ids: set[str] = set()
+    _RUN_CACHE_TTL = 5
     if all_ids:
+        import json as _json
+        _cache_key = f"chats:running:{current_user.id}"
+        _redis = None
+        _cache_hit = False
         try:
-            act_r = await db.execute(
-                text(
-                    """
-                    WITH RECURSIVE subtree AS (
-                        SELECT id AS root, id AS node FROM chats WHERE id = ANY(:ids)
-                        UNION ALL
-                        SELECT s.root, c.id FROM chats c JOIN subtree s ON c.parent_chat_id = s.node
-                    )
-                    SELECT DISTINCT s.root
-                    FROM subtree s
-                    JOIN tasks t ON t.chat_id = s.node
-                    WHERE t.status IN ('pending','queued','in_progress')
-                    """
-                ),
-                {"ids": all_ids},
-            )
-            running_ids = {row[0] for row in act_r.all() if row[0]}
+            from src.core.redis import get_redis as _gr
+            _redis = _gr()
+            _cached = await _redis.get(_cache_key)
+            if _cached is not None:
+                running_ids = set(_json.loads(_cached))
+                _cache_hit = True
         except Exception:
-            running_ids = set()
-        # The chat's own live turn (set at stream start, short TTL) — so the spinner shows
-        # from the first moment, before any task exists.
-        try:
-            from src.core.stream_buffer import active_chats
-            running_ids |= await active_chats(all_ids)
-        except Exception:
-            pass
+            _redis = None
+
+        if not _cache_hit:
+            # cache miss (or Redis unavailable) → compute
+            try:
+                # Hard timeout so a pathological tree can never hang the request (and pile
+                # up workers into a 502). The spinner is non-critical — on timeout we just
+                # show no running flags rather than blocking the whole chat list.
+                act_r = await asyncio.wait_for(
+                    db.execute(
+                        text(
+                            """
+                            WITH RECURSIVE subtree(root, node, depth) AS (
+                                SELECT id, id, 0 FROM chats WHERE id = ANY(:ids)
+                                UNION ALL
+                                SELECT s.root, c.id, s.depth + 1
+                                FROM chats c JOIN subtree s ON c.parent_chat_id = s.node
+                                WHERE s.depth < 64
+                            )
+                            SELECT DISTINCT s.root
+                            FROM subtree s
+                            JOIN tasks t ON t.chat_id = s.node
+                            WHERE t.status IN ('pending','queued','in_progress')
+                            """
+                        ),
+                        {"ids": all_ids},
+                    ),
+                    timeout=3.0,
+                )
+                running_ids = {row[0] for row in act_r.all() if row[0]}
+            except Exception:
+                running_ids = set()
+            # The chat's own live turn (set at stream start, short TTL) — so the spinner
+            # shows from the first moment, before any task exists.
+            try:
+                from src.core.stream_buffer import active_chats
+                running_ids |= await active_chats(all_ids)
+            except Exception:
+                pass
+            if _redis is not None:
+                try:
+                    await _redis.setex(_cache_key, _RUN_CACHE_TTL, _json.dumps(list(running_ids)))
+                except Exception:
+                    pass
 
     result_list = []
     for chat in all_chats:
