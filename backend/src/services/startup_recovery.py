@@ -73,6 +73,31 @@ async def recover_on_startup() -> None:
             )
         except Exception as exc:
             logger.warning(f"[recovery] orphan-task cleanup failed (non-fatal): {exc}")
+
+        # 1c. Fail in-flight tasks with NO live worker. After a restart nothing is actually
+        # running, so any task still flagged in_progress whose heartbeat is stale (or never
+        # set) is a dead orphan — the sub-agent that owned it died with the old process.
+        # Goal-less delegation/broadcast orphans (goal_id NULL) escape the goal-scoped sweep
+        # above and pile up, driving a permanent "agents working" ghost in the chat UI. We
+        # mark them failed rather than re-dispatch: a stopped/abandoned run must STAY stopped
+        # across restarts (the user resumes explicitly via a message or the Resume banner).
+        # CLI-native tasks run in an external loop with no Nexora heartbeat — never touch them.
+        try:
+            from sqlalchemy import or_ as _or
+            from src.core.config import get_settings as _get_settings
+            _hb_cutoff = datetime.now(timezone.utc) - timedelta(
+                minutes=max(1, _get_settings().heartbeat_timeout_minutes)
+            )
+            await db.execute(
+                update(Task)
+                .where(
+                    Task.status == "in_progress",
+                    _or(Task.worker_heartbeat_at.is_(None), Task.worker_heartbeat_at < _hb_cutoff),
+                )
+                .values(status="failed", last_error="Interrupted by server restart (no live worker)")
+            )
+        except Exception as exc:
+            logger.warning(f"[recovery] stale-worker orphan cleanup failed (non-fatal): {exc}")
         await db.commit()
 
         # 2. Find tasks stuck in_progress / queued with an assigned agent
@@ -193,10 +218,18 @@ async def _recover_dead_task_chats(cutoff: datetime) -> None:
         return
 
     # Group by chat_id
+    from src.services.chat_cancel import is_ancestor_cancelled
     chats_to_resume: dict[str, tuple[str, str]] = {}  # chat_id → (org_id, user_id)
     for dt in dead_tasks:
         if dt.chat_id in chats_to_resume:
             continue
+
+        # Never resurrect a run the user stopped — its chat (or an ancestor) is cancel-flagged.
+        try:
+            if await is_ancestor_cancelled(dt.chat_id):
+                continue
+        except Exception:
+            pass
 
         async with AsyncSessionLocal() as db:
             # Skip if there are still active tasks in this chat

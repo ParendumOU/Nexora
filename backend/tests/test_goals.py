@@ -60,6 +60,44 @@ async def test_goal_not_found(client, auth_headers):
     assert (await client.get("/api/goals/00000000-0000-0000-0000-000000000000", headers=auth_headers)).status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_pause_all_stops_goalless_orphan_tasks(client, auth_headers, db):
+    """pause-all is the org-wide kill switch. It must fail EVERY in-flight task in the org,
+    including delegation/broadcast orphans with goal_id NULL (the ghost-'agents working'
+    drivers that escape goal-scoped cleanup) — not only goal-linked ones."""
+    import uuid
+    from sqlalchemy import select
+    from src.models.user import User
+    from src.models.chat import Chat
+    from src.models.task import Task
+
+    created = (await client.post("/api/goals", headers=auth_headers, json={"title": "Active goal"})).json()
+    org_id, gid = created["org_id"], created["id"]
+
+    user = (await db.execute(select(User).where(User.email == "fixture@example.com"))).scalar_one()
+    chat = Chat(id=str(uuid.uuid4()), user_id=user.id, title="run")
+    db.add(chat)
+    await db.flush()
+    orphan = Task(id=str(uuid.uuid4()), org_id=org_id, chat_id=chat.id, title="orphan",
+                  status="in_progress", goal_id=None)          # goal-less — must still die
+    linked = Task(id=str(uuid.uuid4()), org_id=org_id, chat_id=chat.id, title="linked",
+                  status="queued", goal_id=gid)
+    db.add_all([orphan, linked])
+    await db.commit()
+
+    resp = await client.post("/api/goals/pause-all", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["paused"] == 1
+    assert body["tasks_stopped"] == 2
+
+    assert (await client.get(f"/api/goals/{gid}", headers=auth_headers)).json()["status"] == "paused"
+    for tid in (orphan.id, linked.id):
+        t = (await db.execute(select(Task).where(Task.id == tid))).scalar_one()
+        assert t.status == "failed", f"task {tid} not failed"
+        assert t.last_error == "All autonomy paused"
+
+
 def test_goal_agent_tools_are_executable_and_always_allowed():
     # The 5 inline goal tools must resolve to a handler and be coordination tools
     # (always-allowed) so any orchestrator can manage objectives.

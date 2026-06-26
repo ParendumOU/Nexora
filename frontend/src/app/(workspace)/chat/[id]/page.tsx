@@ -24,6 +24,16 @@ import { Loader2, ListTodo, Network, Terminal, FolderKanban, FolderCode, Zap, Ch
 import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 
+// Task lifecycle states where no work is happening (and none will, absent a new trigger).
+// The sub-agent panel must treat ALL of these as done — not just completed/failed — or a
+// `dead` (exception-killed) / `blocked` task renders a permanent "working" spinner that gets
+// reconstructed from the DB on every refresh (the ghost-working bug). Mirrors TASK_STATUSES
+// in backend/src/models/task.py: {pending,in_progress,paused,queued,completed,failed,blocked,dead}.
+const TERMINAL_TASK_STATES = ["completed", "failed", "dead", "blocked", "cancelled", "paused"];
+const isTaskDone = (s: string | null | undefined): boolean => !!s && TERMINAL_TASK_STATES.includes(s);
+const isTaskFailed = (s: string | null | undefined): boolean =>
+  s === "failed" || s === "dead" || s === "cancelled";
+
 interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -204,7 +214,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     refetchInterval: (query) => {
       const tasks = query.state.data as { status: string }[] | undefined;
       if (!tasks || tasks.length === 0) return 2000;
-      const done = tasks[0].status === "completed" || tasks[0].status === "failed";
+      const done = isTaskDone(tasks[0].status);
       return done ? false : 2000;
     },
   });
@@ -257,8 +267,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         agentName: t.assigned_agent_name || "Agent",
         taskTitle: t.title,
         content: "",
-        done: t.status === "completed" || t.status === "failed",
-        failed: t.status === "failed",
+        done: isTaskDone(t.status),
+        failed: isTaskFailed(t.status),
         subChatId: t.sub_chat_id || undefined,
         createdAfterMessageId: t.created_after_message_id,
         steps: (t.steps || []).map((s: { step_id: string; name: string; label: string; status: string; error?: string | null }) => ({
@@ -306,7 +316,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     if (!parentTask || parentTask.length === 0) return;
     const task = parentTask[0];
-    const isDone = task.status === "completed" || task.status === "failed";
+    const isDone = isTaskDone(task.status);
     const dbSteps = (task.steps || []).map((s: { step_id: string; name: string; label: string; status: string; error?: string }) => ({
       stepId: s.step_id,
       name: s.name,
@@ -325,7 +335,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           taskTitle: task.title,
           content: "",
           done: isDone,
-          failed: task.status === "failed",
+          failed: isTaskFailed(task.status),
           subChatId: task.sub_chat_id || undefined,
           createdAfterMessageId: undefined,
           steps: dbSteps,
@@ -336,7 +346,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       const merged = {
         ...existing,
         done: isDone || existing.done,
-        failed: task.status === "failed" || existing.failed,
+        failed: isTaskFailed(task.status) || existing.failed,
         steps: dbSteps.length > 0 ? dbSteps : existing.steps,
       };
       const result = [...prev];

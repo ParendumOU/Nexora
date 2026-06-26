@@ -191,6 +191,23 @@ async def cancel_chat_tree(root_chat_id: str, reason: str = "Cancelled by user")
                 .values(status="paused")
             )
             paused_goals = int(g_res.rowcount or 0)
+            # Also pause goals whose TASKS run in this subtree even though the goal itself is
+            # hosted in another chat (goal.chat_id not in the tree). Otherwise the goal stays
+            # active and the autonomy tick re-dispatches it every minute → the killed run comes
+            # back. The subquery is cheap and scoped to the visited set.
+            g_res2 = await db.execute(
+                sql_update(Goal)
+                .where(
+                    Goal.status == "active",
+                    Goal.id.in_(
+                        select(Task.goal_id).where(
+                            Task.chat_id.in_(visited), Task.goal_id.isnot(None)
+                        )
+                    ),
+                )
+                .values(status="paused")
+            )
+            paused_goals += int(g_res2.rowcount or 0)
         except Exception as exc:
             logger.warning(f"[cancel] pausing autopilot goals failed: {exc}")
         await db.commit()

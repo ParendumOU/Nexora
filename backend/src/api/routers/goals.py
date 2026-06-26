@@ -111,26 +111,23 @@ async def pause_all_goals(
     Paused goals are skipped by the autonomy tick and startup recovery, so they stay stopped
     across restarts until resumed. Resumable via /goals/{id} status, /chats/{id}/resume, or
     /goals/resume-all."""
-    from sqlalchemy import update as _upd, select as _sel
+    from sqlalchemy import update as _upd
     from src.models.task import Task
     org_id = await get_active_org_id(current_user, db)
-    # Snapshot which goals we're pausing so we can fail their in-flight tasks too.
-    goal_ids = (await db.execute(
-        _sel(Goal.id).where(Goal.org_id == org_id, Goal.status == "active")
-    )).scalars().all()
     res = await db.execute(
         _upd(Goal).where(Goal.org_id == org_id, Goal.status == "active").values(status="paused")
     )
-    # Fail their in-flight tasks — otherwise they linger as orphans showing "agents working"
-    # and get re-dispatched on the next restart.
-    if goal_ids:
-        await db.execute(
-            _upd(Task)
-            .where(Task.goal_id.in_(goal_ids), Task.status.in_(["pending", "queued", "in_progress"]))
-            .values(status="failed", last_error="Run paused")
-        )
+    # Sledgehammer: this is the "stop ALL autonomy" button, so fail EVERY in-flight task in
+    # the org — not only goal-linked ones. Broadcast/delegation orphans carry goal_id NULL and
+    # would otherwise linger as "agents working" ghosts and be candidates for re-dispatch. One
+    # org-wide UPDATE is the superset of the old goal-scoped fail.
+    failed = await db.execute(
+        _upd(Task)
+        .where(Task.org_id == org_id, Task.status.in_(["pending", "queued", "in_progress"]))
+        .values(status="failed", last_error="All autonomy paused")
+    )
     await db.commit()
-    return {"paused": int(res.rowcount or 0)}
+    return {"paused": int(res.rowcount or 0), "tasks_stopped": int(failed.rowcount or 0)}
 
 
 @router.post("/resume-all")

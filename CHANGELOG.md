@@ -10,6 +10,13 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.19.4
+
+- Fixed a conversation that kept showing "agents working" (and a sub-agent stuck on "Analyzing...") even after it was stopped and even though nothing was actually running. The chat was rebuilding that state on every refresh from finished tasks whose status the screen did not recognize as finished (an agent that errored out, or a blocked step), so it drew a spinner forever. Those states now count as done.
+- "Pause all autonomy" is now a true workspace-wide stop. It ends every in-flight task in the workspace, including background helper tasks that were not tied to a specific goal. Those were slipping through before and kept the "working" indicator alive.
+- Stopping a run now also pauses a goal whose work runs inside that conversation even when the goal itself lives in another chat, so the autonomy loop can no longer quietly restart it a minute later.
+- On startup, any task still marked in-progress with no live worker behind it is now cleaned up instead of being shown as active, so a restart no longer revives or fakes work left over from a previous session.
+
 ## 1.19.3
 
 - Fixed a conversation showing "agents working" forever (and after every refresh) even though nothing was running. The cause was leftover tasks stuck in an in-progress state after a run was stopped or the server restarted; the chat rebuilt them as active on load. Stopping a run, pausing all autonomy, and deleting a chat now also clear those tasks, and on startup any in-progress task belonging to a stopped/paused run or a deleted chat is cleaned up instead of being shown as active or re-dispatched.
