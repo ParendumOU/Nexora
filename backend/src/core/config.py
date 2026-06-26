@@ -187,6 +187,14 @@ class Settings(BaseSettings):
     # sequential path.
     parallel_tool_calls_enabled: bool = True
 
+    # shell_run safety. Builds (pnpm install, docker build) need more than the old
+    # hard 30s; bump the default but keep it bounded. The host guard blocks commands
+    # that would take down the platform itself — an agent has the Docker socket, so a
+    # `docker compose down` / `docker stop|kill|rm|restart` / reboot would kill its own
+    # host. Agents may still bring their project UP (docker compose up/build/ps/logs).
+    shell_run_timeout_seconds: int = 60
+    shell_guard_host: bool = True
+
     # Auto-assign delegated tasks by capability. When a task_create call names no agent
     # (and no persona), the platform deterministically routes the task to the best-fit
     # existing agent (skills/tools/role overlap, with a capable-"doer" fallback) instead

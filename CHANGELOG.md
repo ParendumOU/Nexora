@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.14.1
+
+- Agents can no longer run a shell command that takes down the platform itself (stopping, killing, removing or restarting containers, rebooting, or mass-killing processes); they can still bring their own project up with docker compose. This fixes the backend restarting in the middle of an autonomous run.
+- The shell command timeout is configurable and was raised so builds and installs do not time out instantly; a timed-out command is now stopped cleanly.
+
 ## 1.14.0
 
 - Approval requests for risky commands now appear in the top-level conversation, so you can approve or deny every sub-agent's action from one place without opening each sub-chat.
