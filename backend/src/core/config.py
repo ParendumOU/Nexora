@@ -205,6 +205,16 @@ class Settings(BaseSettings):
     # pick the worker — orchestration that doesn't depend on model inference. Default on.
     auto_assign_agents: bool = True
 
+    # Broadcast amplification control. agent_broadcast with no channel fans out to EVERY
+    # active agent in the org, each spawning a sub-agent turn that can broadcast again →
+    # exponential conversation growth (a single objective ballooned to ~600 chats live).
+    # Two deterministic bounds keep autonomy finite without killing coordination:
+    #   - fan-out cap: at most N recipients per broadcast (prevents N-squared per call).
+    #   - per-run budget: at most N broadcasts per root conversation (hard storm ceiling).
+    # Generous defaults; raise via env for bigger swarms, lower to tighten.
+    broadcast_max_recipients: int = 12
+    broadcast_budget_per_run: int = 80
+
     # Tool permissions (GitLab #222)
     tools_default_deny: bool = False         # when true, an agent with NO configured tools is
                                              # deny-all (only always-allowed + its skills/local

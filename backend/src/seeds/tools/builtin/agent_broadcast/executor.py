@@ -30,6 +30,30 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
     if not subject or not body:
         return {"error": "subject and body are required"}
 
+    # Per-run broadcast budget — stop a broadcast storm (every agent broadcasting to all,
+    # each recipient broadcasting again → exponential conversations). Keyed by the root
+    # conversation so the whole delegation tree shares one finite budget.
+    from src.core.config import get_settings as _get_settings
+    _settings = _get_settings()
+    try:
+        from src.services.tool_approvals import _root_chat_id
+        from src.core.redis import get_redis
+        _root = await _root_chat_id(chat_id)
+        _bkey = f"broadcast_budget:{_root}"
+        _redis = get_redis()
+        _used = await _redis.incr(_bkey)
+        if _used == 1:
+            await _redis.expire(_bkey, 86400)
+        if _used > _settings.broadcast_budget_per_run:
+            return {"error": (
+                f"Broadcast budget for this run is exhausted "
+                f"({_settings.broadcast_budget_per_run} broadcasts). Stop broadcasting: "
+                "reply directly to one agent with send_message_to_agent, or just finish "
+                "your assigned task. Further broadcasts will not be delivered."
+            )}
+    except Exception:
+        pass
+
     channel: str | None = args.get("channel")
     explicit_ids: list[str] = args.get("agent_ids") or []
 
@@ -89,6 +113,15 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
                 "skipped": 0,
                 "reason": f"No eligible recipients in {scope}",
             }}
+
+        # Fan-out cap — a broadcast to a huge org is the N-squared amplifier. An explicit
+        # agent_ids list is respected as-is (a targeted send); only the implicit "all"/
+        # channel fan-out is capped. Deterministic slice (sorted by name) so it's stable.
+        _capped = 0
+        if not explicit_ids and len(recipients) > _settings.broadcast_max_recipients:
+            recipients.sort(key=lambda a: (a.name or "").lower())
+            _capped = len(recipients) - _settings.broadcast_max_recipients
+            recipients = recipients[:_settings.broadcast_max_recipients]
 
         # Create messages + tasks for all recipients
         dispatched: list[dict] = []
@@ -158,4 +191,9 @@ async def execute(args: dict, chat_id: str, agent_id: str | None, agent_name: st
         "dispatched": len(dispatched),
         "channel": channel,
         "recipients": dispatched,
+        "capped_recipients": _capped,
+        "note": (
+            f"Reached {len(dispatched)} agents; {_capped} more were not included (fan-out "
+            "cap). Broadcast sparingly — prefer send_message_to_agent for a specific agent."
+        ) if _capped else None,
     }}

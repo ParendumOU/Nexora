@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.15.0
+
+- Autonomous runs no longer balloon into hundreds of conversations. Agent broadcasts are now bounded by a per-run budget and a fan-out cap, so a team can still coordinate but a broadcast can no longer trigger an exponential storm of new conversations. A targeted message to one agent is never capped, and both limits are configurable.
+
 ## 1.14.4
 
 - Fixed an error that made updating a task or completing a plan step fail with "cannot access local variable timezone"; these now work reliably during autonomous runs.
