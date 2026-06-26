@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.15.4
+
+- Fixed the repository panel's changed-files list showing rows of "?" with no names or counts. The compare endpoint now returns each changed file with its path, status, and added/removed line counts (for both GitHub and GitLab) instead of just a filename, so the list, diff view, and per-file stats render correctly.
+- The repository file tree now shows the branch you are viewing (the selected agent branch when there is one) instead of always the base branch, so the explorer reflects the agent's work rather than appearing almost empty.
+
 ## 1.15.3
 
 - The repository panel inside a conversation no longer crashes the whole app ("Application error: a client-side exception") when it hits unexpected data. It is now wrapped in an error boundary that shows a contained, retryable message with the actual error, and the file tree tolerates malformed entries instead of throwing.

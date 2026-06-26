@@ -127,9 +127,13 @@ export function FileExplorerPanel({ project, onClose }: FileExplorerPanelProps) 
 
   // ── File tree ─────────────────────────────────────────────────────────────
 
+  // Show the tree of the branch being viewed (the selected agent branch when there is
+  // one) so the explorer reflects the agent's work — not just the base branch, which is
+  // often near-empty (e.g. only a README before the first merge).
+  const treeBranch = resolvedAgentBranch ?? defaultBranch;
   const { data: treeData, refetch: refetchTree } = useQuery({
-    queryKey: ["git-tree", credId, repoUrl, defaultBranch],
-    queryFn: () => gitProxyApi.tree(credId, repoUrl, defaultBranch).then((r) => r.data as TreeItem[]),
+    queryKey: ["git-tree", credId, repoUrl, treeBranch],
+    queryFn: () => gitProxyApi.tree(credId, repoUrl, treeBranch).then((r) => r.data as TreeItem[]),
     staleTime: 60_000,
   });
 

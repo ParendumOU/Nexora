@@ -268,6 +268,30 @@ async def list_commits(
 
 # ── compare ──────────────────────────────────────────────────────────────────
 
+def _gitlab_diff_file(d: dict) -> dict:
+    """Map a GitLab compare `diffs[]` entry to the file shape the web panel expects
+    ({path, status, additions, deletions, patch}). GitLab gives no per-file counts, so
+    derive them from the unified diff text."""
+    diff_text = d.get("diff") or ""
+    adds = sum(1 for ln in diff_text.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
+    dels = sum(1 for ln in diff_text.splitlines() if ln.startswith("-") and not ln.startswith("---"))
+    if d.get("new_file"):
+        status = "added"
+    elif d.get("deleted_file"):
+        status = "removed"
+    elif d.get("renamed_file"):
+        status = "renamed"
+    else:
+        status = "modified"
+    return {
+        "path": d.get("new_path") or d.get("old_path") or "",
+        "status": status,
+        "additions": adds,
+        "deletions": dels,
+        "patch": diff_text,
+    }
+
+
 @router.get("/compare")
 async def compare_refs(
     credential_id: str = Query(...),
@@ -295,7 +319,16 @@ async def compare_refs(
                 "ahead_by": data.get("ahead_by", 0),
                 "behind_by": data.get("behind_by", 0),
                 "status": data.get("status"),
-                "files": [f["filename"] for f in data.get("files", [])],
+                "files": [
+                    {
+                        "path": f.get("filename"),
+                        "status": f.get("status", "modified"),
+                        "additions": f.get("additions", 0),
+                        "deletions": f.get("deletions", 0),
+                        "patch": f.get("patch", ""),
+                    }
+                    for f in data.get("files", [])
+                ],
                 "commits": [
                     {
                         "sha": c["sha"],
@@ -318,7 +351,7 @@ async def compare_refs(
                 "ahead_by": len(data.get("commits", [])),
                 "behind_by": 0,
                 "status": "ahead" if data.get("commits") else "identical",
-                "files": [f["new_path"] for f in data.get("diffs", [])],
+                "files": [_gitlab_diff_file(d) for d in data.get("diffs", [])],
                 "commits": [
                     {
                         "sha": c["id"],
