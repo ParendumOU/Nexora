@@ -46,6 +46,7 @@ hljs.registerLanguage("java", langJava);
 hljs.registerLanguage("sql", langSQL);
 hljs.registerLanguage("markdown", langMarkdown);
 import { Button } from "@/components/ui/button";
+import RepoCreateDialog from "@/components/projects/RepoCreateDialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -918,44 +919,20 @@ function RepoTab({ project, onSave }: { project: Project; onSave: (d: Partial<Pr
   const [rules, setRules] = useState(project.repo_rules ?? "");
   const [selectedFile, setSelectedFile] = useState<TreeNode | null>(null);
   const [saving, setSaving] = useState(false);
-  // Create-new-repo (#242)
-  const [createOpen, setCreateOpen] = useState(false);
-  const [newRepoName, setNewRepoName] = useState("");
-  const [newRepoNs, setNewRepoNs] = useState("");
-  const [newRepoPrivate, setNewRepoPrivate] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);  // create-new-repo modal (#242)
 
   const { data: creds = [] } = useQuery<GitCredential[]>({
     queryKey: ["git-credentials"],
     queryFn: () => gitCredentialsApi.list().then(r => r.data),
   });
 
-  const { data: namespaces = [], isLoading: loadingNs } = useQuery<{ id: string; name: string; kind: string }[]>({
-    queryKey: ["git-namespaces", credId],
-    queryFn: () => gitProxyApi.namespaces(credId).then(r => r.data),
-    enabled: createOpen && !!credId,
-  });
+  const selectedCred = useMemo(() => creds.find(c => c.id === credId) ?? null, [creds, credId]);
 
-  const handleCreateRepo = async () => {
-    if (!credId) { toast.error("Select a credential first"); return; }
-    if (!newRepoName.trim()) { toast.error("Enter a repository name"); return; }
-    setCreating(true);
-    try {
-      const { data } = await gitProxyApi.createRepo({
-        credential_id: credId, name: newRepoName.trim(), namespace: newRepoNs,
-        private: newRepoPrivate,
-      });
-      setRepoUrl(data.repo_url);
-      setBranch(data.default_branch || "");
-      await onSave({ repo_url: data.repo_url, repo_type: repoType, repo_branch: data.default_branch || undefined, repo_credential_id: credId, is_private: newRepoPrivate, repo_rules: rules });
-      setCreateOpen(false); setNewRepoName("");
-      toast.success(`Repository created: ${data.repo_url}`);
-    } catch (e) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(msg ? `Create failed: ${msg}` : "Failed to create repository");
-    } finally {
-      setCreating(false);
-    }
+  const handleRepoCreated = async (data: { repo_url: string; provider: string; default_branch: string }) => {
+    setRepoUrl(data.repo_url);
+    setRepoType(data.provider);
+    setBranch(data.default_branch || "");
+    await onSave({ repo_url: data.repo_url, repo_type: data.provider, repo_branch: data.default_branch || undefined, repo_credential_id: credId, repo_rules: rules });
   };
 
   const { data: branches = [], isLoading: loadingBranches, refetch: fetchBranches } = useQuery<{ name: string }[]>({
@@ -1054,38 +1031,12 @@ function RepoTab({ project, onSave }: { project: Project; onSave: (d: Partial<Pr
           }
         </div>
 
-        {/* Create new repository (#242) */}
-        <div className="space-y-1.5">
-          <button onClick={() => setCreateOpen(o => !o)}
-            className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1">
-            <Plus className="w-3 h-3" />{createOpen ? "Cancel new repository" : "Create new repository"}
-          </button>
-          {createOpen && (
-            <div className="space-y-2 rounded-md border border-border p-2.5">
-              {!credId && <p className="text-[10px] text-yellow-500">Select a credential above first.</p>}
-              <Input value={newRepoName} onChange={e => setNewRepoName(e.target.value)}
-                placeholder="new-repo-name" className="text-xs h-8" disabled={!credId} />
-              <select value={newRepoNs} onChange={e => setNewRepoNs(e.target.value)} disabled={!credId || loadingNs}
-                className="w-full h-8 text-xs border border-border rounded-md bg-background px-2 focus:outline-none focus:ring-1 focus:ring-ring">
-                {loadingNs ? <option>Loading namespaces…</option>
-                  : namespaces.map(n => <option key={n.id || "personal"} value={n.id}>{n.name}</option>)}
-              </select>
-              <div className="flex gap-1.5">
-                {[{ v: false, label: "Public", Icon: Globe }, { v: true, label: "Private", Icon: Lock }].map(({ v, label, Icon }) => (
-                  <button key={label} onClick={() => setNewRepoPrivate(v)} disabled={!credId}
-                    className={cn("flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border flex-1 justify-center transition-colors",
-                      newRepoPrivate === v ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent")}>
-                    <Icon className="w-3 h-3" />{label}
-                  </button>
-                ))}
-              </div>
-              <Button size="sm" onClick={handleCreateRepo} disabled={creating || !credId} className="w-full">
-                {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Plus className="w-3.5 h-3.5 mr-1.5" />}
-                Create &amp; link
-              </Button>
-            </div>
-          )}
-        </div>
+        {/* Create new repository (#242) — opens a proper picker modal */}
+        <button onClick={() => credId ? setCreateOpen(true) : toast.error("Select a credential first")}
+          className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 disabled:opacity-50"
+          disabled={!credId} title={credId ? "" : "Select a credential first"}>
+          <Plus className="w-3 h-3" />Create new repository
+        </button>
 
         {/* Branch */}
         <div className="space-y-1.5">
@@ -1167,6 +1118,7 @@ function RepoTab({ project, onSave }: { project: Project; onSave: (d: Partial<Pr
       </div>
 
       <CredentialsModal open={showCredModal} onClose={() => setShowCredModal(false)} />
+      <RepoCreateDialog open={createOpen} credential={selectedCred} onClose={() => setCreateOpen(false)} onCreated={handleRepoCreated} />
     </div>
   );
 }
