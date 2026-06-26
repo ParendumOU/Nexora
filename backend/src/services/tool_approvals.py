@@ -52,6 +52,77 @@ def _args_key(args: dict) -> str:
         return str(args)
 
 
+# ── Session-scoped "approve always (similar)" (#235) ─────────────────────────
+# A user can approve a held call AND tell us not to ask again for *similar* calls
+# for the rest of the conversation. "Similar" is matched by the command CONTENT
+# (the shell command / code, not the tool name) so re-running the same command —
+# or a sub-agent in the same delegation tree running it — is auto-approved. Stored
+# as a Redis set keyed by the ROOT chat so the whole tree (every sub-conversation)
+# shares the allow-set. Best-effort: any Redis error falls back to still prompting.
+_SIMILAR_TTL = 7 * 24 * 3600  # session lifetime for the allow-set
+
+
+def _approve_similar_key(root_chat_id: str) -> str:
+    return f"chat:approve_similar:{root_chat_id}"
+
+
+def _similar_sig(tool_name: str, args: dict) -> str:
+    """Content signature for a tool call. For command/code tools it is the
+    whitespace-normalized command text (so spacing differences still match); for
+    other tools it is the normalized full args. Tool-scoped so shell_run and
+    code_python never collide."""
+    import hashlib
+    a = args or {}
+    raw = a.get("command") or a.get("cmd") or a.get("code") or a.get("script")
+    if raw is None:
+        raw = _args_key(a)
+    norm = " ".join(str(raw).split())
+    return f"{tool_name}:{hashlib.sha1(norm.encode('utf-8')).hexdigest()[:16]}"
+
+
+async def _root_chat_id(chat_id: str) -> str:
+    """Walk parent_chat_id to the topmost chat so the allow-set is shared across a
+    whole delegation tree (an approval in a sub-chat covers its siblings/parent)."""
+    from src.models.chat import Chat
+    cur, seen = chat_id, set()
+    async with AsyncSessionLocal() as db:
+        while cur and cur not in seen:
+            seen.add(cur)
+            parent = (await db.execute(
+                select(Chat.parent_chat_id).where(Chat.id == cur)
+            )).scalar_one_or_none()
+            if not parent:
+                return cur
+            cur = parent
+    return cur
+
+
+async def mark_approve_similar(chat_id: str, tool_name: str, args: dict) -> None:
+    """Remember (session-scoped) that calls similar to this one are pre-approved."""
+    from src.core.redis import get_redis
+    try:
+        root = await _root_chat_id(chat_id)
+        r = get_redis()
+        key = _approve_similar_key(root)
+        await r.sadd(key, _similar_sig(tool_name, args))
+        await r.expire(key, _SIMILAR_TTL)
+        logger.info("[approval] approve-similar armed root=%s tool=%s", root, tool_name)
+    except Exception:
+        pass
+
+
+async def is_similar_approved(chat_id: str, tool_name: str, args: dict) -> bool:
+    """True if a prior 'approve always (similar)' covers this call in this session."""
+    from src.core.redis import get_redis
+    try:
+        root = await _root_chat_id(chat_id)
+        return bool(await get_redis().sismember(
+            _approve_similar_key(root), _similar_sig(tool_name, args)
+        ))
+    except Exception:
+        return False
+
+
 async def _resolve_org(chat_id: str, agent_id: str | None) -> str | None:
     from src.models.agent import Agent
     from src.models.chat import Chat
@@ -119,9 +190,12 @@ async def record_pending_approval(
     return aid
 
 
-async def approve(approval_id: str, decided_by: str) -> dict:
+async def approve(approval_id: str, decided_by: str, remember_similar: bool = False) -> dict:
     """Approve + execute the held tool, persist the result, and resume the chat so
-    the agent continues with it. Returns {status, result} or {error}."""
+    the agent continues with it. Returns {status, result} or {error}.
+
+    When remember_similar is set, similar calls (same command content) are
+    auto-approved for the rest of this conversation tree (no more prompts)."""
     from src.services.agent_tools.tool_executor import _run_single_tool
 
     async with AsyncSessionLocal() as db:
@@ -133,6 +207,11 @@ async def approve(approval_id: str, decided_by: str) -> dict:
         chat_id, agent_id, agent_name = appr.chat_id, appr.agent_id, appr.agent_name
         tool_name, tool_args = appr.tool_name, dict(appr.tool_args or {})
         org_id = appr.org_id
+
+    # Arm the session-scoped allow-set BEFORE running, so a near-simultaneous similar
+    # call already in flight is covered too.
+    if remember_similar:
+        await mark_approve_similar(chat_id, tool_name, tool_args)
 
     # Execute the tool for real (outside the gate — it's now authorized).
     try:

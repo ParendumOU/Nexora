@@ -47,12 +47,13 @@ async def _authz(approval_id: str, org_id: str, db: AsyncSession) -> ToolApprova
 @router.post("/{approval_id}/approve")
 async def approve_approval(
     approval_id: str,
+    remember_similar: bool = False,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     org_id = await get_active_org_id(current_user, db)
     await _authz(approval_id, org_id, db)
-    res = await svc.approve(approval_id, decided_by=current_user.id)
+    res = await svc.approve(approval_id, decided_by=current_user.id, remember_similar=remember_similar)
     if "error" in res:
         raise HTTPException(status_code=409, detail=res["error"])
     return res

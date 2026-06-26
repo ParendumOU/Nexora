@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.10.0
+
+- Risky-command approvals gain an "Always allow similar" action: approving a held command with it stops re-prompting for commands with the same content for the rest of the conversation (sub-agents included), while different commands still ask.
+- New optional shared agent workspace: when enabled, an agent and all of its sub-agents work inside one persistent directory per project (or per conversation when there is no project), so a team can build a real git-backed codebase together, and the directory survives restarts.
+
 ## 1.9.0
 
 - Provider-native function calling, system-prompt caching, parallel read-only tools, and event-driven sub-agent delegation are now on by default after production validation; each can still be turned off with its setting.

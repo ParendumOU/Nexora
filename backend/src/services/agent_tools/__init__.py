@@ -566,8 +566,13 @@ async def _execute_agent_tools(
             # approval, and return a blocking result so the agent stops. A human
             # approves via the approvals API → the tool then runs + the chat resumes.
             # Skip if this exact pending call was already recorded (avoid dup on resume).
-            # Per-chat YOLO (user opted out of the prompt) bypasses the gate.
-            if tool_requires_approval(name, _gs) and not await _is_yolo(chat_id):
+            # Bypass the gate when: per-chat YOLO is on (user opted out of the prompt),
+            # or a prior "approve always (similar)" in this session already cleared a
+            # call with the same command content.
+            from src.services.tool_approvals import is_similar_approved as _is_similar_ok
+            if (tool_requires_approval(name, _gs)
+                    and not await _is_yolo(chat_id)
+                    and not await _is_similar_ok(chat_id, name, args)):
                 from src.services.tool_approvals import record_pending_approval
                 _appr = await record_pending_approval(
                     chat_id=chat_id, message_id=message_id, agent_id=agent_id,

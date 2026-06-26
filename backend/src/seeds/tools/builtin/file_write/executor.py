@@ -15,6 +15,14 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict:
     if content is None:
         return {"error": "content is required"}
 
+    # Shared workspace (#240): a relative path is written under the delegation tree's
+    # workspace; no-op when the feature is off.
+    try:
+        from src.services.workspace import resolve_path
+        path_str = await resolve_path(chat_id, path_str)
+    except Exception:
+        pass
+
     encoding = args.get("encoding") or "utf-8"
     create_dirs = args.get("create_dirs", True)
 

@@ -702,7 +702,10 @@ export const proposalsApi = {
 // ─── Tool approvals (human-in-the-loop, #235) ───────────────────
 export const approvalsApi = {
   list: (status = "pending") => api.get("/approvals", { params: { status } }),
-  approve: (id: string) => api.post(`/approvals/${id}/approve`),
+  // rememberSimilar: also stop prompting for similar (same command content) calls
+  // for the rest of this conversation tree (#235).
+  approve: (id: string, rememberSimilar = false) =>
+    api.post(`/approvals/${id}/approve`, null, rememberSimilar ? { params: { remember_similar: true } } : undefined),
   deny: (id: string) => api.post(`/approvals/${id}/deny`),
 };
 

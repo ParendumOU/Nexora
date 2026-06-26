@@ -8,6 +8,15 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict | None
     if not command:
         return {"error": "Missing required field: command"}
 
+    # Shared workspace (#240): run inside the delegation tree's persistent directory so
+    # the whole team shares one cwd / git repo. None (feature off or no workspace) keeps
+    # the previous behavior (container-default cwd).
+    try:
+        from src.services.workspace import resolve_workspace_dir
+        cwd = await resolve_workspace_dir(chat_id)
+    except Exception:
+        cwd = None
+
     await _broadcast(chat_id, {
         "type": "activity_status", "status": "running",
         "tool": "shell_run", "label": f"$ {command[:80]}",
@@ -23,6 +32,7 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict | None
             "bash", "-c", command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
         out = stdout.decode(errors="replace").strip()

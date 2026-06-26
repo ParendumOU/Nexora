@@ -334,6 +334,18 @@ async def get_platform_context(
             _seen_groups.add(_group)
         tool_lines.extend(_prompt_text.splitlines())
 
+    # Shared workspace (#240): when on, surface the persistent shared working dir so
+    # the agent (and its sub-agents) use relative paths there and follow git discipline.
+    _ws_block: list[str] = []
+    if chat_id:
+        try:
+            from src.services.workspace import resolve_workspace_dir as _resolve_ws
+            _wsd = await _resolve_ws(chat_id)
+            if _wsd:
+                _ws_block = render_prompt("shared_workspace", workspace_path=_wsd).splitlines()
+        except Exception:
+            _ws_block = []
+
     # ── LEAN MODE (sub-agents) ──────────────────────────────────────────────
     # Sub-agents receive all necessary task context from the parent in the task
     # description. They only need their tool docs + minimal project connection
@@ -346,6 +358,9 @@ async def get_platform_context(
         lean.append("")
         lean.append(f"chat_id for this session: `{chat_id or '(not set)'}`")
         lean.append("")
+        if _ws_block:
+            lean.extend(_ws_block)
+            lean.append("")
         lean.extend(get_prompt("platform_tools_footer").splitlines())
         lean.append("")
 
@@ -411,6 +426,9 @@ async def get_platform_context(
     lines.append("")
     lines.append(f"chat_id for this session: `{chat_id or '(not set)'}`")
     lines.append("")
+    if _ws_block:
+        lines.extend(_ws_block)
+        lines.append("")
     lines.extend(get_prompt("platform_tools_footer").splitlines())
     lines.append("")
 

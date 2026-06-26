@@ -82,6 +82,16 @@ class Settings(BaseSettings):
     workspace_base: str = "/workspaces"
     sandbox_image: str = "python:3.12-slim"
 
+    # Shared agent workspace (#240). When on, the in-container filesystem/shell tools
+    # (shell_run, file_read/write/list) operate inside ONE persistent directory per
+    # project (proj_<id>) — or per root chat (chat_<root>) when there is no project —
+    # under workspace_base. An agent and all its sub-agents in a delegation tree share
+    # it, and it survives restarts (the /workspaces docker volume), so a team can build
+    # a real git-backed codebase together. Relative tool paths resolve under it;
+    # absolute paths still work. The CLI local-exec path is unaffected (it keeps the
+    # client's cwd). Default off → tools keep their prior cwd (container root).
+    shared_workspace_enabled: bool = False
+
     # Proactive autonomy tick (GitLab #234, Autonomy epic #238). A periodic sweep that
     # advances active goals (picks the next pending milestone, recomputes progress).
     # OFF by default. When only the tick is enabled it maintains goal state + plans;

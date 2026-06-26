@@ -7,6 +7,14 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict:
     if not path_str:
         return {"error": "path is required"}
 
+    # Shared workspace (#240): resolve a relative path under the delegation tree's
+    # workspace; no-op (returns the path unchanged) when the feature is off.
+    try:
+        from src.services.workspace import resolve_path
+        path_str = await resolve_path(chat_id, path_str)
+    except Exception:
+        pass
+
     try:
         p = Path(path_str).resolve()
     except Exception as exc:

@@ -19,7 +19,7 @@ import { ChatFilesPanel, ChatFile } from "@/components/chat/chat-files-panel";
 import { WebhookSettingsPanel } from "@/components/chat/webhook-settings-panel";
 import { ExecutionGraphPanel } from "@/components/chat/execution-graph-panel";
 import { getWsUrl } from "@/lib/utils";
-import { Loader2, ListTodo, Network, Terminal, FolderKanban, FolderCode, Zap, ChevronRight, ChevronDown, ChevronLeft, MessageSquare, CheckCircle, XCircle, Clock, X, Info, NotebookPen, Layers, ClipboardList, Paperclip, Download, Webhook, GitBranch, ShieldCheck } from "lucide-react";
+import { Loader2, ListTodo, Network, Terminal, FolderKanban, FolderCode, Zap, ChevronRight, ChevronDown, ChevronLeft, MessageSquare, CheckCircle, XCircle, Clock, X, Info, NotebookPen, Layers, ClipboardList, Paperclip, Download, Webhook, GitBranch, ShieldCheck, CheckCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 
@@ -1040,11 +1040,11 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     }
   }, [chatId]);
 
-  const decideApproval = useCallback(async (id: string, ok: boolean) => {
+  const decideApproval = useCallback(async (id: string, ok: boolean, rememberSimilar = false) => {
     // optimistic
     setPendingApprovals((prev) => prev.map((a) => (a.id === id ? { ...a, status: ok ? "approved" : "denied" } : a)));
     try {
-      await (ok ? approvalsApi.approve(id) : approvalsApi.deny(id));
+      await (ok ? approvalsApi.approve(id, rememberSimilar) : approvalsApi.deny(id));
     } catch {
       toast.error("Approval action failed");
       setPendingApprovals((prev) => prev.map((a) => (a.id === id ? { ...a, status: "pending" } : a)));
@@ -1100,10 +1100,15 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
               </div>
             )}
             {a.status === "pending" && (
-              <div className="flex gap-2 pt-0.5">
+              <div className="flex flex-wrap gap-2 pt-0.5">
                 <button onClick={() => decideApproval(a.id, true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors">
                   <CheckCircle className="w-3.5 h-3.5" /> Approve & Run
+                </button>
+                <button onClick={() => decideApproval(a.id, true, true)}
+                  title="Approve this and stop asking for similar commands for the rest of this conversation"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors">
+                  <CheckCheck className="w-3.5 h-3.5" /> Always allow similar
                 </button>
                 <button onClick={() => decideApproval(a.id, false)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">

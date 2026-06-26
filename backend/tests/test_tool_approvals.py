@@ -84,3 +84,61 @@ async def test_record_pending_then_deny(svc_db, monkeypatch):
     async with svc_db() as db:
         a = (await db.execute(select(ToolApproval).where(ToolApproval.id == aid))).scalar_one()
         assert a.status == "denied" and a.decided_by == "u1"
+
+
+# ── approve-always (similar, by command content) (#235) ────────────────────────
+
+def test_similar_sig_is_content_based_and_tool_scoped():
+    from src.services.tool_approvals import _similar_sig
+    # whitespace differences in the command collapse to the same signature
+    assert _similar_sig("shell_run", {"command": "ls -la"}) == _similar_sig("shell_run", {"command": "ls   -la "})
+    # different command → different signature
+    assert _similar_sig("shell_run", {"command": "ls"}) != _similar_sig("shell_run", {"command": "rm -rf /"})
+    # same content, different tool → different signature (tool-scoped)
+    assert _similar_sig("shell_run", {"command": "x"}) != _similar_sig("code_node", {"command": "x"})
+    # cmd/code aliases are read; falls back to full args when neither present
+    assert _similar_sig("code_python", {"code": "print(1)"}).startswith("code_python:")
+    assert _similar_sig("slack", {"channel": "ops", "text": "hi"}).startswith("slack:")
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.sets = {}
+    async def sadd(self, key, *vals):
+        self.sets.setdefault(key, set()).update(vals)
+    async def sismember(self, key, val):
+        return val in self.sets.get(key, set())
+    async def expire(self, key, ttl):
+        return True
+
+
+@pytest.mark.asyncio
+async def test_approve_similar_skips_future_prompts(monkeypatch):
+    from src.services import tool_approvals as svc
+    fake = _FakeRedis()
+    monkeypatch.setattr("src.core.redis.get_redis", lambda: fake)
+    # keep it hermetic: don't touch the DB for the root-chat walk
+    async def _root(cid): return cid
+    monkeypatch.setattr(svc, "_root_chat_id", _root)
+
+    chat = "chat-1"
+    # not approved yet
+    assert await svc.is_similar_approved(chat, "shell_run", {"command": "pytest -q"}) is False
+    # user clicks "always allow similar"
+    await svc.mark_approve_similar(chat, "shell_run", {"command": "pytest -q"})
+    # the same command (even with different spacing) is now pre-approved
+    assert await svc.is_similar_approved(chat, "shell_run", {"command": "pytest  -q "}) is True
+    # a DIFFERENT command still needs approval
+    assert await svc.is_similar_approved(chat, "shell_run", {"command": "rm -rf build"}) is False
+    # and a different tool with the same text is not covered
+    assert await svc.is_similar_approved(chat, "code_node", {"command": "pytest -q"}) is False
+
+
+@pytest.mark.asyncio
+async def test_is_similar_approved_fails_open_without_redis(monkeypatch):
+    from src.services import tool_approvals as svc
+    def _boom():
+        raise RuntimeError("no redis")
+    monkeypatch.setattr("src.core.redis.get_redis", _boom)
+    # any Redis error → treat as not-approved (still prompt) rather than crash
+    assert await svc.is_similar_approved("c", "shell_run", {"command": "ls"}) is False
