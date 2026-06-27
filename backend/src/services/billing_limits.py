@@ -95,3 +95,46 @@ async def agent_quota_message(org_id: str | None) -> str | None:
     if res and not res[0]:
         return _limit_detail("Agent", res)
     return None
+
+
+async def _feature_check(feature: str, org_id: str | None) -> bool | None:
+    """Ask the billing-worker whether `org_id`'s plan includes `feature`.
+    Returns True/False, or None when enforcement is not configured (no
+    BILLING_WORKER_URL → OSS, everything available) or on transport error
+    (fail-open, consistent with the quota checks)."""
+    if not org_id:
+        return None
+    from src.core.config import get_settings
+    settings = get_settings()
+    if not settings.billing_worker_url:
+        return None
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.post(
+                f"{settings.billing_worker_url}/api/gate/internal/feature-check",
+                json={"org_id": org_id, "feature": feature},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Internal-Secret": settings.secret_key,
+                },
+            )
+        if resp.status_code != 200:
+            logger.warning("[limits] feature-check(%s) HTTP %s — allowing", feature, resp.status_code)
+            return None
+        return bool(resp.json().get("allowed", True))
+    except Exception as exc:  # noqa: BLE001 — fail open on transport errors
+        logger.warning("[limits] feature-check(%s) failed (%s) — allowing", feature, exc)
+        return None
+
+
+async def enforce_feature(feature: str, org_id: str | None, label: str | None = None) -> None:
+    """Raise HTTPException(403) if the org's plan does not include `feature`.
+    No-op in OSS (no BILLING_WORKER_URL) or on transport error."""
+    allowed = await _feature_check(feature, org_id)
+    if allowed is False:
+        name = label or feature.replace("_", " ").title()
+        raise HTTPException(
+            status_code=403,
+            detail=f"{name} is not included in your plan. Upgrade your license to enable it.",
+        )

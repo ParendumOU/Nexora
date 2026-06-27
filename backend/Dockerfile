@@ -41,8 +41,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex \
-    && rm -rf /root/.npm
+    && corepack enable && corepack prepare pnpm@latest --activate \
+    && pnpm add -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex \
+    && rm -rf /root/.npm /root/.local/share/pnpm/store
 
 ENV PYTHONPATH=/app
 

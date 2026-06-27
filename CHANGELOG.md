@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.21.0
+
+- Hardened the build and CI pipeline against the npm supply-chain compromise. The backend image, the GitLab CI frontend check, and the dev Docker setup now install every Node dependency with pnpm through corepack instead of npm, removing all use of the affected npm client. No runtime behavior changes.
+
 ## 1.20.0
 
 - Accounts now show a live "Resets in 2h 16m" countdown when an account is rate-limited, so you can see at a glance whether you can work right now or when a limited account comes back, instead of guessing.

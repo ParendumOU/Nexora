@@ -643,6 +643,11 @@ async def import_marketplace_item(
 
     org_id = await get_active_org_id(current_user, db)
 
+    # Plan gate (NexoraCloud): marketplace access is a paid-tier feature. No-op in
+    # OSS (no BILLING_WORKER_URL) — 403 on Free/Starter in a licensed deployment.
+    from src.services.billing_limits import enforce_feature
+    await enforce_feature("marketplace", org_id, "Marketplace access")
+
     # Populated by the agent branch when it auto-resolves sub-dependencies.
     dep_installed: list[dict] = []
     dep_skipped: list[dict] = []
