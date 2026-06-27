@@ -10,6 +10,10 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.21.2
+
+- Set PNPM_HOME and added it to PATH in the backend image so the global install of the Claude, Gemini, and Codex CLIs works. Unlike npm, pnpm needs a global bin directory on PATH (ERR_PNPM_NO_GLOBAL_BIN_DIR). No runtime behavior change.
+
 ## 1.21.1
 
 - Pinned pnpm to version 9 in the backend image and CI. Corepack was resolving pnpm 10, which errors on ignored dependency build scripts and no longer reads the build-script allowlist from package.json, breaking the install. No runtime behavior change.

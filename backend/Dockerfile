@@ -29,6 +29,9 @@ CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 
 # ─── Runtime stage ─────────────────────────────────────────────
 FROM base AS runtime
+# pnpm needs a global bin dir on PATH for `pnpm add -g` (unlike npm).
+ENV PNPM_HOME=/usr/local/share/pnpm
+ENV PATH=$PNPM_HOME:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 curl git ca-certificates gnupg \
     && install -m 0755 -d /etc/apt/keyrings \
@@ -42,8 +45,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y nodejs \
     && apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* \
     && corepack enable && corepack prepare pnpm@9 --activate \
+    && mkdir -p "$PNPM_HOME" \
     && pnpm add -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex \
-    && rm -rf /root/.npm /root/.local/share/pnpm/store
+    && rm -rf /root/.npm
 
 ENV PYTHONPATH=/app
 
