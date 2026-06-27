@@ -13,5 +13,23 @@
     {"text": "Login at opencode.ai", "url": "https://opencode.ai"},
     {"text": "Go to your account dashboard"},
     {"text": "Copy your API key (starts with sk-oc-) — same key works for Zen and Go"}
+  ],
+  "rate_limit": [
+    {
+      "name": "5-hour usage limit",
+      "match": "GoUsageLimitError",
+      "reset_regex": "(\\d+)\\s*hr\\s*(\\d+)\\s*min",
+      "reset_units": ["h", "m"],
+      "default_seconds": 18000,
+      "buffer_seconds": 60
+    },
+    {
+      "name": "daily free-tier limit",
+      "match": "FreeUsageLimitError",
+      "reset_regex": "(\\d+)\\s*day",
+      "reset_units": ["d"],
+      "default_seconds": 86400,
+      "buffer_seconds": 60
+    }
   ]
 }

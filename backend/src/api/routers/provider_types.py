@@ -35,6 +35,21 @@ class SetupStep(BaseModel):
     url: str | None = None
 
 
+class RateLimitRule(BaseModel):
+    """One declarative rate-limit detection rule (see providers/rate_limits.py).
+
+    The engine tests ``match`` (case-insensitive substring) against the provider's
+    error type + message; on a hit it derives the cooldown from ``reset_regex`` +
+    ``reset_units`` (or ``default_seconds``) plus ``buffer_seconds``.
+    """
+    name: str = ""
+    match: str
+    reset_regex: str | None = None
+    reset_units: list[str] = []
+    default_seconds: int | None = None
+    buffer_seconds: int = 0
+
+
 class ProviderTypeCreate(BaseModel):
     key: str
     name: str
@@ -52,6 +67,7 @@ class ProviderTypeCreate(BaseModel):
     credential_format: str = "raw_json"
     website: str | None = None
     setup_steps: list[SetupStep] = []
+    rate_limit: list[RateLimitRule] = []
 
 
 class FetchModelsRequest(BaseModel):
@@ -75,6 +91,7 @@ class ProviderTypeUpdate(BaseModel):
     credential_format: str | None = None
     website: str | None = None
     setup_steps: list[SetupStep] | None = None
+    rate_limit: list[RateLimitRule] | None = None
 
 
 class ProviderTypeResponse(BaseModel):
@@ -94,15 +111,26 @@ class ProviderTypeResponse(BaseModel):
     credential_format: str = "raw_json"
     website: str | None
     setup_steps: list[SetupStep] = []
+    rate_limit: list[RateLimitRule] = []
     source: str  # "builtin" | "custom"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _rules_from(p: dict) -> list[RateLimitRule]:
+    raw = p.get("rate_limit", [])
+    out: list[RateLimitRule] = []
+    for r in raw if isinstance(raw, list) else []:
+        if isinstance(r, dict) and r.get("match"):
+            out.append(RateLimitRule(**{k: v for k, v in r.items() if k in RateLimitRule.model_fields}))
+    return out
+
+
 def _to_response(p: dict) -> ProviderTypeResponse:
     raw_steps = p.get("setup_steps", [])
     steps = [SetupStep(text=s.get("text", ""), url=s.get("url")) for s in raw_steps if isinstance(s, dict)]
     return ProviderTypeResponse(
+        rate_limit=_rules_from(p),
         key=p.get("key", ""),
         name=p.get("name", ""),
         description=p.get("description", ""),
@@ -285,12 +313,15 @@ async def create_provider_type(
         data["credential_paths"] = req.credential_paths
     if req.credential_format and req.credential_format != "raw_json":
         data["credential_format"] = req.credential_format
+    if req.rate_limit:
+        data["rate_limit"] = [r.model_dump(exclude_none=True) for r in req.rate_limit]
 
     (target_dir / "provider.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
     reload_seeds()
 
     return ProviderTypeResponse(
-        **{k: v for k, v in data.items() if k in ProviderTypeResponse.model_fields and k != "setup_steps"},
+        **{k: v for k, v in data.items()
+           if k in ProviderTypeResponse.model_fields and k not in ("setup_steps", "rate_limit")},
         key=key,
         category=req.category,
         source="custom",
@@ -299,6 +330,7 @@ async def create_provider_type(
         credential_paths=req.credential_paths,
         credential_format=req.credential_format or "raw_json",
         setup_steps=req.setup_steps,
+        rate_limit=req.rate_limit,
     )
 
 
@@ -350,6 +382,8 @@ async def update_provider_type(
         data["website"] = req.website or None
     if req.setup_steps is not None:
         data["setup_steps"] = [s.model_dump(exclude_none=True) for s in req.setup_steps]
+    if req.rate_limit is not None:
+        data["rate_limit"] = [r.model_dump(exclude_none=True) for r in req.rate_limit]
 
     manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
     reload_seeds()
@@ -357,6 +391,7 @@ async def update_provider_type(
     raw_steps = data.get("setup_steps", [])
     steps = [SetupStep(text=s.get("text", ""), url=s.get("url")) for s in raw_steps if isinstance(s, dict)]
     return ProviderTypeResponse(
+        rate_limit=_rules_from(data),
         key=key,
         name=data.get("name", ""),
         description=data.get("description", ""),

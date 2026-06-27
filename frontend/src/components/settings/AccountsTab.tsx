@@ -1,10 +1,44 @@
 "use client";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  Plus, Loader2, Zap, CheckCircle2, AlertCircle, Key, Pencil, Trash2, RotateCcw,
+  Plus, Loader2, Zap, CheckCircle2, AlertCircle, Key, Pencil, Trash2, RotateCcw, Clock,
 } from "lucide-react";
 import { ProviderItem, providerDef } from "./provider-definitions";
+
+function fmtRemaining(seconds: number): string {
+  seconds = Math.max(0, Math.floor(seconds));
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${seconds}s`;
+}
+
+// Live "Resets in 2h 16m" badge for a rate-limited account — ticks down once a second
+// off cooling_until, so the user can see at a glance whether they can work now or when.
+function CoolingBadge({ p }: { p: ProviderItem }) {
+  const target = p.cooling_until ? new Date(p.cooling_until).getTime() : 0;
+  const compute = () => (target ? Math.max(0, Math.round((target - Date.now()) / 1000)) : 0);
+  const [remaining, setRemaining] = useState<number>(
+    p.cooling_remaining_seconds ?? compute()
+  );
+  useEffect(() => {
+    if (!target) return;
+    const id = setInterval(() => setRemaining(compute()), 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.cooling_until]);
+  if (!target || remaining <= 0) return null;
+  return (
+    <span
+      title={`Rate-limited${p.last_error ? `: ${p.last_error}` : ""}. Resets ${new Date(target).toLocaleTimeString()}`}
+      className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded px-1.5 py-0.5 shrink-0 cursor-help"
+    >
+      <Clock className="w-2.5 h-2.5" />
+      Resets in {fmtRemaining(remaining)}
+    </span>
+  );
+}
 
 interface AccountsTabProps {
   loadingProviders: boolean;
@@ -88,18 +122,24 @@ function AccountsTab({
                       "flex items-center gap-3 px-3 py-2.5 bg-card border border-border rounded-lg transition-colors",
                       p.is_active ? "hover:border-border/60" : "opacity-50"
                     )}>
-                      {p.is_active
-                        ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                        : <AlertCircle className="w-3.5 h-3.5 text-yellow-400 shrink-0" />}
+                      {(() => {
+                        const cooling = !!p.cooling_until && (p.cooling_remaining_seconds ?? 0) > 0;
+                        if (!p.is_active) return <AlertCircle className="w-3.5 h-3.5 text-yellow-400 shrink-0" />;
+                        if (cooling) return <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />;
+                        return <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />;
+                      })()}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-medium truncate">{p.name}</p>
                           {!p.is_active && (
                             <span className="text-[10px] font-medium text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 rounded px-1.5 py-0.5 shrink-0">Inactive</span>
                           )}
-                          {p.last_error && (
+                          <CoolingBadge p={p} />
+                          {/* Only show a hard "Auth error" when the account isn't merely cooling
+                              (a rate-limit reset is shown as the amber Resets-in badge instead). */}
+                          {p.last_error && !(p.cooling_until && (p.cooling_remaining_seconds ?? 0) > 0) && (
                             <span
-                              title={`Auth error: ${p.last_error}`}
+                              title={`Error: ${p.last_error}`}
                               className="text-[10px] font-medium text-red-400 bg-red-400/10 border border-red-400/20 rounded px-1.5 py-0.5 shrink-0 cursor-help"
                             >
                               Auth error

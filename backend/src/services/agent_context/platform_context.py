@@ -661,6 +661,18 @@ async def get_platform_context(
                 lines.append(f"  {mp.description}")
         lines.append("")
 
+    # Provider availability — only surfaced to orchestrators (they route delegation) and only
+    # when something is cooling, so an agent can avoid an exhausted provider and pick a live one.
+    if not suppress_delegation_protocol:
+        try:
+            from src.services.agent_context.providers import provider_availability_summary
+            _avail = await provider_availability_summary(org_id)
+            if _avail:
+                lines.extend(_avail.splitlines())
+                lines.append("")
+        except Exception:
+            pass
+
     # Inject user profile when keyed facts, notes, or contact info are available
     _facts = web_user_profile.get("facts", [])
     _freeform = next((v for k, v in _facts if k == "freeform"), "").strip()

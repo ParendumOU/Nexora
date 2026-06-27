@@ -549,4 +549,7 @@ export interface ProviderItem {
   last_error?: string | null;
   last_error_at?: string | null;
   last_used_at?: string | null;
+  state?: string;
+  cooling_until?: string | null;
+  cooling_remaining_seconds?: number;
 }

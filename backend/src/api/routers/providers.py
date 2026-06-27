@@ -118,6 +118,18 @@ async def _prime_models_cache(provider: Provider) -> None:
 
 # ── Response helpers ──────────────────────────────────────────────────────────
 
+def _cooling_remaining(p: Provider) -> int:
+    """Seconds until this account's durable cooldown clears (0 if not cooling)."""
+    cu = p.cooling_until
+    if not cu:
+        return 0
+    from datetime import datetime, timezone
+    if cu.tzinfo is None:
+        cu = cu.replace(tzinfo=timezone.utc)
+    delta = (cu - datetime.now(timezone.utc)).total_seconds()
+    return int(delta) if delta > 0 else 0
+
+
 def _to_response(p: Provider, available_models: list[str]) -> "ProviderResponse":
     return ProviderResponse(
         id=p.id, name=p.name, provider_type=p.provider_type,
@@ -130,6 +142,7 @@ def _to_response(p: Provider, available_models: list[str]) -> "ProviderResponse"
         last_used_at=p.last_used_at.isoformat() if p.last_used_at else None,
         state=p.state,
         cooling_until=p.cooling_until.isoformat() if p.cooling_until else None,
+        cooling_remaining_seconds=_cooling_remaining(p),
         consecutive_failures=p.consecutive_failures,
     )
 
@@ -166,6 +179,7 @@ class ProviderResponse(BaseModel):
     last_used_at: str | None = None
     state: str = "healthy"
     cooling_until: str | None = None
+    cooling_remaining_seconds: int = 0
     consecutive_failures: int = 0
 
     model_config = {"from_attributes": True}
@@ -250,6 +264,26 @@ async def list_providers(
     providers = result.scalars().all()
     models_list = await asyncio.gather(*[_get_provider_models(p) for p in providers])
     return [_to_response(p, m) for p, m in zip(providers, models_list)]
+
+
+@router.get("/availability")
+async def get_provider_availability(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-account availability snapshot — which accounts are usable now and, for any
+    that are cooling, when they come back. Powers the 'can we work / when' indicators
+    in the UI and the availability hint agents see when delegating."""
+    org_id = await get_active_org_id(current_user, db)
+    from src.services.agent_context.providers import provider_availability
+    snapshot = await provider_availability(org_id, db=db)
+    usable = sum(1 for s in snapshot if s["available"])
+    return {
+        "accounts": snapshot,
+        "usable_count": usable,
+        "cooling_count": len(snapshot) - usable,
+        "any_usable": usable > 0,
+    }
 
 
 @router.post("", response_model=ProviderResponse, status_code=201)

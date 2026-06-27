@@ -811,6 +811,15 @@ export const providersApi = {
 
 
 // ─── Provider Types (seed definitions) ──────────────────────────
+export interface RateLimitRule {
+  name?: string;
+  match: string;
+  reset_regex?: string | null;
+  reset_units?: string[];
+  default_seconds?: number | null;
+  buffer_seconds?: number;
+}
+
 export interface ProviderTypeDef {
   key: string;
   name: string;
@@ -827,6 +836,7 @@ export interface ProviderTypeDef {
   credential_paths?: string[];
   credential_format?: string;
   website: string | null;
+  rate_limit?: RateLimitRule[];
   source: "builtin" | "custom";
 }
 

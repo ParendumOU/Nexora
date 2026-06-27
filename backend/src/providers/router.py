@@ -460,39 +460,14 @@ async def stream_openai_compat(provider: Provider, messages: list[dict], **kw) -
             err_code = err_body.get("error", {}).get("code", "") or err_body.get("error", {}).get("type", "")
         if err_code == "insufficient_quota":
             raise ProviderError(f"{ptype}: quota exceeded for this model — pick a different model")
-        # Detect provider-specific long-duration usage limits (e.g. OpenCode 5-hour cap)
-        # and extract the reset time so the router sets an appropriate cooldown.
+        # Detect provider-specific usage/burst limits via the modular rate-limit engine
+        # (declarative rules per provider type — see providers/rate_limits.py). This covers
+        # OpenCode's long "5-hour usage limit" caps AND OpenAI's sub-second TPM bursts, and
+        # is user-tunable per provider type without touching code.
         err_type = err_body.get("error", {}).get("type", "")
-        cooldown_hint: int | None = None
-        if err_type in ("GoUsageLimitError", "FreeUsageLimitError"):
-            import re as _re
-            msg = err_body.get("error", {}).get("message", "")
-            # Try "Xhr Ymin" format
-            m = _re.search(r"(\d+)hr\s*(\d+)min", msg)
-            if m:
-                cooldown_hint = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + 60
-            else:
-                # Try "Resets in N days" or "N day(s)"
-                md = _re.search(r"(\d+)\s*day", msg, _re.IGNORECASE)
-                if md:
-                    cooldown_hint = int(md.group(1)) * 86400
-                else:
-                    # FreeUsageLimitError: daily free tier — default 24h
-                    # GoUsageLimitError without time info: default 5h
-                    cooldown_hint = 86400 if err_type == "FreeUsageLimitError" else 5 * 3600
-        # OpenAI per-minute TPM/RPM bursts put the reset in the MESSAGE body
-        # ("Please try again in 68ms" / "1.2s" / "2m"), not a Retry-After header. Parse
-        # it so the cooldown is the real (often sub-second) value instead of the long
-        # default — the router then briefly waits and retries instead of failing the task.
-        if cooldown_hint is None:
-            import re as _re2
-            _msg = err_body.get("error", {}).get("message", "") or (e.message if hasattr(e, "message") else str(e))
-            _m = _re2.search(r"try again in\s*([\d.]+)\s*(ms|s|m)\b", _msg, _re2.IGNORECASE)
-            if _m:
-                _val = float(_m.group(1)); _unit = _m.group(2).lower()
-                _secs = _val / 1000 if _unit == "ms" else (_val * 60 if _unit == "m" else _val)
-                # round sub-second up to a small floor so the retry actually clears the window
-                cooldown_hint = max(_secs, 0.5)
+        _err_msg = err_body.get("error", {}).get("message", "") or (e.message if hasattr(e, "message") else str(e))
+        from src.providers.rate_limits import detect_cooldown as _detect_cd
+        cooldown_hint = _detect_cd(ptype, error_type=err_type, message=_err_msg)
         # A Retry-After / ratelimit-reset header (when present) is the most accurate
         # signal; fall back to the parsed provider-specific usage-limit hint.
         raise RateLimitError(

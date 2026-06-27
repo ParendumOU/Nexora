@@ -135,6 +135,89 @@ async def get_effective_chain_id(chat: Chat | None) -> str | None:
         return project.provider_chain_id
 
 
+def _fmt_remaining(seconds: int) -> str:
+    """Human '2h 16m' / '45s' for a cooldown remaining-time."""
+    seconds = max(0, int(seconds))
+    if seconds >= 3600:
+        return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+    if seconds >= 60:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+async def provider_availability(org_id: str | None, db=None) -> list[dict]:
+    """Per-account availability snapshot for the org's active providers.
+
+    Returns ``[{name, provider_type, model, available, cooling, remaining_seconds,
+    remaining_human, reason}]`` — the durable state every caller (UI, agents,
+    resolver) reads to know "can we work now, and if not, when". An account is
+    available when active and not durably cooling. Pass ``db`` to reuse an open
+    session (e.g. a request's injected session); omit it to open a fresh one.
+    """
+    from datetime import datetime, timezone
+    out: list[dict] = []
+    if not org_id:
+        return out
+    _q = (
+        select(Provider).where(Provider.org_id == org_id, Provider.is_active == True)  # noqa: E712
+        .order_by(Provider.provider_type, Provider.name)
+    )
+    if db is not None:
+        rows = (await db.execute(_q)).scalars().all()
+    else:
+        async with AsyncSessionLocal() as _db:
+            rows = (await _db.execute(_q)).scalars().all()
+    now = datetime.now(timezone.utc)
+    for p in rows:
+        cu = p.cooling_until
+        remaining = 0
+        if cu:
+            if cu.tzinfo is None:
+                cu = cu.replace(tzinfo=timezone.utc)
+            remaining = max(0, int((cu - now).total_seconds()))
+        cooling = remaining > 0
+        out.append({
+            "name": p.name,
+            "provider_type": p.provider_type,
+            "model": p.model_name,
+            "available": not cooling,
+            "cooling": cooling,
+            "remaining_seconds": remaining,
+            "remaining_human": _fmt_remaining(remaining) if cooling else "",
+            "reason": (p.last_error or "")[:120] if cooling else "",
+        })
+    return out
+
+
+async def provider_availability_summary(org_id: str | None, db=None) -> str:
+    """Compact one-block summary of provider availability for agent context.
+
+    Empty string when nothing is cooling (no need to spend tokens telling an agent
+    everything is fine). When something IS cooling, agents see which accounts are
+    usable now and when the limited ones come back, so they route delegation to a
+    live provider instead of stalling on an exhausted one.
+    """
+    snap = await provider_availability(org_id, db=db)
+    if not snap:
+        return ""
+    cooling = [s for s in snap if s["cooling"]]
+    if not cooling:
+        return ""  # all good — stay quiet
+    avail = [s for s in snap if s["available"]]
+    lines = ["## Provider availability", ""]
+    if avail:
+        lines.append("Usable now: " + ", ".join(
+            f"{s['name']} ({s['provider_type']})" for s in avail
+        ))
+    else:
+        lines.append("No provider is usable right now — every account is cooling down.")
+    for s in cooling:
+        lines.append(f"- {s['name']} ({s['provider_type']}) cooling, back in ~{s['remaining_human']}")
+    lines.append("")
+    lines.append("Prefer a usable provider when delegating; avoid the cooling ones until they reset.")
+    return "\n".join(lines)
+
+
 async def get_direct_provider(chat: Chat | None) -> list[tuple[Provider, str | None]]:
     """Return a single-provider list if the chat has a direct_provider_id set."""
     if not chat:

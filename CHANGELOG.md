@@ -10,6 +10,15 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.20.0
+
+- Accounts now show a live "Resets in 2h 16m" countdown when an account is rate-limited, so you can see at a glance whether you can work right now or when a limited account comes back, instead of guessing.
+- Added smart rate-limit detection that reads each provider's own limit message. OpenCode Go's "5-hour usage limit, resets in 2hr 16min" is now understood exactly, so the account cools down for the real remaining time and is retried the moment it resets, instead of a flat guess.
+- Rate-limit detection is modular and data-driven, a few lines of rules per provider, so new providers are easy to teach and existing ones easy to tune.
+- Provider Types gains a Rate-limit detection editor: define how a provider signals a limit (a match phrase, a regex to pull the reset time, units, and a fallback duration) per provider type, right from Settings.
+- Orchestrator agents now see which accounts are usable now and which are cooling (and for how long) when they delegate, so they route work to a live provider instead of stalling on an exhausted one. The hint only appears when something is actually cooling.
+- New availability endpoint summarizing, across the workspace, how many accounts are usable now versus cooling and when each returns.
+
 ## 1.19.8
 
 - Fixed a chat replying "No available providers" when its only AI account had been temporarily flagged as cooling down (for example after a burst of rate-limit or connection errors during a heavy run), even though the account itself was fine. Nexora now makes a last-resort attempt on a cooling account when there is no other option, so one hiccup no longer dead-ends the conversation.

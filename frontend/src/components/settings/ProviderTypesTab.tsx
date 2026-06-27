@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Lock, Globe, Cpu, ExternalLink, ChevronDown, ChevronRight, X, Download, Upload, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
-import { providerTypesApi, ProviderTypeDef } from "@/lib/api";
+import { providerTypesApi, ProviderTypeDef, RateLimitRule } from "@/lib/api";
 import { ConfirmDeleteDialog } from "@/components/ui/confirm-delete-dialog";
 
 // ── Stream type colors ────────────────────────────────────────────────────────
@@ -46,6 +46,7 @@ interface FormState {
   default_model: string; models: string; website: string;
   cli_command: string; cli_login_args: string; credential_paths: string;
   credential_format: "claude_oauth" | "raw_json" | "token_pair";
+  rate_limit: RateLimitRule[];
 }
 
 const EMPTY_FORM: FormState = {
@@ -55,6 +56,7 @@ const EMPTY_FORM: FormState = {
   default_model: "", models: "", website: "",
   cli_command: "", cli_login_args: "", credential_paths: "",
   credential_format: "raw_json",
+  rate_limit: [],
 };
 
 function defToForm(d: ProviderTypeDef): FormState {
@@ -68,6 +70,7 @@ function defToForm(d: ProviderTypeDef): FormState {
     cli_login_args: (d.cli_login_args ?? []).join(" "),
     credential_paths: (d.credential_paths ?? []).join("\n"),
     credential_format: (d.credential_format as FormState["credential_format"]) ?? "raw_json",
+    rate_limit: d.rate_limit ?? [],
   };
 }
 
@@ -88,6 +91,16 @@ function formToPayload(f: FormState) {
     cli_login_args: f.cli_login_args.trim() ? f.cli_login_args.trim().split(/\s+/) : [],
     credential_paths: f.credential_paths.split("\n").map(s => s.trim()).filter(Boolean),
     credential_format: f.credential_format,
+    rate_limit: f.rate_limit
+      .filter(r => r.match?.trim())
+      .map(r => ({
+        name: r.name?.trim() || "",
+        match: r.match.trim(),
+        reset_regex: r.reset_regex?.trim() || null,
+        reset_units: (r.reset_units ?? []).map(u => u.trim()).filter(Boolean),
+        default_seconds: r.default_seconds ?? null,
+        buffer_seconds: r.buffer_seconds ?? 0,
+      })),
   };
 }
 
@@ -137,6 +150,74 @@ function Select({ value, onChange, options }: {
     >
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
+  );
+}
+
+// ── Rate-limit rule editor ────────────────────────────────────────────────────
+// Lets the user teach Nexora how THIS provider signals a rate/usage limit, so the
+// account auto-cools for the right amount of time and the UI can show "Resets in …".
+function RateLimitEditor({
+  rules, onChange,
+}: {
+  rules: RateLimitRule[];
+  onChange: (rules: RateLimitRule[]) => void;
+}) {
+  const update = (i: number, patch: Partial<RateLimitRule>) =>
+    onChange(rules.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const remove = (i: number) => onChange(rules.filter((_, idx) => idx !== i));
+  const add = () =>
+    onChange([...rules, { name: "", match: "", reset_regex: "", reset_units: [], default_seconds: 3600, buffer_seconds: 60 }]);
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Rate-limit detection</h3>
+        <button type="button" onClick={add}
+          className="flex items-center gap-1 px-2 py-0.5 text-[10px] rounded border border-border hover:bg-muted transition-colors">
+          <Plus size={9} /> Add rule
+        </button>
+      </div>
+      <p className="text-[10px] text-muted-foreground -mt-1">
+        When an error matches, the account cools down until its limit resets. Match is tested against the
+        provider&apos;s error type + message; the regex pulls the reset time out (capture groups map to units),
+        falling back to the default. Header-based limits (Retry-After) are detected automatically.
+      </p>
+      {rules.length === 0 && (
+        <p className="text-[10px] text-muted-foreground italic">No custom rules — generic &quot;try again in Ns&quot; bursts and Retry-After headers still work.</p>
+      )}
+      <div className="space-y-2.5">
+        {rules.map((r, i) => (
+          <div key={i} className="border border-border rounded-lg p-2.5 space-y-2 bg-background/40">
+            <div className="flex items-center gap-2">
+              <Input value={r.name ?? ""} onChange={v => update(i, { name: v })} placeholder="Rule name (e.g. 5-hour limit)" className="flex-1" />
+              <button type="button" onClick={() => remove(i)}
+                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors">
+                <Trash2 size={12} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Match (substring)" hint="Tested vs error type + message">
+                <Input value={r.match} onChange={v => update(i, { match: v })} placeholder="GoUsageLimitError" />
+              </Field>
+              <Field label="Reset regex" hint="Capture groups = time values">
+                <Input value={r.reset_regex ?? ""} onChange={v => update(i, { reset_regex: v })} placeholder="(\d+)\s*hr\s*(\d+)\s*min" />
+              </Field>
+              <Field label="Units (per group)" hint="Comma-separated: h, m, s, d, ms">
+                <Input value={(r.reset_units ?? []).join(", ")} onChange={v => update(i, { reset_units: v.split(",").map(s => s.trim()).filter(Boolean) })} placeholder="h, m" />
+              </Field>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Default (s)" hint="If regex misses">
+                  <Input value={String(r.default_seconds ?? "")} onChange={v => update(i, { default_seconds: v ? parseInt(v, 10) || 0 : null })} placeholder="18000" />
+                </Field>
+                <Field label="Buffer (s)" hint="Safety margin">
+                  <Input value={String(r.buffer_seconds ?? 0)} onChange={v => update(i, { buffer_seconds: parseInt(v, 10) || 0 })} placeholder="60" />
+                </Field>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -339,6 +420,11 @@ function ProviderTypeDialog({
               </Field>
             </section>
           )}
+
+          <RateLimitEditor
+            rules={form.rate_limit}
+            onChange={(rules) => setForm(prev => ({ ...prev, rate_limit: rules }))}
+          />
         </form>
 
         {/* Footer */}

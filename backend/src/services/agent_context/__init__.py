@@ -4,6 +4,8 @@ from src.services.agent_context.providers import (
     get_chain_providers,
     get_direct_provider,
     get_effective_chain_id,
+    provider_availability,
+    provider_availability_summary,
 )
 from src.services.agent_context.platform_context import (
     get_live_chat,
@@ -21,5 +23,7 @@ __all__ = [
     "get_agent_system_prompt",
     "get_effective_chain_id",
     "get_direct_provider",
+    "provider_availability",
+    "provider_availability_summary",
     "MODE_PREFIXES",
 ]
