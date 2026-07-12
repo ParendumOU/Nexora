@@ -11,6 +11,25 @@ Nexora is the open-source core. Run it standalone for development or self-hostin
 
 ---
 
+## One-command install
+
+The installer asks a couple of questions, generates all secrets, writes `.env`,
+starts the stack, and runs the migrations:
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/ParendumOU/Nexora/main/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+powershell -c "irm https://raw.githubusercontent.com/ParendumOU/Nexora/main/install.ps1 | iex"
+```
+
+Prefer to do it by hand? Follow the steps below.
+
+---
+
 ## Quick start
 
 ```bash

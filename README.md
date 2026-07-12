@@ -97,6 +97,25 @@ More in the [documentation](https://docs.nexora.parendum.com).
 
 ## Quick start
 
+### One-liner (recommended)
+
+The installer checks Docker, asks a couple of questions, generates every secret,
+starts the stack, and runs the migrations for you.
+
+**Linux / macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ParendumOU/Nexora/main/install.sh | bash
+```
+
+**Windows (PowerShell)**
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/ParendumOU/Nexora/main/install.ps1 | iex"
+```
+
+### Manual
+
 ```bash
 git clone https://github.com/ParendumOU/Nexora.git
 cd Nexora
