@@ -293,7 +293,8 @@ export default function OrgSettingsPage() {
   const currentUserId = members.find((m) => m.role === org.role)?.user_id;
 
   return (
-    <div className="max-w-2xl mx-auto px-6 py-8">
+    <div className="h-full overflow-y-auto">
+    <div className={cn("mx-auto px-6 py-8", tab === "groups" ? "max-w-4xl" : "max-w-2xl")}>
       <div className="flex items-center gap-3 mb-6">
         <div
           className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold text-white"
@@ -715,6 +716,7 @@ export default function OrgSettingsPage() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

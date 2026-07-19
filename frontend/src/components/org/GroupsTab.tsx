@@ -486,7 +486,7 @@ export function GroupsTab({ members }: { members: GroupMemberOption[] }) {
           {/* Capabilities */}
           <div>
             <label className="block text-xs font-medium mb-2">Capabilities</label>
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
               {capSections.map((sec) => (
                 <div key={sec.dim}>
                   <div className="text-[11px] font-medium text-muted-foreground mb-1">
