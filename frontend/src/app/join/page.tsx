@@ -124,7 +124,7 @@ function JoinContent() {
             Log in to accept
           </button>
           <button
-            onClick={() => router.push(`/register?next=/join?token=${token}`)}
+            onClick={() => router.push(`/register?org_invite=${token}`)}
             className="w-full py-2.5 rounded-xl border border-border text-sm font-medium hover:bg-accent transition-colors"
           >
             Create account

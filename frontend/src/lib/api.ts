@@ -122,7 +122,7 @@ export default api;
 // ─── Auth ───────────────────────────────────────────────────────
 export const authApi = {
   firstRun: () => api.get("/auth/first-run"),
-  register: (data: { email: string; password: string; full_name: string; org_name?: string; invite_token?: string }) =>
+  register: (data: { email: string; password: string; full_name: string; org_name?: string; invite_token?: string; org_invite_token?: string }) =>
     api.post("/auth/register", data),
   login: (data: { email: string; password: string }) => api.post("/auth/login", data),
   totpLogin: (data: { totp_token: string; code: string }) => api.post("/auth/totp-login", data),

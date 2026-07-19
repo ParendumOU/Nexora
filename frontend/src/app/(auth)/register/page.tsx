@@ -2,14 +2,25 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2, ShieldAlert, Eye, EyeOff } from "lucide-react";
-import { authApi } from "@/lib/api";
+import { authApi, orgsApi } from "@/lib/api";
 import { BrandMark } from "@/components/BrandMark";
 import { useAuthStore } from "@/store/auth";
 import { useOnboardingStore } from "@/store/onboarding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import toast from "react-hot-toast";
+
+interface InviteDetails {
+  org_id: string;
+  org_name: string;
+  org_icon: string | null;
+  org_color: string | null;
+  invited_by: string;
+  role: string;
+  expires_at: string;
+}
 
 function RegisterForm() {
   const router = useRouter();
@@ -18,21 +29,37 @@ function RegisterForm() {
   const startOnboarding = useOnboardingStore((s) => s.start);
 
   const inviteToken = searchParams.get("invite") ?? "";
-  const joinToken = searchParams.get("join") ?? "";
+  // Org invite → invite-first registration (managed account inside the inviting org).
+  // Accept ?org_invite=, the legacy ?join=, or a next=/join?token=... redirect param.
+  const orgInviteToken =
+    searchParams.get("org_invite") ||
+    searchParams.get("join") ||
+    (() => {
+      const n = searchParams.get("next") ?? "";
+      const m = n.match(/[?&]token=([^&]+)/);
+      return m ? decodeURIComponent(m[1]) : "";
+    })();
 
-  const [form, setForm] = useState({ full_name: "", email: "", password: "", org_name: "", invite_token: inviteToken });
+  const [form, setForm] = useState({ full_name: "", email: "", password: "", org_name: "", invite_token: inviteToken, org_invite_token: orgInviteToken });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [inviteBlocked, setInviteBlocked] = useState(false);
+
+  const { data: orgInvite, isError: orgInviteError } = useQuery<InviteDetails>({
+    queryKey: ["org-invite", orgInviteToken],
+    queryFn: () => orgsApi.getInviteDetails(orgInviteToken).then((r) => r.data),
+    enabled: !!orgInviteToken,
+    retry: false,
+  });
 
   useEffect(() => {
     if (_hasHydrated && isAuthenticated) router.replace("/chat");
   }, [_hasHydrated, isAuthenticated, router]);
 
-  // Keep invite_token in sync if URL param changes
+  // Keep tokens in sync if the URL params change
   useEffect(() => {
-    setForm((f) => ({ ...f, invite_token: inviteToken }));
-  }, [inviteToken]);
+    setForm((f) => ({ ...f, invite_token: inviteToken, org_invite_token: orgInviteToken }));
+  }, [inviteToken, orgInviteToken]);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -51,8 +78,8 @@ function RegisterForm() {
       const meRes = await authApi.me();
       login(res.data, meRes.data);
       startOnboarding();
-      // If a join token is present, redirect to org join page instead of profile
-      router.replace(joinToken ? `/join?token=${joinToken}` : "/profile?tab=profile");
+      // Invite-first accounts are already inside their org → go straight to chat.
+      router.replace(orgInviteToken ? "/chat" : "/profile?tab=profile");
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       const message = Array.isArray(detail)
@@ -104,7 +131,11 @@ function RegisterForm() {
           <div>
             <h2 className="text-xl font-semibold">Create account</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              {inviteToken ? "You've been invited to join Nexora." : "Get started for free"}
+              {orgInvite
+                ? `You've been invited to join ${orgInvite.org_name}.`
+                : inviteToken
+                  ? "You've been invited to join Nexora."
+                  : "Get started for free"}
             </p>
           </div>
 
@@ -126,10 +157,35 @@ function RegisterForm() {
                 </button>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Organization name <span className="text-muted-foreground/50">(optional)</span></label>
-              <Input placeholder="Acme Corp" value={form.org_name} onChange={set("org_name")} />
-            </div>
+            {orgInviteToken ? (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Organization</label>
+                {orgInvite ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white shrink-0"
+                      style={{ backgroundColor: orgInvite.org_color || "#6366f1" }}
+                    >
+                      {orgInvite.org_icon || orgInvite.org_name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{orgInvite.org_name}</div>
+                      <div className="text-[11px] text-muted-foreground">You&apos;ll join as {orgInvite.role}</div>
+                    </div>
+                  </div>
+                ) : orgInviteError ? (
+                  <p className="text-xs text-destructive">This invite is invalid or has expired.</p>
+                ) : (
+                  <div className="h-12 rounded-lg bg-muted/30 animate-pulse" />
+                )}
+                <p className="text-[11px] text-muted-foreground">Your account will be created inside this organization.</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Organization name <span className="text-muted-foreground/50">(optional)</span></label>
+                <Input placeholder="Acme Corp" value={form.org_name} onChange={set("org_name")} />
+              </div>
+            )}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Creating account…</> : "Create account"}
             </Button>

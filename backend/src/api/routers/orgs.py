@@ -135,12 +135,17 @@ async def list_orgs(
     return result
 
 
+_MANAGED_MSG = "This account is managed by your organization and cannot change organizations."
+
+
 @router.post("", response_model=OrgResponse, status_code=201)
 async def create_org(
     body: OrgCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if getattr(current_user, "is_managed", False):
+        raise HTTPException(status_code=403, detail=_MANAGED_MSG)
     import re
     def slugify(text: str) -> str:
         slug = re.sub(r"[^\w\s-]", "", text.lower())
@@ -440,6 +445,8 @@ async def leave_org(
     db: AsyncSession = Depends(get_db),
 ):
     """Leave an organization. Owners must transfer ownership first."""
+    if getattr(current_user, "is_managed", False):
+        raise HTTPException(status_code=403, detail=_MANAGED_MSG)
     r = await db.execute(select(Organization).where(Organization.id == org_id))
     org = r.scalar_one_or_none()
     if not org:
@@ -551,6 +558,8 @@ async def accept_invite(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if getattr(current_user, "is_managed", False):
+        raise HTTPException(status_code=403, detail=_MANAGED_MSG)
     r = await db.execute(select(OrgInvite).where(OrgInvite.token == body.token))
     invite = r.scalar_one_or_none()
     if not invite:
@@ -600,6 +609,8 @@ async def switch_org(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if getattr(current_user, "is_managed", False):
+        raise HTTPException(status_code=403, detail=_MANAGED_MSG)
     await _require_membership(current_user.id, body.org_id, db)
 
     current_user.active_org_id = body.org_id

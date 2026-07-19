@@ -10,6 +10,15 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.24.0
+
+- Invited employees now get a managed account: when someone registers from an organization invite, the account is created directly inside that organization with no personal workspace of its own, so it exists only to work in the org it was invited to.
+- The signup form, when opened from an invite, no longer asks for a workspace name. It shows the organization the account is joining, read-only, so it is clear the account is being created inside that org.
+- Managed accounts cannot switch, create, join or leave organizations. The org selector in the top-left is replaced by a static label of their single organization, with no dropdown.
+- Self-registered accounts are unchanged: they keep their own personal organization, can belong to several organizations and can switch between them.
+- CLI onboarding via an org invite (nexora join) now also creates a managed account, so terminal-onboarded employees behave the same as web-invited ones.
+- New field is_managed on the user, returned by GET /users/me, and a new org_invite_token option on POST /auth/register for invite-first registration.
+
 ## 1.23.0
 
 - Zero-touch CLI onboarding: an org admin can invite a teammate straight to the terminal. From Organization to Invites, the new "Invite to the terminal (CLI)" card takes an email and name and generates a single copy-paste command for macOS, Linux or Windows.

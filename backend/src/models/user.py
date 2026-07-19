@@ -23,6 +23,9 @@ class User(Base):
     contact_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+    # A managed account is born from an org invite: no personal org, tied to exactly
+    # one org, cannot switch/create/join/leave orgs. Normal self-signup stays False.
+    is_managed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     # #212: opt-in delivery of notifications via email / Telegram DM for events
     # missed while no real-time client was connected.
     notify_email: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)

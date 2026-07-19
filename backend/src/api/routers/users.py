@@ -24,6 +24,7 @@ class UserResponse(BaseModel):
     contact_info: str | None
     is_active: bool
     is_superuser: bool
+    is_managed: bool = False
     notify_email: bool = False
     notify_telegram: bool = False
 

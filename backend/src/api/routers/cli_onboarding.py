@@ -159,11 +159,26 @@ async def cli_redeem(
             hashed_password=hash_password(secrets.token_urlsafe(32)),
             full_name=display,
             is_verified=True,
+            # Born from an org invite → managed: no personal org, tied to this one org.
+            is_managed=True,
         )
         db.add(user)
         await db.flush()
     elif not user.is_active:
         raise HTTPException(status_code=403, detail="This account is disabled")
+    elif getattr(user, "is_managed", False):
+        # A managed account is tied to exactly one org — only re-redeeming an invite
+        # for that same org is allowed (to re-pair), never joining a second one.
+        mm = await db.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == invite.org_id, OrgMember.user_id == user.id
+            )
+        )
+        if mm.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=403,
+                detail="This account is managed and is tied to another organization.",
+            )
 
     # ── join the org (idempotent) ────────────────────────────────────────────────
     mr = await db.execute(

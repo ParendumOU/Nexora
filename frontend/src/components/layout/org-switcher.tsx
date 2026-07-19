@@ -113,7 +113,7 @@ function CreateOrgForm({ onClose, onCreated }: { onClose: () => void; onCreated:
 export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const { activeOrg, setActiveOrg, switchOrg: storeSwitch } = useAuthStore();
+  const { activeOrg, setActiveOrg, switchOrg: storeSwitch, user } = useAuthStore();
   const [showCreate, setShowCreate] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -160,6 +160,27 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
     setShowCreate(false);
     setOpen(false);
   };
+
+  // Managed accounts are tied to exactly one org — show a static label, never the
+  // switcher dropdown (no switching, no "New organization", no org settings).
+  if (user?.is_managed) {
+    if (collapsed) {
+      return (
+        <div className="flex justify-center w-full px-1 py-1.5">
+          <OrgChip org={current} />
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg">
+        <OrgChip org={current} />
+        <div className="flex-1 min-w-0 text-left">
+          <div className="text-xs font-semibold truncate text-sidebar-foreground">{current.name}</div>
+          <div className="text-[10px] text-muted-foreground capitalize">{current.role}</div>
+        </div>
+      </div>
+    );
+  }
 
   if (collapsed) {
     return (

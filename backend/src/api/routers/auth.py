@@ -71,6 +71,9 @@ class RegisterRequest(BaseModel):
     full_name: str
     org_name: str | None = None
     invite_token: str | None = None
+    # When set, registration is "invite-first": the new account is created inside the
+    # inviting org (no personal org, managed) and this org invite authorizes signup.
+    org_invite_token: str | None = None
 
     @field_validator("password")
     @classmethod
@@ -194,20 +197,40 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
     settings = get_settings()
     invite: SignupInvite | None = None
 
+    # Invite-first registration: an org invite creates a MANAGED account inside the
+    # inviting org (no personal org) and authorizes signup on its own, so the platform
+    # SignupInvite / REQUIRE_INVITE checks below are skipped when it's present + valid.
+    from src.models.org_invite import OrgInvite
+    org_invite: OrgInvite | None = None
+    if req.org_invite_token:
+        oir = await db.execute(select(OrgInvite).where(OrgInvite.token == req.org_invite_token))
+        org_invite = oir.scalar_one_or_none()
+        if not org_invite:
+            raise HTTPException(status_code=403, detail="Invalid or expired invitation")
+        if org_invite.accepted_at:
+            raise HTTPException(status_code=403, detail="Invitation already used")
+        _exp = org_invite.expires_at
+        if _exp is not None and _exp.tzinfo is None:
+            _exp = _exp.replace(tzinfo=timezone.utc)  # naive rows (SQLite) → assume UTC
+        if _exp is not None and _exp < datetime.now(timezone.utc):
+            raise HTTPException(status_code=403, detail="Invitation has expired")
+        if org_invite.email and org_invite.email.lower() != req.email.lower():
+            raise HTTPException(status_code=403, detail="Invitation is not valid for this email address")
+
     # First-run bypass: if no non-superuser users exist, the invite requirement is
     # waived so the initial admin account can be created via the /setup page.
     # #166: take a transaction-scoped Postgres advisory lock around the count so two
     # concurrent invite-less registrations can't both observe an empty table and both
     # bypass the invite requirement. (No-op on non-PG dialects, e.g. the SQLite tests.)
     is_first_run = False
-    if settings.require_invite and not req.invite_token:
+    if settings.require_invite and not org_invite and not req.invite_token:
         if db.bind is not None and db.bind.dialect.name == "postgresql":
             from sqlalchemy import text
             await db.execute(text("SELECT pg_advisory_xact_lock(91823461)"))
         count_r = await db.execute(select(func.count()).select_from(User).where(User.email != "system@nexora.internal"))
         is_first_run = count_r.scalar_one() == 0
 
-    if settings.require_invite and not is_first_run:
+    if settings.require_invite and not org_invite and not is_first_run:
         if not req.invite_token:
             raise HTTPException(status_code=403, detail="An invitation is required to register")
         r = await db.execute(select(SignupInvite).where(SignupInvite.token == req.invite_token))
@@ -234,27 +257,38 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
     db.add(user)
     await db.flush()
 
-    # Create personal org
-    org_name = req.org_name or f"{req.full_name}'s Workspace"
-    base_slug = slugify(org_name)
-    slug = base_slug
-    i = 1
-    while True:
-        existing = await db.execute(select(Organization).where(Organization.slug == slug))
-        if not existing.scalar_one_or_none():
-            break
-        slug = f"{base_slug}-{i}"
-        i += 1
+    personal_org: Organization | None = None
+    if org_invite:
+        # Invite-first → MANAGED account: join the inviting org, no personal org.
+        from src.services.billing_limits import enforce_user_quota
+        await enforce_user_quota(org_invite.org_id)
+        role = OrgRole(org_invite.role) if org_invite.role in OrgRole._value2member_map_ else OrgRole.member
+        db.add(OrgMember(id=str(uuid.uuid4()), org_id=org_invite.org_id, user_id=user.id, role=role))
+        user.active_org_id = org_invite.org_id
+        user.is_managed = True
+        org_invite.accepted_at = datetime.now(timezone.utc)
+        active_org_id = org_invite.org_id
+    else:
+        # Normal self-signup → create a personal org owned by the user.
+        org_name = req.org_name or f"{req.full_name}'s Workspace"
+        base_slug = slugify(org_name)
+        slug = base_slug
+        i = 1
+        while True:
+            existing = await db.execute(select(Organization).where(Organization.slug == slug))
+            if not existing.scalar_one_or_none():
+                break
+            slug = f"{base_slug}-{i}"
+            i += 1
 
-    org = Organization(id=str(uuid.uuid4()), name=org_name, slug=slug, owner_id=user.id, is_personal=True)
-    db.add(org)
-    await db.flush()
+        personal_org = Organization(id=str(uuid.uuid4()), name=org_name, slug=slug, owner_id=user.id, is_personal=True)
+        db.add(personal_org)
+        await db.flush()
 
-    member = OrgMember(id=str(uuid.uuid4()), org_id=org.id, user_id=user.id, role=OrgRole.owner)
-    db.add(member)
-
-    # Set active org immediately
-    user.active_org_id = org.id
+        db.add(OrgMember(id=str(uuid.uuid4()), org_id=personal_org.id, user_id=user.id, role=OrgRole.owner))
+        # Set active org immediately
+        user.active_org_id = personal_org.id
+        active_org_id = personal_org.id
 
     if invite:
         invite.used_at = datetime.now(timezone.utc)
@@ -277,11 +311,13 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
         from src.services.email import send_verification_email as _send_verify
         _asyncio.create_task(_send_verify(user.email, user.verification_token))
 
-    # Notify billing worker to create subscription record (fire-and-forget)
-    _fire_onboarding(org.id, req.email, org_name)
+    # Notify billing worker to create a subscription only for a NEW personal org
+    # (a managed account joins an existing org — no new subscription).
+    if personal_org is not None:
+        _fire_onboarding(personal_org.id, req.email, personal_org.name)
 
     return TokenResponse(
-        access_token=create_access_token(user.id, org.id, token_version=user.token_version),
+        access_token=create_access_token(user.id, active_org_id, token_version=user.token_version),
         refresh_token=create_refresh_token(user.id, user.token_version),
     )
 

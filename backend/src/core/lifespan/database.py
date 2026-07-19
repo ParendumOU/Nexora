@@ -54,6 +54,7 @@ async def startup_database():
             "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_personal BOOLEAN DEFAULT TRUE",
             "UPDATE organizations SET is_personal = TRUE WHERE is_personal IS NULL",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS active_org_id VARCHAR(36)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_managed BOOLEAN DEFAULT FALSE",
             # Integrations default flag
             "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE",
             # Tasks org attachment
