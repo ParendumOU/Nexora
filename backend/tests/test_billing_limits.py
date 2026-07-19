@@ -10,6 +10,16 @@ from fastapi import HTTPException
 import src.services.billing_limits as bl
 
 
+@pytest.fixture(autouse=True)
+def _clear_caches():
+    """The grace caches are module-level; isolate every test."""
+    bl._quota_cache.clear()
+    bl._feature_cache.clear()
+    yield
+    bl._quota_cache.clear()
+    bl._feature_cache.clear()
+
+
 class _Resp:
     def __init__(self, payload, status=200):
         self._p = payload
@@ -91,14 +101,73 @@ async def test_user_at_limit_blocks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fail_open_on_transport_error(monkeypatch):
+async def test_fail_closed_on_transport_error_no_cache(monkeypatch):
+    # Configured but unreachable and no prior good answer → FAIL CLOSED (deny).
+    # 503 (retryable), not mistaken for a real plan limit; slots capped at 0.
     _wire(monkeypatch, boom=True)
-    # Billing-worker unreachable → allow (availability), no raise.
-    await bl.enforce_agent_quota("org1")
-    assert await bl.agent_slots_remaining("org1") is None
+    with pytest.raises(HTTPException) as exc:
+        await bl.enforce_agent_quota("org1")
+    assert exc.value.status_code == 503
+    assert await bl.agent_slots_remaining("org1") == 0
+    assert "unavailable" in (await bl.agent_quota_message("org1")).lower()
 
 
 @pytest.mark.asyncio
-async def test_fail_open_on_non_200(monkeypatch):
+async def test_fail_closed_on_non_200_no_cache(monkeypatch):
     _wire(monkeypatch, payload={}, status=500)
-    await bl.enforce_agent_quota("org1")  # no raise
+    with pytest.raises(HTTPException) as exc:
+        await bl.enforce_agent_quota("org1")
+    assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_grace_cache_rides_out_a_hiccup(monkeypatch):
+    # A good answer is cached; a subsequent transient failure uses the cache
+    # (rides out restarts/blips) instead of failing closed.
+    _wire(monkeypatch, payload={"allowed": True, "limit": 5, "current": 2})
+    assert await bl.agent_slots_remaining("org1") == 3  # caches (True,5,2)
+    _wire(monkeypatch, boom=True)
+    await bl.enforce_agent_quota("org1")  # cached allow → no raise
+    assert await bl.agent_slots_remaining("org1") == 3
+
+
+@pytest.mark.asyncio
+async def test_stale_cache_beyond_grace_fails_closed(monkeypatch):
+    _wire(monkeypatch, payload={"allowed": True, "limit": 5, "current": 2})
+    assert await bl.agent_slots_remaining("org1") == 3
+    # Expire the cache (push timestamp past the grace window).
+    monkeypatch.setattr(bl, "_GRACE_SECONDS", 0)
+    _wire(monkeypatch, boom=True)
+    with pytest.raises(HTTPException) as exc:
+        await bl.enforce_agent_quota("org1")
+    assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_feature_fail_closed_no_cache(monkeypatch):
+    # Paid feature denied when the gate can't be reached and there's no cache.
+    _wire(monkeypatch, boom=True)
+    with pytest.raises(HTTPException) as exc:
+        await bl.enforce_feature("sso", "org1", "SAML 2.0 SSO")
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_feature_unconfigured_is_noop(monkeypatch):
+    _wire(monkeypatch, configured=False)
+    await bl.enforce_feature("sso", "org1")  # OSS → no raise
+
+
+@pytest.mark.asyncio
+async def test_feature_allowed(monkeypatch):
+    _wire(monkeypatch, payload={"allowed": True, "feature": "marketplace"})
+    await bl.enforce_feature("marketplace", "org1")  # no raise
+
+
+@pytest.mark.asyncio
+async def test_feature_denied_by_plan(monkeypatch):
+    _wire(monkeypatch, payload={"allowed": False, "feature": "sso"})
+    with pytest.raises(HTTPException) as exc:
+        await bl.enforce_feature("sso", "org1", "SAML 2.0 SSO")
+    assert exc.value.status_code == 403
+    assert "SAML 2.0 SSO" in exc.value.detail

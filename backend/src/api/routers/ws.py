@@ -39,6 +39,25 @@ from src.services.turn_engine import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
+async def _resolve_chat_org_id(chat: Chat, db: AsyncSession) -> str | None:
+    """Best-effort org for a chat: its project's org, else the chat owner's first
+    org membership. Used to enforce an API key's org allowlist on the socket."""
+    try:
+        if chat.project_id:
+            oid = (await db.execute(
+                select(Project.org_id).where(Project.id == chat.project_id)
+            )).scalar_one_or_none()
+            if oid:
+                return oid
+        if chat.user_id:
+            return (await db.execute(
+                select(OrgMember.org_id).where(OrgMember.user_id == chat.user_id).limit(1)
+            )).scalar_one_or_none()
+    except Exception:
+        pass
+    return None
+
 # Presence tracking (GitLab #224): a Redis hash per chat (field=user_id,
 # value=json{id,name}) so participant lists are correct across multiple workers
 # (the old module-level dict was per-process). A TTL refresh expires entries left
@@ -240,6 +259,13 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
         await websocket.close(code=4001)
         return
 
+    # #177: capability scope + org allowlist carried from an API-key auth. A
+    # read-only key may observe the stream but not drive a turn or opt into local
+    # exec (both are writes); an org-restricted key may not open a foreign chat.
+    _key_scopes = getattr(user, "_api_key_scopes", None)
+    _ws_readonly = bool(_key_scopes) and "write" not in _key_scopes
+    _key_allowed_orgs = getattr(user, "_api_key_allowed_org_ids", None)
+
     async with AsyncSessionLocal() as db:
         from src.api.access import _access_via_single_chat
         result = await db.execute(select(Chat).where(Chat.id == chat_id))
@@ -259,6 +285,13 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 pr = await db.execute(select(Chat).where(Chat.id == cur.parent_chat_id))
                 cur = pr.scalar_one_or_none()
             if not can_access:
+                chat = None
+
+        # Org allowlist for org-restricted API keys: deny when the chat's org is
+        # positively resolvable and not in the key's allowlist.
+        if chat and _key_allowed_orgs:
+            _chat_org = await _resolve_chat_org_id(chat, db)
+            if _chat_org and _chat_org not in _key_allowed_orgs:
                 chat = None
 
     if not chat:
@@ -450,6 +483,15 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
             msg_type = data.get("type")
 
             if msg_type == "message":
+                # #177: a read-only API key may watch the stream but not drive a
+                # turn (a write). Reject the frame instead of silently executing it.
+                if _ws_readonly:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "API key lacks 'write' scope — this connection is read-only.",
+                    })
+                    continue
+
                 user_content = data.get("content", "").strip()
                 if not user_content:
                     continue
@@ -485,8 +527,13 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 # can also proxy; torn down in finally.
                 if data.get("local_exec") and _local_exec.get_bridge(chat_id) is None:
                     local_bridge["b"] = await _local_exec.register(
-                        chat_id, lambda ev: pubsub.broadcast(chat_id, ev)
+                        chat_id, lambda ev: pubsub.broadcast(chat_id, ev),
+                        owner_user_id=user.id,
                     )
+                # Bind this turn (and the sub-agent tasks it spawns — asyncio copies the
+                # context at create_task) to the initiating user, so local-tool grants
+                # only apply to the bridge owner's own turns.
+                _local_exec.set_turn_user(user.id)
 
                 # Refuse new messages while the executor loop is still driving this chat
                 # (sub-chats most commonly), to avoid dual-stream interleaving + duplicate rows.
@@ -600,6 +647,25 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 if not agent_id and live_chat and live_chat.agent_id:
                     agent_id = live_chat.agent_id
 
+                # Governance (per-user limits + capability allowlists set by an org
+                # admin). Hard-block BEFORE any tokens are spent: over-budget users and
+                # agents outside a restricted user's allowlist are refused. Owners/
+                # admins/group-less members are unrestricted (fast path). Applies to
+                # both the autopilot path below and the normal turn.
+                _gov_policy: dict = {}
+                if org_id:
+                    from src.services import governance as _gov
+                    async with AsyncSessionLocal() as _gdb:
+                        try:
+                            _gov_policy = await _gov.evaluate_turn(
+                                user, org_id, agent_id if enable_agent else None, _gdb,
+                            )
+                        except _gov.GovernanceError as _ge:
+                            await websocket.send_json({
+                                "type": "error", "code": _ge.code, "message": _ge.message,
+                            })
+                            continue
+
                 # Autopilot: if engaged, decompose the objective ONCE (structured) and
                 # let code create the goal/milestones/tasks, auto-assign, dispatch, and
                 # iterate to completion — instead of a normal model turn. Runs in the
@@ -646,6 +712,13 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 # is gated by `enable_agent` below. Previously this `continue` left the
                 # chat silent (message saved, no response, no signal).
 
+                # Restricted users may be pinned to a forced default chain and/or an
+                # allowed-chain list. Never honour a chain outside the allowlist —
+                # override to the assigned default.
+                if _gov_policy.get("restricted"):
+                    from src.services import governance as _gov
+                    chain_override = _gov.forced_chain_override(_gov_policy, chain_override)
+
                 # An explicit per-message account/chain pick (the settings button in
                 # the message field) should stick as the chat default — otherwise it
                 # applied only to this turn and resumes + sub-agents reverted to the
@@ -662,6 +735,20 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                     live_chat, org_id, chain_override=chain_override,
                     agent_id=agent_id if enable_agent else None,
                 )
+
+                # Restrict to the user's allowed provider accounts + cap count. If the
+                # allowlist wipes out every account, refuse rather than fall back.
+                if _gov_policy.get("restricted") and providers:
+                    from src.services import governance as _gov
+                    _filtered = _gov.filter_providers(_gov_policy, providers)
+                    try:
+                        _gov.assert_providers_available(providers, _filtered)
+                    except _gov.GovernanceError as _ge:
+                        await websocket.send_json({
+                            "type": "error", "code": _ge.code, "message": _ge.message,
+                        })
+                        continue
+                    providers = _filtered
 
                 agent_name: str | None = None
                 if agent_id and enable_agent:
@@ -759,6 +846,23 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                             # still works via cancel_check.
                             _alive["v"] = False
 
+                # Per-user concurrency cap (governance). Acquire a slot for the
+                # duration of the LLM stream; release it in finally. Cap 0/unset or an
+                # unrestricted user → no-op. Redis key self-heals via TTL.
+                _gov_max_conc = int((_gov_policy.get("limits") or {}).get("max_concurrent_agents", 0) or 0)
+                if org_id and _gov_max_conc > 0:
+                    from src.services import governance as _gov
+                    if not await _gov.acquire_user_slot(org_id, user.id, _gov_max_conc):
+                        await _buf_clear(chat_id)
+                        await websocket.send_json({
+                            "type": "error", "code": "concurrency",
+                            "message": (
+                                "You have too many agents running at once. "
+                                "Wait for one to finish or contact your organization admin."
+                            ),
+                        })
+                        continue
+
                 _gen_params = await load_agent_gen_params(agent_id if enable_agent else None)
                 try:
                     _outcome = await consume_provider_stream(
@@ -779,6 +883,10 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 except AllProvidersExhausted as e:
                     await _emit_stream_failure(str(e), ws_alive=_alive["v"])
                     continue
+                finally:
+                    if org_id and _gov_max_conc > 0:
+                        from src.services import governance as _gov
+                        await _gov.release_user_slot(org_id, user.id, _gov_max_conc)
                 full_response = _outcome.text
                 msg_metadata = _outcome.metadata
                 ws_alive = _alive["v"]
@@ -1177,8 +1285,10 @@ async def recover_stuck_tasks() -> None:
                     _finished.append((t.id, t.parent_id))
                     continue
                 # 3. Retry: reset to pending for re-dispatch, counting the attempt.
+                # Keep the thread as the resume target so the re-run doesn't orphan it.
                 t.retry_count = (t.retry_count or 0) + 1
                 t.status = "pending"
+                t.continue_chat_id = t.continue_chat_id or t.sub_chat_id
                 t.sub_chat_id = None
                 t.worker_id = None
                 t.worker_heartbeat_at = None

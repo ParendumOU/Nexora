@@ -56,15 +56,22 @@ async def _walk_chat_to_root(chat_id: str, db) -> str:
     return cur  # last valid id if a cycle is hit
 
 
-async def _enforce_root_spawn_caps(chat_id: str, db) -> str | None:
+async def _enforce_root_spawn_caps(chat_id: str, db, *, count: bool = True) -> str | None:
     """Per-ROOT-conversation spawn backstop. The per-parent fan-out cap only bounds
     siblings under one parent; a recursive loop evades it by spawning across many
     sub-chats. This counts spawns against the ROOT chat (cumulative + rate, in Redis)
     so one runaway conversation cannot create unbounded sub-agents.
 
+    With count=True (the dispatch choke point, sub_agent/executor claim + the CLI
+    subchat path) the Redis counters are INCREMENTED — that is the authoritative
+    accounting, and it covers every task creator (task_create tool, schedules,
+    events, autopilot, autonomy). With count=False (the task_create tool pre-check)
+    the counters are only READ, so a spawn is never double-counted while the model
+    still gets early friendly feedback at creation time.
+
     Returns a user/agent-facing message string when a cap is hit (caller returns it
     as the tool result so the orchestrator stops), or None to allow the spawn.
-    Fails OPEN if Redis is unavailable — a backstop must never wedge normal work.
+    Fails OPEN if Redis is unavailable — unless spawn_caps_fail_closed is set.
     """
     from src.core.config import get_settings as _gs
     s = _gs()
@@ -78,8 +85,11 @@ async def _enforce_root_spawn_caps(chat_id: str, db) -> str | None:
         if s.max_spawn_rate_per_root > 0:
             window = max(1, s.max_spawn_rate_window_seconds)
             rk = f"spawn_rate:{root}"
-            cur = await redis.incr(rk)
-            await redis.expire(rk, window)
+            if count:
+                cur = await redis.incr(rk)
+                await redis.expire(rk, window)
+            else:
+                cur = int(await redis.get(rk) or 0) + 1
             if cur > s.max_spawn_rate_per_root:
                 logger.warning(
                     "[task_create] root spawn-rate cap hit (root=%s, %d/%ds > %d) — rejecting",
@@ -94,8 +104,11 @@ async def _enforce_root_spawn_caps(chat_id: str, db) -> str | None:
 
         if s.max_subagents_per_root > 0:
             tk = f"spawn_total:{root}"
-            tot = await redis.incr(tk)
-            await redis.expire(tk, 86400)  # per-conversation-day ceiling; resets after 24h idle
+            if count:
+                tot = await redis.incr(tk)
+                await redis.expire(tk, 86400)  # per-conversation-day ceiling; resets after 24h idle
+            else:
+                tot = int(await redis.get(tk) or 0) + 1
             if tot > s.max_subagents_per_root:
                 logger.warning(
                     "[task_create] root cumulative spawn cap hit (root=%s, %d > %d) — rejecting",
@@ -108,6 +121,13 @@ async def _enforce_root_spawn_caps(chat_id: str, db) -> str | None:
                     "have, and end your turn with <final/>."
                 )
     except Exception as exc:
+        if s.spawn_caps_fail_closed:
+            logger.error("[spawn-caps] check unavailable (%s) — fail-closed, rejecting", exc)
+            return (
+                "Spawn-cap accounting is unavailable (Redis unreachable) and this instance is "
+                "configured fail-closed — not spawning a sub-agent. Retry once infrastructure "
+                "recovers, or finish the work directly."
+            )
         logger.warning("[task_create] root spawn-cap check unavailable (%s) — allowing", exc)
         return None
     return None
@@ -748,7 +768,10 @@ async def _run_single_tool(
 
             # Per-ROOT spawn backstop (cumulative + rate) — catches recursive loops
             # that evade the per-parent cap by spreading across many sub-chats.
-            _root_msg = await _enforce_root_spawn_caps(chat_id, db)
+            # Read-only pre-check: authoritative counting happens at the dispatch
+            # choke point (sub_agent/executor claim), which also covers tasks
+            # created programmatically (schedules, events, autopilot, autonomy).
+            _root_msg = await _enforce_root_spawn_caps(chat_id, db, count=False)
             if _root_msg:
                 return {"tool": "task_create", "data": _root_msg}
 
@@ -923,6 +946,7 @@ async def _run_single_tool(
             task = r.scalar_one_or_none()
             if not task:
                 return None
+            _prev_agent_id = task.assigned_agent_id
             # Allow cross-chat task management within the same project.
             # The calling chat must belong to the same project as the task's chat.
             if task.chat_id != chat_id:
@@ -947,6 +971,23 @@ async def _run_single_tool(
                 task.retry_policy = args["retry_policy"]
             if "agent_overrides" in args and isinstance(args["agent_overrides"], dict):
                 incoming: dict = args["agent_overrides"]
+                # Never persist raw secrets on the Task row: env_vars must reference
+                # platform-stored credentials (resolved at execution), not paste them.
+                if isinstance(incoming.get("env_vars"), dict):
+                    from src.services.agent_tools.secret_guard import scrub_env_vars
+                    _clean_env, _rejected = scrub_env_vars(incoming["env_vars"])
+                    if _rejected:
+                        logger.warning(
+                            "[task_update] rejected secret-looking env_vars %s on task %s",
+                            _rejected, task_id,
+                        )
+                        return {"tool": "task_update", "data": (
+                            f"Rejected env_vars {', '.join(_rejected)}: the value looks like a raw "
+                            "credential. Never paste secrets into task overrides — store the "
+                            "credential in the platform (org/user env vars or provider settings) "
+                            "and reference it by NAME; it is resolved at execution time."
+                        )}
+                    incoming = {**incoming, "env_vars": _clean_env}
                 # Validate capability grants: calling agent can only grant what it has
                 if agent_id and ("additional_skills" in incoming or "additional_tools" in incoming):
                     r_caller = await db.execute(select(Agent).where(Agent.id == agent_id))
@@ -968,6 +1009,12 @@ async def _run_single_tool(
                 task.completed_at = datetime.now(timezone.utc)
             # Clear sub_chat_id when explicitly reset to pending so dispatcher can re-dispatch.
             if args.get("status") == "pending":
+                # Preserve the thread for reuse when the task stays with the same agent;
+                # a handoff must not adopt the previous agent's sub-chat.
+                if task.assigned_agent_id == _prev_agent_id:
+                    task.continue_chat_id = task.continue_chat_id or task.sub_chat_id
+                else:
+                    task.continue_chat_id = None
                 task.sub_chat_id = None
                 task.completed_at = None
             await db.commit()

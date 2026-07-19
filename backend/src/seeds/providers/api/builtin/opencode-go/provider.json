@@ -16,6 +16,14 @@
   ],
   "rate_limit": [
     {
+      "name": "weekly usage limit",
+      "match": "weekly usage limit",
+      "reset_regex": "resets?\\s+in\\s*(\\d+)\\s*(week|weeks|wk|w|day|days|d|hr|hrs|hour|hours|h|min|mins|minute|minutes|m)\\b",
+      "reset_units": ["__inline__"],
+      "default_seconds": 86400,
+      "buffer_seconds": 60
+    },
+    {
       "name": "5-hour usage limit",
       "match": "GoUsageLimitError",
       "reset_regex": "(\\d+)\\s*hr\\s*(\\d+)\\s*min",

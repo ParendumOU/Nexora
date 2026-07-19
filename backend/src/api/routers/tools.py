@@ -142,7 +142,10 @@ async def list_tools(
 ):
     org_id = await _get_org(current_user, db)
     result = await db.execute(select(Tool).where(Tool.org_id == org_id).order_by(Tool.category, Tool.name))
-    return result.scalars().all()
+    from src.core.permissions import filter_by_capability
+    return await filter_by_capability(
+        current_user, org_id, db, list(result.scalars().all()), "tool_keys", lambda t: t.key,
+    )
 
 
 @router.post("", response_model=ToolResponse, status_code=201)

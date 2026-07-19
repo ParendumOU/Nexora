@@ -5,6 +5,47 @@ from urllib.parse import urlparse, parse_qs
 from src.core.pubsub import broadcast as _broadcast
 
 
+async def _resolve_org_id(chat_id: str, agent_id) -> str | None:
+    """Best-effort org for the acting turn: the agent's org, else the chat's
+    project org, else the chat owner's first org membership. Used to scope
+    credential lookups so a tool call can't reach another tenant's secrets."""
+    from sqlalchemy import select
+    from src.core.database import AsyncSessionLocal
+    from src.models.agent import Agent
+    from src.models.chat import Chat
+    from src.models.project import Project
+    from src.models.org import OrgMember
+    try:
+        async with AsyncSessionLocal() as db:
+            if agent_id:
+                oid = (await db.execute(
+                    select(Agent.org_id).where(Agent.id == agent_id)
+                )).scalar_one_or_none()
+                if oid:
+                    return oid
+            if chat_id:
+                row = (await db.execute(
+                    select(Chat.project_id, Chat.user_id).where(Chat.id == chat_id)
+                )).first()
+                if row:
+                    proj_id, user_id = row[0], row[1]
+                    if proj_id:
+                        oid = (await db.execute(
+                            select(Project.org_id).where(Project.id == proj_id)
+                        )).scalar_one_or_none()
+                        if oid:
+                            return oid
+                    if user_id:
+                        oid = (await db.execute(
+                            select(OrgMember.org_id).where(OrgMember.user_id == user_id).limit(1)
+                        )).scalar_one_or_none()
+                        if oid:
+                            return oid
+    except Exception:
+        pass
+    return None
+
+
 def _parse_repo(repo_url: str) -> str:
     url = repo_url.rstrip("/")
     for prefix in ("https://github.com/", "https://gitlab.com/", "http://github.com/", "http://gitlab.com/"):
@@ -14,8 +55,13 @@ def _parse_repo(repo_url: str) -> str:
     return url.removesuffix(".git")
 
 
-async def _git_proxy(path: str, query: dict) -> dict:
-    """Execute a /api/git-proxy/* call directly without going through HTTP."""
+async def _git_proxy(path: str, query: dict, org_id: str | None) -> dict:
+    """Execute a /api/git-proxy/* call directly without going through HTTP.
+
+    The credential is scoped to `org_id` (the acting turn's org) so a tool call
+    cannot use another tenant's stored PAT by guessing its UUID — mirrors the
+    HTTP git_proxy router's `_get_cred(credential_id, org_id)` guard.
+    """
     from sqlalchemy import select
     from src.core.database import AsyncSessionLocal
     from src.models.git_credential import GitCredential
@@ -28,9 +74,14 @@ async def _git_proxy(path: str, query: dict) -> dict:
 
     if not cred_id:
         return {"error": "git-proxy: credential_id is required"}
+    if not org_id:
+        return {"error": "git-proxy: could not resolve the org for this request"}
 
     async with AsyncSessionLocal() as db:
-        r = await db.execute(select(GitCredential).where(GitCredential.id == cred_id))
+        r = await db.execute(select(GitCredential).where(
+            GitCredential.id == cred_id,
+            GitCredential.org_id == org_id,
+        ))
         cred = r.scalar_one_or_none()
     if not cred:
         return {"error": f"git-proxy: credential '{cred_id}' not found"}
@@ -38,6 +89,13 @@ async def _git_proxy(path: str, query: dict) -> dict:
     repo = _parse_repo(repo_url)
     is_github = cred.provider == "github"
     base      = "https://api.github.com" if is_github else (cred.base_url or "https://gitlab.com").rstrip("/")
+    if not is_github:
+        # cred.base_url is user-controlled (self-hosted GitLab) and proxied to — SSRF guard.
+        from src.core.ssrf import assert_public_url
+        try:
+            assert_public_url(base)
+        except ValueError as exc:
+            return {"error": f"git-proxy: blocked base_url ({exc})"}
 
     if is_github:
         def _headers() -> dict:
@@ -107,9 +165,23 @@ async def _git_proxy(path: str, query: dict) -> dict:
 
 
 def _check_allowlist(url: str) -> str | None:
-    """Return an error string if url is blocked by HTTP_TOOL_ALLOWED_ORIGINS, else None."""
+    """Return an error string if url is blocked by HTTP_TOOL_DENIED_ORIGINS or
+    (when set) not covered by HTTP_TOOL_ALLOWED_ORIGINS, else None."""
     from src.core.config import get_settings
-    allowed = get_settings().http_tool_allowed_origins
+    settings = get_settings()
+
+    # Deny-list first: raw git-provider APIs have dedicated tools with
+    # credential injection; a hand-rolled call is the wrong path even on an
+    # otherwise unrestricted instance.
+    for base in settings.http_tool_denied_origins:
+        if url == base or url.startswith(base + "/"):
+            return (
+                f"URL '{url[:120]}' targets a blocked API ({base}). Use the dedicated "
+                "github_*/gitlab_* tools or the /api/git-proxy/ path instead — "
+                "credentials are injected automatically there."
+            )
+
+    allowed = settings.http_tool_allowed_origins
     if not allowed:
         return None  # unrestricted
     parsed = urlparse(url)
@@ -141,23 +213,31 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict | None
         "tool": "http_request", "label": f"{method} {url[:80]}…",
     })
 
-    # Shortcut: platform git-proxy paths (relative or localhost)
+    # Shortcut: platform git-proxy paths (relative or localhost). Credential is
+    # scoped to the acting turn's org (resolved from chat/agent).
     parsed = urlparse(url)
     path_only = parsed.path
-    if path_only.startswith("/api/git-proxy/"):
+    if path_only.startswith("/api/git-proxy/") or (
+        parsed.hostname in ("localhost", "127.0.0.1", "backend")
+        and path_only.startswith("/api/git-proxy/")
+    ):
         qs = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-        return await _git_proxy(path_only, qs)
-
-    # Strip localhost prefix so callers can write http://localhost/api/git-proxy/...
-    if parsed.hostname in ("localhost", "127.0.0.1", "backend") and path_only.startswith("/api/git-proxy/"):
-        qs = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-        return await _git_proxy(path_only, qs)
+        org_id = await _resolve_org_id(chat_id, agent_id)
+        return await _git_proxy(path_only, qs, org_id)
 
     # General external HTTP request
     if not url.startswith(("http://", "https://")):
         return {"error": "URL must be absolute (http:// or https://) or a platform path (/api/git-proxy/…)"}
 
-    # SSRF allowlist check
+    # SSRF guard: block internal/loopback/link-local targets (cloud metadata,
+    # 127.x, 10.x, backend, …) — always, even when the origin allowlist is unset.
+    from src.core.ssrf import assert_public_url
+    try:
+        assert_public_url(url)
+    except ValueError as exc:
+        return {"error": f"Blocked URL (SSRF guard): {exc}"}
+
+    # Optional origin allow/deny-list on top.
     blocked = _check_allowlist(url)
     if blocked:
         return {"error": blocked}
@@ -173,15 +253,33 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict | None
             headers.setdefault("Authorization", f"Basic {creds}")
 
     try:
-        req_kw: dict = {"headers": headers, "timeout": timeout, "follow_redirects": True}
+        # Follow redirects MANUALLY, re-validating every hop — a public URL can 302
+        # to an internal address (SSRF via redirect), which httpx auto-redirect would
+        # follow blindly after our one-time up-front check.
+        req_kw: dict = {"headers": headers, "timeout": timeout, "follow_redirects": False}
         if body is not None:
             if isinstance(body, dict):
                 req_kw["json"] = body
             else:
                 req_kw["content"] = str(body).encode()
 
+        cur = url
         async with httpx.AsyncClient() as client:
-            resp = await client.request(method, url, **req_kw)
+            for _hop in range(6):
+                resp = await client.request(method, cur, **req_kw)
+                if resp.is_redirect and resp.headers.get("location"):
+                    nxt = str(resp.next_request.url) if resp.next_request else resp.headers["location"]
+                    try:
+                        assert_public_url(nxt)
+                    except ValueError as exc:
+                        return {"error": f"Blocked redirect (SSRF guard): {exc}"}
+                    if _check_allowlist(nxt):
+                        return {"error": f"Redirect to a non-allowed origin: {nxt[:120]}"}
+                    cur = nxt
+                    continue
+                break
+            else:
+                return {"error": "Too many redirects (>6)"}
 
         ct = resp.headers.get("content-type", "")
         raw = resp.text

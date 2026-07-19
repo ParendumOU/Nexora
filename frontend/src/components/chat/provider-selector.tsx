@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, Zap, GitMerge, User } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import * as Separator from "@radix-ui/react-separator";
+import { usePermissionsStore, capAllows } from "@/store/permissions";
 
 const TYPE_DOT: Record<string, string> = {
   claude:  "bg-orange-400",
@@ -28,6 +29,9 @@ interface Props {
 
 export function ProviderSelector({ chatId, currentChainId, currentDirectProviderId, side = "bottom", asPill = false }: Props) {
   const qc = useQueryClient();
+  const restricted = usePermissionsStore((s) => s.restricted);
+  const capabilities = usePermissionsStore((s) => s.capabilities);
+  const forcedChainId = capabilities?.default_chain_id ?? null;
 
   const { data: chains = [] } = useQuery<Chain[]>({
     queryKey: ["chains"],
@@ -59,6 +63,31 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
   const label = isAuto
     ? defaultChain ? `Auto (${defaultChain.name})` : "Auto"
     : activeDirectProvider?.name || activeChain?.name || "Select";
+
+  // A restricted user with a forced default chain has no choice — show it read-only.
+  if (restricted && forcedChainId) {
+    const forced = chains.find((c) => c.id === forcedChainId);
+    return (
+      <span
+        title="Your administrator has assigned this model"
+        className={cn(
+          "flex items-center gap-1.5 rounded-full border border-border bg-transparent text-muted-foreground text-xs font-medium shrink-0 select-none cursor-default opacity-80",
+          asPill ? "px-2.5 py-1" : "px-2.5 py-1.5"
+        )}
+      >
+        <Zap className="w-3 h-3 shrink-0" />
+        <span className="truncate max-w-[140px]">{forced?.name ?? "Assigned model"}</span>
+      </span>
+    );
+  }
+
+  // When restricted, only surface chains/accounts the group allows (empty allowlist = all).
+  const visibleChains = chains.filter(
+    (c) => c.steps.length >= 1 && (!restricted || capAllows(capabilities, "chain_ids", c.id))
+  );
+  const visibleProviders = (providers as Provider[]).filter(
+    (p) => !restricted || capAllows(capabilities, "provider_ids", p.id)
+  );
 
   return (
     <Popover.Root>
@@ -109,7 +138,7 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
           </div>
 
           {/* Fallback chains */}
-          {chains.filter((c) => c.steps.length >= 1).length > 0 && (
+          {visibleChains.length > 0 && (
             <>
               <Separator.Root className="h-px bg-border my-1" />
               <div className="px-2 py-1.5">
@@ -117,7 +146,7 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
                   <GitMerge className="w-3 h-3" />Fallback Chains
                 </p>
                 <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                  {chains.filter((c) => c.steps.length >= 1).map((c) => {
+                  {visibleChains.map((c) => {
                     const isActive = currentChainId === c.id;
                     return (
                       <button
@@ -150,7 +179,7 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
           )}
 
           {/* Single account */}
-          {providers.length > 0 && (
+          {visibleProviders.length > 0 && (
             <>
               <Separator.Root className="h-px bg-border my-1" />
               <div className="px-2 py-1.5">
@@ -159,7 +188,7 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
                 </p>
                 <p className="text-[10px] text-amber-500/80 mb-1.5 px-0.5">Tries this account first, then falls back to chain on rate limit.</p>
                 <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                  {(providers as Provider[]).map((p) => {
+                  {visibleProviders.map((p) => {
                     const active = currentDirectProviderId === p.id;
                     return (
                       <button
@@ -181,7 +210,7 @@ export function ProviderSelector({ chatId, currentChainId, currentDirectProvider
             </>
           )}
 
-          {chains.length === 0 && providers.length === 0 && (
+          {visibleChains.length === 0 && visibleProviders.length === 0 && (
             <div className="px-3 py-4 text-center text-xs text-muted-foreground">
               No accounts yet. <a href="/settings" className="text-primary underline">Add one in Settings</a>
             </div>

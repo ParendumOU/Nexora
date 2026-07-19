@@ -448,6 +448,19 @@ async def _execute_agent_tools(
     clean_text = _BARE_TOOLCALLS_RE.sub("", clean_text)
     clean_text = _ORPHAN_JSON_TAIL_RE.sub("", clean_text).rstrip()
 
+    # Structured turn-completion signal (#213 / H1): a model seals its turn by
+    # emitting the `end_turn` control tool in the fence — the JSON-native,
+    # provider-agnostic equivalent of the <final/> sentinel (composes with native
+    # function calling #214). It is NOT executable work, so strip it. When it was
+    # the SOLE call the turn carries no resumable work → return had_fence=False so
+    # the engine seals it as terminal (no resume, no watchdog re-poke). Mixed with
+    # real tools, their results must still resume, so end_turn is just dropped.
+    from src.services.turn_completion import strip_end_turn
+    tool_calls, _had_end_turn = strip_end_turn(tool_calls)
+    if _had_end_turn and not tool_calls:
+        await _ws_status(websocket, "idle", pub_chat_id=_status_pub)
+        return clean_text, _file_deliveries, [], bool(_file_deliveries), None
+
     # Resolve which optional built-in tools this agent may call
     agent_enabled = await _get_agent_enabled_tools(agent_id, chat_id)
 

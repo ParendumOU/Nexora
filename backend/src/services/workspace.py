@@ -135,6 +135,57 @@ async def resolve_path(chat_id: str, path_str: str | None, *, default_to_root: b
     return os.path.join(ws, raw)
 
 
+# In-container filesystem paths a tool must never touch, regardless of the
+# workspace setting. Blocks exfiltration of the platform's own secrets
+# (ENCRYPTION_KEY via /proc/self/environ or an /app/.env), SSH/cloud creds, and
+# the host account dirs. Workspaces live under /workspaces and temp under /tmp,
+# so this never blocks legitimate agent work.
+_SENSITIVE_PREFIXES = (
+    "/proc", "/sys", "/root", "/etc/shadow", "/etc/ssh",
+    "/app/.env", "/app/.git",
+)
+_SENSITIVE_SEGMENTS = (".ssh", ".aws", ".gnupg")
+
+
+def _is_sensitive_path(resolved: str) -> bool:
+    norm = os.path.normpath(resolved)
+    if any(norm == p or norm.startswith(p + os.sep) or norm.startswith(p + "/") for p in _SENSITIVE_PREFIXES):
+        return True
+    parts = set(norm.split(os.sep))
+    return any(seg in parts for seg in _SENSITIVE_SEGMENTS)
+
+
+async def resolve_path_guarded(
+    chat_id: str, path_str: str | None, *, default_to_root: bool = False
+) -> tuple[str | None, str | None]:
+    """Resolve a tool `path` arg AND enforce confinement. Returns (safe_path, None)
+    or (None, error).
+
+    - Always rejects sensitive in-container paths (platform secrets, ssh/cloud creds).
+    - When a shared workspace is active, rejects any path that escapes the workspace
+      root (absolute paths outside it, or `..` traversal) — the #240 jail.
+    - When no workspace is active, keeps legacy behavior (container-root cwd / raw
+      path) but still applies the sensitive-path denylist.
+    """
+    raw = (path_str or "").strip()
+    ws = await resolve_workspace_dir(chat_id)
+    if ws:
+        base = os.path.realpath(ws)
+        target = raw if os.path.isabs(raw) else os.path.join(base, raw or ".")
+        resolved = os.path.realpath(target)
+        if resolved != base and not resolved.startswith(base + os.sep):
+            return None, f"Path escapes the workspace: {raw or '.'}"
+        if _is_sensitive_path(resolved):
+            return None, f"Access to this path is not allowed: {raw or '.'}"
+        return resolved, None
+    # No workspace: legacy raw/container-root behavior + sensitive denylist.
+    candidate = raw or ("." if not default_to_root else ".")
+    resolved = os.path.realpath(candidate)
+    if _is_sensitive_path(resolved):
+        return None, f"Access to this path is not allowed: {raw or '.'}"
+    return candidate, None
+
+
 def _dir_size(path: str, *, cap: int = 200_000) -> tuple[int, int]:
     """(total_bytes, file_count) for a directory, bounded so a huge tree can't stall
     the request (stops walking after `cap` files)."""

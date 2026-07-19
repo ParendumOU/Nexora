@@ -30,12 +30,14 @@ async def db():
 
 
 class _FakeRedis:
-    """Minimal async Redis stub: incr + expire over an in-memory dict."""
+    """Minimal async Redis stub: incr/get/expire over an in-memory dict."""
     def __init__(self):
         self.store: dict[str, int] = {}
     async def incr(self, key):
         self.store[key] = self.store.get(key, 0) + 1
         return self.store[key]
+    async def get(self, key):
+        return self.store.get(key)
     async def expire(self, key, ttl):
         return True
 
@@ -135,3 +137,45 @@ async def test_fails_open_when_redis_unavailable(db, monkeypatch):
     monkeypatch.setattr("src.core.redis.get_redis", _boom)
     # Must not raise and must allow the spawn (backstop never wedges work).
     assert await te._enforce_root_spawn_caps(rid, db) is None
+
+
+@pytest.mark.asyncio
+async def test_fails_closed_when_configured(db, monkeypatch):
+    rid = str(uuid.uuid4())
+    db.add(Chat(id=rid, user_id="u", title="root", parent_chat_id=None))
+    await db.commit()
+    _set_caps(monkeypatch, total=1, rate=1)
+    from src.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "spawn_caps_fail_closed", True, raising=False)
+
+    def _boom():
+        raise RuntimeError("redis down")
+    monkeypatch.setattr("src.core.redis.get_redis", _boom)
+    msg = await te._enforce_root_spawn_caps(rid, db)
+    assert msg is not None and "fail-closed" in msg
+
+
+# ── peek mode (count=False) ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_peek_mode_does_not_increment(db, monkeypatch):
+    rid = str(uuid.uuid4())
+    db.add(Chat(id=rid, user_id="u", title="root", parent_chat_id=None))
+    await db.commit()
+    fake = _FakeRedis()
+    _patch_redis(monkeypatch, fake)
+    _set_caps(monkeypatch, total=3, rate=0)
+
+    # Repeated peeks never consume budget.
+    for _ in range(10):
+        assert await te._enforce_root_spawn_caps(rid, db, count=False) is None
+    assert fake.store == {}
+
+    # Authoritative dispatch-side counting consumes it; peek then rejects.
+    for _ in range(3):
+        assert await te._enforce_root_spawn_caps(rid, db, count=True) is None
+    msg = await te._enforce_root_spawn_caps(rid, db, count=False)
+    assert msg is not None and "Sub-agent limit reached" in msg
+    # And the rejected peek did not bump the counter further.
+    assert fake.store[f"spawn_total:{rid}"] == 3

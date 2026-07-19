@@ -2,9 +2,9 @@
 import { use, useEffect, useRef, useState, useCallback, useMemo, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { chatsApi, tasksApi, projectsApi, plansApi, chatFilesApi, approvalsApi } from "@/lib/api";
+import { chatsApi, tasksApi, projectsApi, plansApi, chatFilesApi, approvalsApi, refreshAccessToken } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
-import { useUIModeStore } from "@/store/ui-mode";
+import { useEffectiveUIMode, getEffectiveUIMode } from "@/store/ui-mode";
 import { ChatMessage } from "@/components/chat/message";
 import { ChatInput, SendOptions } from "@/components/chat/input";
 import { TaskData } from "@/components/chat/task-panel";
@@ -71,7 +71,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const initialTasksLoadedRef = useRef(false);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
   const currentUser = useAuthStore((s) => s.user);
-  const uiMode = useUIModeStore((s) => s.mode);
+  const uiMode = useEffectiveUIMode();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
@@ -660,7 +660,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     };
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      let data: any;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;  // ignore a malformed frame instead of throwing out of the handler
+      }
       lastWsActivityRef.current = Date.now();  // feed the stale-activity watchdog
 
       if (data.type === "error") {
@@ -674,23 +679,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           return;
         }
         if (data.message === "Unauthorized") {
-          const refresh = localStorage.getItem("refresh_token");
-          if (refresh) {
-            fetch("/api/auth/refresh", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ refresh_token: refresh }),
-            })
-              .then((r) => (r.ok ? r.json() : Promise.reject()))
-              .then((tokens) => {
-                localStorage.setItem("access_token", tokens.access_token);
-                localStorage.setItem("refresh_token", tokens.refresh_token);
-                setWsRetryKey((k) => k + 1);
-              })
-              .catch(() => { window.location.href = "/login"; });
-          } else {
-            window.location.href = "/login";
-          }
+          // Refresh through the shared deduped singleton (lib/api) — a raw fetch
+          // here races the axios interceptor's refresh and, with refresh-token
+          // rotation, the two invalidate each other and force a logout loop.
+          refreshAccessToken()
+            .then(() => { setWsRetryKey((k) => k + 1); })
+            .catch(() => { window.location.href = "/login"; });
           return;
         }
         // Turn-failure errors (no providers, chain exhausted, mid-stream crash) are
@@ -874,7 +868,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         activeSubAgentsRef.current++;
         setIsStreaming(true);
         setAgentStatus({ label: "Sub-agents working…" });
-        if (!userClosedActivitiesRef.current && useUIModeStore.getState().mode !== "simple") setShowActivitiesPanel(true);
+        if (!userClosedActivitiesRef.current && getEffectiveUIMode() !== "simple") setShowActivitiesPanel(true);
         setSubAgentActivities((prev) => {
           const existing = prev.find((a) => a.taskId === data.task_id);
           if (existing) return prev;

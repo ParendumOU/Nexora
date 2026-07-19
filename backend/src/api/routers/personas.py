@@ -183,7 +183,10 @@ async def list_personas(
 ):
     org_id = await _get_org(current_user, db)
     result = await db.execute(select(Persona).where(Persona.org_id == org_id).order_by(Persona.name))
-    return result.scalars().all()
+    from src.core.permissions import filter_by_capability
+    return await filter_by_capability(
+        current_user, org_id, db, list(result.scalars().all()), "persona_ids", lambda p: p.id,
+    )
 
 
 @router.post("", response_model=PersonaResponse, status_code=201)

@@ -8,10 +8,11 @@ import { Copy, Check, Trash2, UserPlus, RefreshCw, AlertTriangle, LogOut, Chevro
 import { cn, copyToClipboard } from "@/lib/utils";
 import toast from "react-hot-toast";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { GroupsTab } from "@/components/org/GroupsTab";
 
 const PRESET_COLORS = ["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6"];
 
-type Tab = "general" | "members" | "invites";
+type Tab = "general" | "members" | "groups" | "invites";
 
 const ROLES = [
   { value: "viewer", label: "Viewer", description: "Read-only access to agents and knowledge bases" },
@@ -282,7 +283,7 @@ export default function OrgSettingsPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-border">
-        {(["general", "members", "invites"] as Tab[]).map((t) => (
+        {((isAdmin ? ["general", "members", "groups", "invites"] : ["general", "members", "invites"]) as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -537,6 +538,9 @@ export default function OrgSettingsPage() {
           )}
         </div>
       )}
+
+      {/* Groups tab — admin-managed permission groups */}
+      {tab === "groups" && isAdmin && <GroupsTab members={members} />}
 
       {/* Invites tab */}
       {tab === "invites" && (

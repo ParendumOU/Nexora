@@ -120,7 +120,10 @@ async def list_skills(
 ):
     org_id = await _get_org(current_user, db)
     result = await db.execute(select(Skill).where(Skill.org_id == org_id).order_by(Skill.category, Skill.name))
-    return result.scalars().all()
+    from src.core.permissions import filter_by_capability
+    return await filter_by_capability(
+        current_user, org_id, db, list(result.scalars().all()), "skill_keys", lambda s: s.key,
+    )
 
 
 @router.post("", response_model=SkillResponse, status_code=201)

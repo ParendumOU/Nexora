@@ -5,9 +5,7 @@ import logging
 
 from telegram import Message as TgMessage  # type used in _process_message signature
 
-from src.services.telegram.helpers import (
-    _send, _TEXT_EXTENSIONS, UPLOADS_DIR, _WHISPER_PROVIDERS, _VISION_PROVIDERS,
-)
+from src.services.telegram.helpers import _send, _TEXT_EXTENSIONS, UPLOADS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -36,107 +34,91 @@ def _save_upload(vchat_id: str, filename: str, data: bytes) -> str:
     return dest
 
 
-# ── Provider lookup ───────────────────────────────────────────────────────────
-
-async def _find_media_provider(
-    org_id: str, provider_types: tuple[str, ...]
-) -> "tuple[str, str | None, str] | None":
-    """Return (api_key, base_url, provider_type) for the first active matching provider."""
-    from src.models.provider import Provider
-    from src.providers.router import _get_credentials
-    from src.core.database import AsyncSessionLocal
-    from sqlalchemy import select
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(
-            select(Provider).where(
-                Provider.org_id == org_id,
-                Provider.provider_type.in_(provider_types),
-                Provider.is_active == True,
-            ).order_by(Provider.priority.desc())
-        )
-        for p in r.scalars().all():
-            creds = _get_credentials(p)
-            api_key = creds.get("api_key") or creds.get("token") or ""
-            if api_key:
-                return api_key, p.base_url, p.provider_type
-    return None
-
-
 # ── Transcription ─────────────────────────────────────────────────────────────
 
 async def _transcribe_audio_bytes(audio_bytes: bytes, filename: str, org_id: str) -> str | None:
-    found = await _find_media_provider(org_id, _WHISPER_PROVIDERS)
-    if not found:
-        return None
-    api_key, base_url, ptype = found
-    try:
-        import io
-        import openai
-        kw: dict = {"api_key": api_key}
-        if base_url:
-            kw["base_url"] = base_url
-        client = openai.AsyncOpenAI(**kw)
-        model = "whisper-large-v3" if ptype == "groq" else "whisper-1"
-        result = await client.audio.transcriptions.create(
-            model=model,
-            file=(filename, io.BytesIO(audio_bytes), "audio/ogg"),
-        )
-        return result.text or None
-    except Exception as exc:
-        logger.warning(f"[tg_media] transcription failed ({ptype}): {exc}")
-        return None
+    """Speech-to-text through the org's stt-capable providers (seed-declared),
+    best-first with failover — no hardcoded provider/model lists."""
+    from src.providers.capabilities import (
+        find_capability_providers, provider_api_key, provider_base_url,
+    )
+    for provider, cap in await find_capability_providers(org_id, "stt"):
+        api_key = provider_api_key(provider)
+        model = cap.get("model")
+        if not api_key or not model:
+            continue
+        try:
+            import io
+            import openai
+            kw: dict = {"api_key": api_key}
+            base_url = provider_base_url(provider)
+            if base_url:
+                kw["base_url"] = base_url
+            client = openai.AsyncOpenAI(**kw)
+            result = await client.audio.transcriptions.create(
+                model=model,
+                file=(filename, io.BytesIO(audio_bytes), "audio/ogg"),
+            )
+            if result.text:
+                return result.text
+        except Exception as exc:
+            logger.warning(f"[tg_media] transcription failed ({provider.provider_type}): {exc}")
+    return None
 
 
 # ── Vision ────────────────────────────────────────────────────────────────────
 
 async def _describe_image_bytes(image_bytes: bytes, mime_type: str, org_id: str) -> str | None:
+    """Image description through the org's vision-capable providers (seed-declared),
+    best-first with failover. The capability's `api` picks the wire format."""
     import base64
     b64 = base64.standard_b64encode(image_bytes).decode()
     prompt = "Describe what you see in this image concisely."
 
-    found = await _find_media_provider(org_id, ("anthropic",))
-    if found:
-        api_key, base_url, _ = found
+    from src.providers.capabilities import (
+        find_capability_providers, provider_api_key, provider_base_url,
+    )
+    for provider, cap in await find_capability_providers(org_id, "vision"):
+        api_key = provider_api_key(provider)
+        model = cap.get("model")
+        if not api_key or not model:
+            continue
+        base_url = provider_base_url(provider)
         try:
-            import anthropic as ant
-            kw: dict = {"api_key": api_key}
-            if base_url:
-                kw["base_url"] = base_url
-            client = ant.AsyncAnthropic(**kw)
-            resp = await client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=512,
-                messages=[{"role": "user", "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": b64}},
-                    {"type": "text", "text": prompt},
-                ]}],
-            )
-            if resp.content:
-                return resp.content[0].text
+            if cap.get("api") == "anthropic":
+                import anthropic as ant
+                kw: dict = {"api_key": api_key}
+                if base_url:
+                    kw["base_url"] = base_url
+                client = ant.AsyncAnthropic(**kw)
+                resp = await client.messages.create(
+                    model=model,
+                    max_tokens=512,
+                    messages=[{"role": "user", "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": b64}},
+                        {"type": "text", "text": prompt},
+                    ]}],
+                )
+                if resp.content and resp.content[0].text:
+                    return resp.content[0].text
+            else:  # openai_compat
+                import openai
+                kw = {"api_key": api_key}
+                if base_url:
+                    kw["base_url"] = base_url
+                client = openai.AsyncOpenAI(**kw)
+                resp = await client.chat.completions.create(
+                    model=model,
+                    max_tokens=512,
+                    messages=[{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+                        {"type": "text", "text": prompt},
+                    ]}],
+                )
+                if resp.choices and resp.choices[0].message.content:
+                    return resp.choices[0].message.content
         except Exception as exc:
-            logger.warning(f"[tg_media] Anthropic vision failed: {exc}")
-
-    found = await _find_media_provider(org_id, ("openai",))
-    if found:
-        api_key, base_url, _ = found
-        try:
-            import openai
-            kw = {"api_key": api_key}
-            if base_url:
-                kw["base_url"] = base_url
-            client = openai.AsyncOpenAI(**kw)
-            resp = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                max_tokens=512,
-                messages=[{"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
-                    {"type": "text", "text": prompt},
-                ]}],
-            )
-            if resp.choices:
-                return resp.choices[0].message.content
-        except Exception as exc:
-            logger.warning(f"[tg_media] OpenAI vision failed: {exc}")
+            logger.warning(f"[tg_media] vision failed ({provider.provider_type}): {exc}")
 
     return None
 

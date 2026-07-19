@@ -13,6 +13,7 @@ import { cn, truncate } from "@/lib/utils";
 import { useSidebarStore } from "@/store/sidebar";
 import { useAuthStore } from "@/store/auth";
 import { useUIModeStore } from "@/store/ui-mode";
+import { usePermissionsStore, hasPermission } from "@/store/permissions";
 import { useOnboardingStore } from "@/store/onboarding";
 import { ActiveAgentsPanel, AgentFilterPayload } from "@/components/sidebar/ActiveAgentsPanel";
 import { chatsApi, projectsApi } from "@/lib/api";
@@ -60,21 +61,21 @@ interface Project {
   pm_agent_id?: string | null;
 }
 
-const _baseManageItems = [
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
-  { href: "/issues", label: "Issues", icon: CircleDot },
-  { href: "/proposals", label: "Proposals", icon: Lightbulb },
-  { href: "/approvals", label: "Approvals", icon: ShieldCheck },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/channels", label: "Channels", icon: Radio },
-  { href: "/schedules", label: "Schedules", icon: Clock },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/personas", label: "Personas", icon: Fingerprint },
-  { href: "/skills", label: "Skills", icon: Sparkles },
-  { href: "/tools", label: "Tools", icon: Wrench },
-  { href: "/mcps", label: "MCP Servers", icon: Server },
-  { href: "/knowledge-bases", label: "Knowledge Bases", icon: BookOpen },
-  { href: "/memory", label: "Memory", icon: BrainCircuit },
+const _baseManageItems: { href: string; label: string; icon: React.ElementType; perm?: string }[] = [
+  { href: "/tasks", label: "Tasks", icon: ListTodo, perm: "tasks.view" },
+  { href: "/issues", label: "Issues", icon: CircleDot, perm: "issues.view" },
+  { href: "/proposals", label: "Proposals", icon: Lightbulb, perm: "proposals.view" },
+  { href: "/approvals", label: "Approvals", icon: ShieldCheck, perm: "approvals.view" },
+  { href: "/projects", label: "Projects", icon: FolderKanban, perm: "projects.view" },
+  { href: "/channels", label: "Channels", icon: Radio, perm: "channels.view" },
+  { href: "/schedules", label: "Schedules", icon: Clock, perm: "schedules.view" },
+  { href: "/agents", label: "Agents", icon: Bot, perm: "agents.view" },
+  { href: "/personas", label: "Personas", icon: Fingerprint, perm: "personas.view" },
+  { href: "/skills", label: "Skills", icon: Sparkles, perm: "skills.view" },
+  { href: "/tools", label: "Tools", icon: Wrench, perm: "tools.view" },
+  { href: "/mcps", label: "MCP Servers", icon: Server, perm: "mcp_servers.view" },
+  { href: "/knowledge-bases", label: "Knowledge Bases", icon: BookOpen, perm: "knowledge_bases.view" },
+  { href: "/memory", label: "Memory", icon: BrainCircuit, perm: "memory.view" },
   { href: "/org", label: "Organization", icon: Network },
 ];
 
@@ -82,7 +83,7 @@ const billingEnabled = process.env.NEXT_PUBLIC_BILLING_ENABLED === "true";
 const manageItems = billingEnabled
   ? [
       ..._baseManageItems,
-      { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
+      { href: "/marketplace", label: "Marketplace", icon: ShoppingBag, perm: "marketplace.view" },
       { href: "/billing", label: "Billing", icon: CreditCard },
       { href: "/audit", label: "Audit Logs", icon: LayoutGrid },
     ]
@@ -253,7 +254,11 @@ function ProjectGroup({
 export function Sidebar() {
   const { collapsed, toggle, chatGroups, toggleChatGroup, expandedChats, toggleChat } = useSidebarStore();
   const { user, logout } = useAuthStore();
-  const uiMode = useUIModeStore((s) => s.mode);
+  const rawUiMode = useUIModeStore((s) => s.mode);
+  const permissions = usePermissionsStore((s) => s.permissions);
+  // Admin-managed group permissions can disable the advanced UI mode entirely.
+  const advancedAllowed = hasPermission(permissions, "ui.advanced_mode");
+  const uiMode = advancedAllowed ? rawUiMode : "simple";
   const router = useRouter();
   const pathname = usePathname();
   const qc = useQueryClient();
@@ -747,9 +752,11 @@ export function Sidebar() {
       {uiMode === "advanced" && mode === "manage" && (
         <div className="flex-1 overflow-y-auto">
           <nav className="px-2 pt-2 pb-1 space-y-0.5">
-            {manageItems.map(({ href, label, icon: Icon }) => (
-              <NavItem key={href} href={href} label={label} Icon={Icon} collapsed={collapsed} />
-            ))}
+            {manageItems
+              .filter(({ perm }) => hasPermission(permissions, perm))
+              .map(({ href, label, icon: Icon }) => (
+                <NavItem key={href} href={href} label={label} Icon={Icon} collapsed={collapsed} />
+              ))}
           </nav>
         </div>
       )}
@@ -788,13 +795,15 @@ export function Sidebar() {
                 <UserCircle className="w-4 h-4" />
                 Profile
               </DropdownMenu.Item>
-              <DropdownMenu.Item
-                className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-accent outline-none"
-                onClick={() => router.push("/settings")}
-              >
-                <Settings className="w-4 h-4" />
-                Settings
-              </DropdownMenu.Item>
+              {hasPermission(permissions, "settings.view") && (
+                <DropdownMenu.Item
+                  className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-accent outline-none"
+                  onClick={() => router.push("/settings")}
+                >
+                  <Settings className="w-4 h-4" />
+                  Settings
+                </DropdownMenu.Item>
+              )}
               {/* Billing link moved to main sidebar nav when billing is enabled */}
               {uiMode === "advanced" && (
                 <>

@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
@@ -30,6 +30,7 @@ from src.api.routers import workspaces as workspaces_router
 from src.api.routers import outcomes as outcomes_router
 from src.api.routers import org_roles as org_roles_router
 from src.api.routers import audit as audit_router
+from src.api.routers import permission_groups as permission_groups_router
 from src.integrations import github, gitlab
 
 logging.basicConfig(level=logging.INFO)
@@ -90,58 +91,64 @@ def create_app() -> FastAPI:
 
     # API routers
     prefix = "/api"
+    # Management routers gated by the group-permission route map
+    # (src.core.permissions.ROUTE_AREA_MAP). Ungated requests pass through.
+    from src.core.permissions import permission_guard
+    guarded = [Depends(permission_guard)]
+
     app.include_router(auth.router, prefix=prefix)
     app.include_router(totp_router.router, prefix=prefix)
     app.include_router(search_router.router, prefix=prefix)
-    app.include_router(marketplace_router.router, prefix=prefix)
+    app.include_router(marketplace_router.router, prefix=prefix, dependencies=guarded)
     app.include_router(users.router, prefix=prefix)
     app.include_router(user_api_keys.router, prefix=prefix)
     app.include_router(user_backup.router, prefix=prefix)
     app.include_router(notifications.router, prefix=prefix)
-    app.include_router(providers.router, prefix=prefix)
-    app.include_router(agents.router, prefix=prefix)
+    app.include_router(providers.router, prefix=prefix, dependencies=guarded)
+    app.include_router(agents.router, prefix=prefix, dependencies=guarded)
     app.include_router(agents_public_router, prefix=prefix)
-    app.include_router(projects.router, prefix=prefix)
+    app.include_router(projects.router, prefix=prefix, dependencies=guarded)
     app.include_router(chats.router, prefix=prefix)
-    app.include_router(tasks.router, prefix=prefix)
+    app.include_router(tasks.router, prefix=prefix, dependencies=guarded)
     app.include_router(logs.router, prefix=prefix)
-    app.include_router(skills.router, prefix=prefix)
-    app.include_router(mcp_servers.router, prefix=prefix)
-    app.include_router(tools.router, prefix=prefix)
-    app.include_router(personas.router, prefix=prefix)
-    app.include_router(git_credentials.router, prefix=prefix)
+    app.include_router(skills.router, prefix=prefix, dependencies=guarded)
+    app.include_router(mcp_servers.router, prefix=prefix, dependencies=guarded)
+    app.include_router(tools.router, prefix=prefix, dependencies=guarded)
+    app.include_router(personas.router, prefix=prefix, dependencies=guarded)
+    app.include_router(git_credentials.router, prefix=prefix, dependencies=guarded)
     app.include_router(git_proxy.router, prefix=prefix)
     app.include_router(orgs.router, prefix=prefix)
     app.include_router(seeds.router, prefix=prefix)
-    app.include_router(issues.router, prefix=prefix)
-    app.include_router(integrations.router, prefix=prefix)
+    app.include_router(issues.router, prefix=prefix, dependencies=guarded)
+    app.include_router(integrations.router, prefix=prefix, dependencies=guarded)
     app.include_router(usage.router, prefix=prefix)
-    app.include_router(model_profiles.router, prefix=prefix)
-    app.include_router(provider_types.router, prefix=prefix)
-    app.include_router(memories.router)
-    app.include_router(memory_notes_router.router)
-    app.include_router(teams.router, prefix=prefix)
-    app.include_router(schedules_router.router, prefix=prefix)
-    app.include_router(board_router.router, prefix=prefix)
-    app.include_router(webhook_rules_router.router, prefix=prefix)
+    app.include_router(model_profiles.router, prefix=prefix, dependencies=guarded)
+    app.include_router(provider_types.router, prefix=prefix, dependencies=guarded)
+    app.include_router(memories.router, dependencies=guarded)
+    app.include_router(memory_notes_router.router, dependencies=guarded)
+    app.include_router(teams.router, prefix=prefix, dependencies=guarded)
+    app.include_router(schedules_router.router, prefix=prefix, dependencies=guarded)
+    app.include_router(board_router.router, prefix=prefix, dependencies=guarded)
+    app.include_router(webhook_rules_router.router, prefix=prefix, dependencies=guarded)
     app.include_router(custom_webhook_router.router, prefix=prefix)
-    app.include_router(agent_messages_router.router, prefix=prefix)
-    app.include_router(proposals_router.router, prefix=prefix)
+    app.include_router(agent_messages_router.router, prefix=prefix, dependencies=guarded)
+    app.include_router(proposals_router.router, prefix=prefix, dependencies=guarded)
     app.include_router(plans_router.router, prefix=prefix)
-    app.include_router(knowledge_bases_router.router, prefix=prefix)
+    app.include_router(knowledge_bases_router.router, prefix=prefix, dependencies=guarded)
     app.include_router(system_router.router, prefix=prefix)
-    app.include_router(tool_envs_router.router, prefix=prefix)
-    app.include_router(env_vars_router.router, prefix=prefix)
+    app.include_router(tool_envs_router.router, prefix=prefix, dependencies=guarded)
+    app.include_router(env_vars_router.router, prefix=prefix, dependencies=guarded)
     app.include_router(cli_hooks_router.router, prefix=prefix)
     app.include_router(oauth_router.router, prefix=prefix)
     app.include_router(device_router.router, prefix=prefix)
     app.include_router(platform_backup_router.router, prefix=prefix)
     app.include_router(goals_router.router, prefix=prefix)
-    app.include_router(approvals_router.router, prefix=prefix)
+    app.include_router(approvals_router.router, prefix=prefix, dependencies=guarded)
     app.include_router(workspaces_router.router, prefix=prefix)
     app.include_router(outcomes_router.router, prefix=prefix)
     app.include_router(org_roles_router.router, prefix=prefix)
     app.include_router(audit_router.router, prefix=prefix)
+    app.include_router(permission_groups_router.router, prefix=prefix)
 
     # WebSocket
     app.include_router(ws_router.router)

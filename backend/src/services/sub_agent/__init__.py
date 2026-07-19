@@ -244,28 +244,15 @@ async def _run_delegated_tasks(
                     )
                 )
                 _unassigned_pending = _ua_r.scalar() or 0
-                # A turn that PROMISED a next action ("ahora voy a leerlo…") without a
-                # tool fence must be nudged to actually act — not treated as done.
-                _last_asst = (await _ua_db.execute(
-                    select(Message.content).where(
-                        Message.chat_id == chat_id, Message.role == "assistant",
-                        Message.excluded.isnot(True),
-                    ).order_by(Message.created_at.desc()).limit(1)
-                )).scalar_one_or_none()
-            from src.services.turn_completion import looks_like_promise, has_final_marker
-            # A turn that explicitly closed with <final/> is terminal — never treat it as
-            # a pending promise, even if its prose trips the promise heuristic (e.g. a
-            # final answer ending "...just let me know" matches `let me`). Without this
-            # gate such a turn is wrongly nudged and the orchestrator answers twice.
-            _is_promise = looks_like_promise(_last_asst or "") and not has_final_marker(_last_asst or "")
 
-            # Nudge when:
-            #  - a hallucinated PROMISE ("le paso el encargo…", "I'll delegate…") with no
-            #    tool fence — even on the FIRST turn (the agent narrated intent but never
-            #    acted), or
+            # Nudge only on STRUCTURAL signals — never by pattern-matching the reply's
+            # wording (#H1). Fire when:
+            #  - real work is genuinely outstanding: an unassigned/pending Task exists
+            #    (the agent created work but the dispatcher hasn't picked it up), or
             #  - an empty resume turn that must be pushed to follow through.
-            # A substantive final answer is left alone (no nudge → no extra slow turn).
-            if _unassigned_pending > 0 or (nudge_if_idle and (_is_promise or (from_resume and last_turn_empty))):
+            # A turn that merely narrated a next action without emitting a fence and
+            # created no Task is terminal — the platform does not guess intent from prose.
+            if _unassigned_pending > 0 or (nudge_if_idle and from_resume and last_turn_empty):
                 asyncio.create_task(_nudge_orchestrator(chat_id, org_id, user_id, from_resume=from_resume)).add_done_callback(_on_task_error("nudge_orchestrator"))
             else:
                 # Truly idle (nothing to dispatch/run, no nudge) → tell the UI to stop

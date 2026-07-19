@@ -37,6 +37,7 @@ from .tool_approval import ToolApproval
 from .outcome import Outcome
 from .agent_role import AgentRole
 from .audit_log import AuditLog
+from .permission_group import PermissionGroup, PermissionGroupMember
 
 __all__ = [
     "User", "UserProfileFact", "Organization", "OrgMember", "OrgInvite", "SignupInvite",
@@ -62,4 +63,5 @@ __all__ = [
     "Outcome",
     "AgentRole",
     "AuditLog",
+    "PermissionGroup", "PermissionGroupMember",
 ]

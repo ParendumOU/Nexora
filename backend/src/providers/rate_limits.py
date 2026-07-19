@@ -47,6 +47,7 @@ _UNIT_SECONDS: dict[str, float] = {
     "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
     "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
     "d": 86400, "day": 86400, "days": 86400,
+    "w": 604800, "wk": 604800, "week": 604800, "weeks": 604800,
 }
 
 # ── Builtin defaults ──────────────────────────────────────────────────────────
@@ -54,6 +55,18 @@ _UNIT_SECONDS: dict[str, float] = {
 # new provider reports limits, add a block here (or in its seed JSON).
 _BUILTIN_RULES: dict[str, list[dict]] = {
     "opencode-go": [
+        {
+            # Weekly cap. Message: "Weekly usage limit reached. Resets in 1 day."
+            # (metadata.limitName="weekly"). It is ALSO a GoUsageLimitError, so this
+            # MUST precede the 5-hour rule below or the hr/min regex would miss the
+            # "Resets in N day/week" form and fall back to a far-too-short default.
+            "name": "weekly usage limit",
+            "match": "weekly usage limit",
+            "reset_regex": r"resets?\s+in\s*(\d+)\s*(week|weeks|wk|w|day|days|d|hr|hrs|hour|hours|h|min|mins|minute|minutes|m)\b",
+            "reset_units": ["__inline__"],
+            "default_seconds": 86400,
+            "buffer_seconds": 60,
+        },
         {
             "name": "5-hour usage limit",
             "match": "GoUsageLimitError",

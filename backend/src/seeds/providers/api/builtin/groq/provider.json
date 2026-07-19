@@ -8,6 +8,9 @@
   "requires_base_url": false,
   "default_model": "llama-3.3-70b-versatile",
   "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+  "capabilities": {
+    "stt": {"model": "whisper-large-v3"}
+  },
   "website": "https://console.groq.com",
   "setup_steps": [
     {"text": "Login at console.groq.com", "url": "https://console.groq.com"},

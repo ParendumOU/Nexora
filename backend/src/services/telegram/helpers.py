@@ -29,9 +29,6 @@ _TEXT_EXTENSIONS = {
     ".tf", ".hcl",
 }
 
-_WHISPER_PROVIDERS = ("openai", "groq")
-_VISION_PROVIDERS  = ("anthropic", "openai")
-
 UPLOADS_DIR = "/app/uploads"
 
 # ── Regexes ───────────────────────────────────────────────────────────────────

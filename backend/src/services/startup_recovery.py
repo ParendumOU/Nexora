@@ -164,8 +164,10 @@ async def _recover_task(task: Task) -> None:
                     asyncio.create_task(_bubble_complete_parent(t.parent_id))
                 return
 
-            # Sub-chat exists but has no useful output — reset for re-dispatch
+            # Sub-chat exists but has no useful output — reset for re-dispatch, keeping
+            # the thread as the resume target so the re-run doesn't orphan it.
             logger.info(f"[recovery] Task {t.id}: sub-chat empty, resetting for re-dispatch")
+            t.continue_chat_id = t.continue_chat_id or t.sub_chat_id
             t.sub_chat_id = None
 
         # Reset to pending so _run_delegated_tasks can pick it up

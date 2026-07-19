@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
+import { usePermissionsStore } from "@/store/permissions";
 import { Sidebar } from "@/components/layout/sidebar";
 import { OnboardingBanner } from "@/components/onboarding/OnboardingBanner";
 import { AdvancedTourBanner } from "@/components/onboarding/AdvancedTourBanner";
@@ -19,12 +20,19 @@ function LoadingScreen() {
 }
 
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, _hasHydrated, user, setUser, logout } = useAuthStore();
+  const { isAuthenticated, _hasHydrated, user, setUser, logout, activeOrg } = useAuthStore();
+  const fetchPermissions = usePermissionsStore((s) => s.fetch);
   const router = useRouter();
 
   // Single user-level WebSocket → pushes notifications + chat-list changes,
   // replacing the old REST polling. Connects once authenticated.
   useUserSocket(_hasHydrated && isAuthenticated);
+
+  // Effective group permissions for the active org — drives section visibility
+  // and the advanced-mode gate. Refreshed on login and org switch.
+  useEffect(() => {
+    if (_hasHydrated && isAuthenticated) fetchPermissions();
+  }, [_hasHydrated, isAuthenticated, activeOrg?.id, fetchPermissions]);
 
   useEffect(() => {
     if (!_hasHydrated) return;

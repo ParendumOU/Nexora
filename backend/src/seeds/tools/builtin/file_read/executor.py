@@ -7,11 +7,14 @@ async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict:
     if not path_str:
         return {"error": "path is required"}
 
-    # Shared workspace (#240): resolve a relative path under the delegation tree's
-    # workspace; no-op (returns the path unchanged) when the feature is off.
+    # Shared workspace (#240) + path confinement: resolve under the tree's workspace
+    # and reject workspace-escape / sensitive host paths. Falls back to legacy raw
+    # behavior (still denying sensitive paths) when the feature is off.
     try:
-        from src.services.workspace import resolve_path
-        path_str = await resolve_path(chat_id, path_str)
+        from src.services.workspace import resolve_path_guarded
+        path_str, _err = await resolve_path_guarded(chat_id, path_str)
+        if _err:
+            return {"error": _err}
     except Exception:
         pass
 

@@ -42,6 +42,26 @@ async def create_subchat(
         if not parent:
             return None
 
+        # Same spawn backstops as the API delegation path: depth + per-root caps.
+        # We cannot stop the CLI's external agent loop, but an over-cap sub-agent is
+        # not persisted (caller falls back to ephemeral broadcasting), so a runaway
+        # CLI run cannot grow the chat tree unbounded.
+        from src.core.config import get_settings as _gs
+        from src.services.sub_agent.spawn import delegation_depth
+        if await delegation_depth(parent_chat_id) >= _gs().max_subdelegation_depth:
+            logger.warning(
+                "[cli_subchat] delegation depth cap reached under %s — not persisting sub-chat",
+                parent_chat_id,
+            )
+            return None
+        from src.services.agent_tools.tool_executor import _enforce_root_spawn_caps
+        if await _enforce_root_spawn_caps(parent_chat_id, db, count=True):
+            logger.warning(
+                "[cli_subchat] root spawn cap hit under %s — not persisting sub-chat",
+                parent_chat_id,
+            )
+            return None
+
         sub_chat_id = str(uuid.uuid4())
         task_id = str(uuid.uuid4())
         chat_agent_id = ctx.get("agent_id") or parent.agent_id

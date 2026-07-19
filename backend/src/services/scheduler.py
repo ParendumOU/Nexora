@@ -153,6 +153,26 @@ def schedule_conversation_watchdog(interval_minutes: int = 2) -> None:
     s.add_job(_job, IntervalTrigger(minutes=interval_minutes), id="conversation_watchdog", replace_existing=True)
 
 
+def schedule_chat_archival(interval_minutes: int = 60) -> None:
+    """Register the periodic chat-hygiene sweep (archive finished sub-chats and
+    idle system host chats). Interval from config; the sweep itself no-ops when
+    chat_archive_after_hours is 0."""
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    async def _job():
+        from src.services.chat_maintenance import archive_stale_chats
+        try:
+            await archive_stale_chats()
+        except Exception as exc:
+            logger.error(f"[scheduler] chat archival sweep failed: {exc}")
+
+    s = get_scheduler()
+    if s.get_job("chat_archival"):
+        return
+    s.add_job(_job, IntervalTrigger(minutes=interval_minutes), id="chat_archival", replace_existing=True)
+    logger.info(f"[scheduler] chat_archival registered every {interval_minutes}m")
+
+
 def schedule_autonomy_tick(interval_minutes: int = 5) -> None:
     """Register the proactive autonomy tick (GitLab #234). Only call when enabled."""
     from apscheduler.triggers.interval import IntervalTrigger

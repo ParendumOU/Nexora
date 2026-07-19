@@ -10,6 +10,16 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.22.0
+
+- Org admins and owners can now cap and scope each user through permission groups. A group can set a token budget (total or per rolling window), a max number of agents a user may run at once, and a max number of provider accounts, plus allowlists of the exact agents, skills, tools, personas, provider accounts and fallback chains a member may see and use.
+- A group can pin a member to a forced default fallback chain, so a restricted employee configures nothing and always runs on the account and model you assign.
+- Limits are hard enforced before any tokens are spent: an over-budget user, a disallowed agent, or too many concurrent agents gets a clear message and the turn does not run. This applies to both the WebSocket and SSE chat paths.
+- Restricted users only see what they are assigned: the agents, skills, tools, personas, provider accounts and chains lists are filtered to their allowlist, and the chat provider picker is hidden or locked to the assigned chain.
+- Viewers no longer see the Settings section unless an admin grants it, in the web app and the CLI.
+- The CLI mirrors the web limits: it hides menu sections and command-palette entries the user lacks permission for, and forces the simple interface when advanced mode is not allowed.
+- New endpoints: GET /api/permissions/assignable lists the resources an admin can put in an allowlist, and GET /api/permissions/me now also returns the caller's limits, capabilities and remaining budget.
+
 ## 1.21.2
 
 - Set PNPM_HOME and added it to PATH in the backend image so the global install of the Claude, Gemini, and Codex CLIs works. Unlike npm, pnpm needs a global bin directory on PATH (ERR_PNPM_NO_GLOBAL_BIN_DIR). No runtime behavior change.

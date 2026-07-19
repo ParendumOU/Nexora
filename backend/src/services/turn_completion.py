@@ -1,20 +1,30 @@
 """Deterministic turn-completion decision (GitLab #213, Autonomy epic #238).
 
-Centralizes — in code, not prompt prose — when an agent turn is *terminal*. The
-old contract leaned on the model emitting a `<final/>` marker and a watchdog
-re-poking turns that lacked it. The actual rule is simpler and structural:
+Centralizes — in code, not prompt prose, and never by pattern-matching natural
+language — when an agent turn is *terminal*. The rule is purely structural:
 
-    a turn is complete  ⇔  it emitted no tool calls this turn.
+    a turn is complete  ⇔  it emitted no (resumable) tool calls this turn.
 
-If the turn called tools, the orchestrator must resume with their results (not
-complete). If it called none, it's a final answer (complete). The `<final/>`
-marker is now just how that decision is *persisted* so the watchdog leaves a
-finished turn alone — not the source of truth.
+If the turn called tools, the orchestrator resumes with their results (not
+complete). If it called none, it's a final answer (complete). This is decided
+from the parsed tool-call list — structured JSON — not from the wording of the
+reply.
 
-With native function calling (#214) this is fully reliable ("no tool_call = done").
-With the legacy text-fence path the same rule holds, since `had_tool_calls`
-already reflects a parsed fence. `is_turn_complete` is pure + unit-tested; the
-turn engine calls it and persists the marker.
+A model that wants to *explicitly* seal its turn does so with a structured
+signal, not prose: it emits the ``end_turn`` control tool in the ``tool_calls``
+fence (see ``strip_end_turn``). Under native function calling (#214) that is a
+real function call the provider returns as a ``tool_use`` block; on the legacy
+text-fence path it is the same JSON object. Either way Nexora reads it as data,
+never by scraping the sentence. The legacy ``<final/>`` sentinel is still
+accepted (and persisted, so the watchdog leaves a finished turn alone) but the
+canonical machine signal is now ``end_turn``.
+
+There is deliberately NO natural-language "promise/intent" heuristic: a turn
+that narrates a next action without emitting a fence is simply terminal. If real
+work is genuinely outstanding it shows up structurally (an unassigned/pending
+Task), and the sub-agent dispatcher nudges on *that* — never on the prose.
+``is_turn_complete`` is pure + unit-tested; the turn engine calls it and persists
+the marker.
 """
 from __future__ import annotations
 
@@ -27,34 +37,26 @@ _FINAL_RE = re.compile(
 
 FINAL_MARKER = "<final/>"
 
-# First-person, forward-looking ACTION intent — a turn that *announces* it will do
-# something next (instead of doing it). A weak model often says "ahora voy a
-# leerlo…" / "let me read it…" with no tool-call fence and then stops. Such a turn
-# is NOT terminal: it must be nudged to actually emit the fence. Conservative
-# (first-person intent only) to avoid flagging genuine final answers like "ahora
-# puedes descargarlo".
-_PROMISE_RE = re.compile(
-    r"\b(?:"
-    # Spanish — intent to act / delegate (no fence emitted yet)
-    r"voy\s+a|vamos\s+a|procedo\s+a|procederé|proceder[ée]\s+a|déjame|dejame|"
-    r"a\s+continuaci[oó]n\s+(?:voy|lo|los|la)|lo\s+har[ée]|ahora\s+(?:voy|leo|leer[ée]|reviso|"
-    r"revisar[ée]|consulto|consultar[ée]|busco|buscar[ée]|procedo|crear[ée]|cre[oó])|"
-    r"(?:le|se\s+lo|lo|la|los|las)\s+(?:paso|env[íi]o|asigno|delego|encargo|mando|traslado)|"
-    r"paso\s+(?:el|la|este|esta|esto|lo)|delego|me\s+encargo|encargar[ée]|"
-    # English
-    r"let\s+me|i['’]?ll\b|i\s+will\b|i['’]?m\s+going\s+to|i\s+am\s+going\s+to|"
-    r"i['’]?ll\s+(?:pass|delegate|assign|hand|send|create|spawn)|passing\s+(?:the|this|it)|"
-    r"delegating|handing\s+(?:off|it)|assigning|next\s*,?\s+i\b|now\s+i['’]?ll"
-    r")",
-    re.IGNORECASE,
-)
+# The structured completion control tool. A model emits it in the tool-call fence
+# (``[{"name": "end_turn"}]``) to seal its turn — the JSON-native, provider-agnostic
+# replacement for scraping the reply for an intent phrase. Handled by strip_end_turn
+# (it is a control signal, not executable work).
+END_TURN_TOOL = "end_turn"
 
 
-def looks_like_promise(content: str) -> bool:
-    """True if a turn announces a next action instead of taking it (forward-looking
-    first-person intent). Used to keep such a turn from being sealed as final and to
-    nudge it to actually act. Pure."""
-    return bool(content) and bool(_PROMISE_RE.search(content))
+def strip_end_turn(calls: list[dict] | None) -> tuple[list[dict], bool]:
+    """Split the ``end_turn`` control tool out of a parsed tool-call list.
+
+    Returns ``(remaining_calls, had_end_turn)``. ``end_turn`` is not executable
+    work — it's the structured "this turn is terminal" signal — so callers drop
+    it from the executable set. When it was the *only* call the turn carries no
+    resumable work and is terminal; when mixed with real tools their results must
+    still resume, so the flag is informational there. Pure.
+    """
+    if not calls:
+        return (calls or []), False
+    kept = [c for c in calls if (c.get("name") or "").strip().lower() != END_TURN_TOOL]
+    return kept, len(kept) != len(calls)
 
 
 def has_final_marker(content: str) -> bool:
@@ -103,13 +105,15 @@ def is_turn_complete(*, had_tool_calls: bool) -> bool:
 def finalize_marker(content: str, *, had_tool_calls: bool) -> str:
     """Append `<final/>` when the turn is complete and isn't already marked, so the
     conversation watchdog treats it as done. No-op when the turn called tools (it
-    will be resumed) or a marker is already present. Pure."""
+    will be resumed) or a marker is already present. Pure.
+
+    There is no natural-language exception here: every no-tool-call turn is sealed.
+    A turn that merely *narrates* a next action without emitting a fence is terminal
+    — the platform does not guess intent from prose. Genuinely-outstanding work is
+    caught structurally (pending Task) by the dispatcher, not by re-poking on wording.
+    """
     if had_tool_calls:
         return content
     if has_final_marker(content):
-        return content
-    # A promise ("I'll now read it…") must NOT be sealed as final — leave it
-    # unmarked so the nudge/watchdog re-pokes it to actually act.
-    if looks_like_promise(content):
         return content
     return content.rstrip() + "\n" + FINAL_MARKER

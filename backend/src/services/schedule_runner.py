@@ -54,8 +54,41 @@ async def run_schedule(schedule_id: str, triggered_by: str = "cron") -> str:
             return ""
 
         run_id = str(uuid.uuid4())
-        chat_id = str(uuid.uuid4())
         task_id = str(uuid.uuid4())
+
+        # Reuse the schedule's persistent host chat instead of minting one per run —
+        # a minutely schedule previously accumulated 2 new chats per run, forever.
+        # Lookup is via the newest prior run's chat (schedule ↔ chat link lives on
+        # ScheduleRun); agent change or archival naturally rotates to a fresh host.
+        from src.core.config import get_settings as _gs
+        chat_id: str | None = None
+        if _gs().schedule_reuse_host_chat:
+            prev_r = await db.execute(
+                select(Chat)
+                .join(ScheduleRun, ScheduleRun.chat_id == Chat.id)
+                .where(
+                    ScheduleRun.schedule_id == schedule_id,
+                    Chat.is_archived.is_(False),
+                    Chat.agent_id == schedule.agent_id,
+                    Chat.parent_chat_id.is_(None),
+                )
+                .order_by(ScheduleRun.started_at.desc())
+                .limit(1)
+            )
+            prev_chat = prev_r.scalars().first()
+            if prev_chat:
+                chat_id = prev_chat.id
+                prev_chat.updated_at = now
+
+        if chat_id is None:
+            chat_id = str(uuid.uuid4())
+            db.add(Chat(
+                id=chat_id,
+                user_id=SYSTEM_USER_ID,
+                agent_id=schedule.agent_id,
+                title=f"[Schedule] {schedule.name}",
+            ))
+            await db.flush()
 
         run = ScheduleRun(
             id=run_id,
@@ -67,15 +100,6 @@ async def run_schedule(schedule_id: str, triggered_by: str = "cron") -> str:
             chat_id=chat_id,
         )
         db.add(run)
-
-        chat = Chat(
-            id=chat_id,
-            user_id=SYSTEM_USER_ID,
-            agent_id=schedule.agent_id,
-            title=f"[Schedule] {schedule.name}",
-        )
-        db.add(chat)
-        await db.flush()
 
         task = Task(
             id=task_id,

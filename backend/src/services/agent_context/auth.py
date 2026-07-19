@@ -68,6 +68,11 @@ async def authenticate_ws(websocket: WebSocket) -> User | None:
                 return None
             api_key.last_used_at = datetime.now(timezone.utc)
             await db.commit()
+            # #177: carry the key's capability scope + org allowlist onto the user so
+            # the socket enforces them (a read-only key must not drive a write turn,
+            # and an org-restricted key must not open a foreign org's chat).
+            user._api_key_scopes = api_key.scopes or None  # type: ignore[attr-defined]
+            user._api_key_allowed_org_ids = api_key.allowed_org_ids or None  # type: ignore[attr-defined]
             return user
 
     try:

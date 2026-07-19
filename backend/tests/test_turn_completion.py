@@ -1,7 +1,13 @@
-"""Deterministic turn completion (GitLab #213)."""
+"""Deterministic turn completion (GitLab #213).
+
+Completion is structural — decided from the parsed tool-call list, never by
+pattern-matching the reply's wording. The old natural-language "promise" regex
+was removed (#H1): a model seals its turn with the structured `end_turn` control
+tool or the `<final/>` sentinel, and any no-tool-call turn is terminal.
+"""
 from src.services.turn_completion import (
-    is_turn_complete, has_final_marker, finalize_marker, FINAL_MARKER, looks_like_promise,
-    visible_text,
+    is_turn_complete, has_final_marker, finalize_marker, FINAL_MARKER,
+    strip_end_turn, END_TURN_TOOL, visible_text,
 )
 
 
@@ -32,15 +38,6 @@ def test_visible_text_keeps_real_prose():
 def test_visible_text_empty_input():
     assert visible_text("") == ""
     assert visible_text(None) == ""
-
-
-def test_final_marker_overrides_promise_heuristic():
-    # "...let me know" trips the promise heuristic, but a sealed final turn must
-    # NOT be nudged (the cf88b04 double-reply fix).
-    text = "Done — your report is delivered. Let me know if you need anything else.\n<final/>"
-    assert has_final_marker(text)
-    # sub_agent gate: nudge only when promise AND NOT sealed
-    assert not (looks_like_promise(text) and not has_final_marker(text))
 
 
 def test_complete_iff_no_tool_calls():
@@ -78,31 +75,60 @@ def test_finalize_empty_turn_gets_marker():
     assert FINAL_MARKER in out
 
 
-def test_promise_detected_es_en():
-    assert looks_like_promise("Entendido. Ahora voy a leerlo para mostrarte el progreso.")
-    assert looks_like_promise("Let me read it now to get the milestone IDs.")
-    assert looks_like_promise("I'll delegate that to the sub-agent.")
-    assert looks_like_promise("Déjame consultarlo.")
-    assert looks_like_promise("A continuación voy a crear la tarea.")
+# ── No prose-intent guessing: forward-looking narration is now sealed (#H1) ────
+
+def test_narration_without_fence_is_sealed_not_guessed():
+    # These once tripped the removed promise regex and were left UNMARKED to be
+    # nudged. The platform no longer guesses intent from wording: a no-tool-call
+    # turn is terminal and gets the marker. (Outstanding work is caught
+    # structurally via a pending Task, not by re-reading the sentence.)
+    for prose in (
+        "Ahora voy a leerlo para mostrarte el progreso.",
+        "Le paso el encargo exacto a S4vvy Carder.",
+        "I'll delegate that to the sub-agent.",
+        "Delegating to S4vvy now.",
+    ):
+        out = finalize_marker(prose, had_tool_calls=False)
+        assert out.endswith(FINAL_MARKER), prose
 
 
-def test_promise_delegation_phrases():
-    # the live stuck case: "Le paso el encargo exacto a S4vvy Carder."
-    assert looks_like_promise("Perfecto, Ivan. Le paso el encargo exacto a S4vvy Carder.")
-    assert looks_like_promise("Se lo paso a S4vvy.")
-    assert looks_like_promise("Lo delego al especialista.")
-    assert looks_like_promise("I'll pass this to the specialist agent.")
-    assert looks_like_promise("Delegating to S4vvy now.")
+def test_final_answer_ending_let_me_know_is_sealed_once():
+    # "...let me know" used to false-positive the promise regex. Now it's just a
+    # sealed final answer — no double-reply, no special-casing.
+    text = "Done — your report is delivered. Let me know if you need anything else."
+    out = finalize_marker(text, had_tool_calls=False)
+    assert out.endswith(FINAL_MARKER)
+    assert out.count(FINAL_MARKER) == 1
 
 
-def test_not_promise_for_final_answers():
-    assert not looks_like_promise("Las 4 cards ya están disponibles en tu panel de Archivos.")
-    assert not looks_like_promise("Ahora puedes descargarlas desde Files.")  # 'ahora puedes' ≠ intent
-    assert not looks_like_promise("El objetivo tiene 3 milestones, 33% completado.")
-    assert not looks_like_promise("")
+# ── strip_end_turn: structured completion control tool ────────────────────────
+
+def test_strip_end_turn_sole_call():
+    kept, had = strip_end_turn([{"name": END_TURN_TOOL}])
+    assert had is True
+    assert kept == []
 
 
-def test_promise_is_not_sealed_final():
-    # a promise turn must stay unmarked so it gets nudged to act
-    out = finalize_marker("Ahora voy a leerlo.", had_tool_calls=False)
-    assert FINAL_MARKER not in out
+def test_strip_end_turn_mixed_with_work():
+    calls = [{"name": "file_read", "args": {"path": "x"}}, {"name": "end_turn"}]
+    kept, had = strip_end_turn(calls)
+    assert had is True
+    assert [c["name"] for c in kept] == ["file_read"]
+
+
+def test_strip_end_turn_absent():
+    calls = [{"name": "task_create", "args": {}}]
+    kept, had = strip_end_turn(calls)
+    assert had is False
+    assert kept == calls
+
+
+def test_strip_end_turn_case_insensitive():
+    kept, had = strip_end_turn([{"name": "End_Turn"}, {"name": " end_turn "}])
+    assert had is True
+    assert kept == []
+
+
+def test_strip_end_turn_empty_and_none():
+    assert strip_end_turn([]) == ([], False)
+    assert strip_end_turn(None) == ([], False)

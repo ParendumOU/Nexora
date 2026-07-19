@@ -1,0 +1,10 @@
+{
+  "key": "end_turn",
+  "name": "End Turn",
+  "description": "Structured turn-completion signal. Call this (with no arguments) as the ONLY tool in your fence when you have fully answered and have no further action to take this turn. It hands the conversation back to the user. Do NOT call it alongside other tools — if you still have work, emit those tools instead and end the turn later.",
+  "category": "platform",
+  "env_vars": [],
+  "is_builtin": true,
+  "always_allowed": true,
+  "args": []
+}

@@ -1,7 +1,8 @@
 """Embedding service — generate and search float vectors for semantic memory.
 
-Uses the org's first active OpenAI-compatible provider to generate embeddings.
-Falls back to keyword overlap scoring when no suitable provider is configured.
+Provider selection is capability-driven: the org's active providers whose SEED
+declares an `embeddings` capability (see providers/capabilities.py), best
+priority first. Falls back to keyword overlap scoring when none is configured.
 """
 from __future__ import annotations
 import math
@@ -10,7 +11,8 @@ from typing import Sequence
 
 logger = logging.getLogger(__name__)
 
-_EMBED_MODEL = "text-embedding-3-small"
+# pgvector schema dimension (migration 071) — a capability whose `dimensions`
+# differs is skipped, since its vectors could not be stored or compared.
 _EMBED_DIM = 1536
 
 
@@ -32,38 +34,26 @@ def _keyword_score(query: str, content: str) -> float:
 
 
 async def _get_openai_client(org_id: str):
-    """Return (AsyncOpenAI client, model) for the org's first active openai-compat provider, or None."""
+    """(AsyncOpenAI client, model) for the org's best embeddings-capable provider,
+    or (None, None). Capability + model come from the provider seed, not code."""
     try:
-        import json
-        from sqlalchemy import select
-        from src.core.database import AsyncSessionLocal
-        from src.core.security import decrypt
-        from src.models.provider import Provider
+        from src.providers.capabilities import (
+            find_capability_providers, provider_api_key, provider_base_url,
+        )
 
-        async with AsyncSessionLocal() as db:
-            r = await db.execute(
-                select(Provider).where(
-                    Provider.org_id == org_id,
-                    Provider.is_active == True,  # noqa: E712
-                    Provider.provider_type.in_(["openai", "openrouter", "groq", "together", "gemini-api"]),
-                ).limit(1)
+        for provider, cap in await find_capability_providers(org_id, "embeddings"):
+            if cap.get("dimensions") and int(cap["dimensions"]) != _EMBED_DIM:
+                continue  # incompatible with the stored vector schema
+            model = cap.get("model")
+            api_key = provider_api_key(provider)
+            if not model or not api_key:
+                continue
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
+                api_key=api_key, base_url=provider_base_url(provider), max_retries=0,
             )
-            provider = r.scalar_one_or_none()
-
-        if not provider or not provider.credentials:
-            return None, None
-
-        creds = json.loads(decrypt(provider.credentials))
-        api_key = creds.get("api_key", "")
-        if not api_key:
-            return None, None
-
-        from openai import AsyncOpenAI
-        from src.seeds.loader import get_provider as _get_pdef
-        pdef = _get_pdef(provider.provider_type) or {}
-        base_url = provider.base_url or pdef.get("base_url")
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=0)
-        return client, _EMBED_MODEL
+            return client, model
+        return None, None
     except Exception as exc:
         logger.debug("Could not get embedding client: %s", exc)
         return None, None

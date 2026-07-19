@@ -29,11 +29,24 @@ never opts in), the tool executor takes its normal in-container path.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import uuid
 from typing import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
+
+# The user who initiated the CURRENT turn. Set at the top of a turn (ws message
+# handler) and inherited by sub-agent tasks (asyncio copies the context at
+# create_task). Used to bind local-exec tool grants to the user who opened the
+# bridge, so another member of a shared chat can't drive tools on that user's host.
+current_turn_user: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "local_exec_turn_user", default=None
+)
+
+
+def set_turn_user(user_id: str | None) -> None:
+    current_turn_user.set(user_id)
 
 # Private pub/sub channel namespace for cross-worker result return (#224). Distinct
 # from the chat's broadcast channel, so client sockets never receive these frames.
@@ -53,8 +66,9 @@ SendFn = Callable[[dict], Awaitable[None]]
 class LocalExecBridge:
     """Per-chat proxy that ships tool calls to a connected CLI and awaits their results."""
 
-    def __init__(self, chat_id: str, send: SendFn) -> None:
+    def __init__(self, chat_id: str, send: SendFn, owner_user_id: str | None = None) -> None:
         self.chat_id = chat_id
+        self.owner_user_id = owner_user_id
         self._send = send
         self._pending: dict[str, asyncio.Future] = {}
         # Cross-worker result listener (#224): set by register().
@@ -137,8 +151,8 @@ async def _result_listener(bridge: LocalExecBridge, q: asyncio.Queue) -> None:
         logger.debug("[local_exec] result listener stopped: %s", exc)
 
 
-async def register(chat_id: str, send: SendFn) -> LocalExecBridge:
-    bridge = LocalExecBridge(chat_id, send)
+async def register(chat_id: str, send: SendFn, owner_user_id: str | None = None) -> LocalExecBridge:
+    bridge = LocalExecBridge(chat_id, send, owner_user_id=owner_user_id)
     _bridges[chat_id] = bridge
     # Subscribe to this chat's private result channel so a result raised on another
     # worker (which republishes it) resolves the Future held here (#224).
@@ -172,6 +186,22 @@ def unregister(chat_id: str, bridge: LocalExecBridge | None = None) -> None:
 
 def get_bridge(chat_id: str) -> LocalExecBridge | None:
     return _bridges.get(chat_id)
+
+
+def local_tools_active(chat_id: str) -> bool:
+    """Whether local tools should be granted for the CURRENT turn in this chat.
+
+    True only when a bridge exists AND the turn's initiating user owns it. This
+    prevents another member of a shared chat (or a background turn) from driving
+    filesystem/shell tools on the bridge owner's host. When the owner is unknown
+    (legacy bridge without a recorded owner) it falls back to allow, preserving
+    behavior for single-user chats."""
+    bridge = _bridges.get(chat_id)
+    if bridge is None:
+        return False
+    if bridge.owner_user_id is None:
+        return True  # legacy / unknown owner — single-user chats unaffected
+    return current_turn_user.get() == bridge.owner_user_id
 
 
 async def resolve(chat_id: str, request_id: str, result: dict) -> bool:

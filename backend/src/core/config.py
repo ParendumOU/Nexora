@@ -310,6 +310,37 @@ class Settings(BaseSettings):
     max_subagents_per_root: int = 60
     max_spawn_rate_per_root: int = 20
     max_spawn_rate_window_seconds: int = 60
+    # When Redis is unreachable the spawn-cap backstop normally fails OPEN (a backstop
+    # must not wedge normal work). Set true to fail CLOSED: no cap accounting → no spawn.
+    spawn_caps_fail_closed: bool = False
+
+    # Structural sub-chat reuse: delegating again to an agent that already worked under
+    # the same parent chat resumes its newest completed sub-chat instead of minting a new
+    # one, and hydrates that sub-chat's recent history into the sub-agent's context so
+    # the parent does not re-send context. An explicit Task.continue_chat_id always wins.
+    #   - subagent_reuse_subchats: master switch.
+    #   - subagent_reuse_max_age_hours: only reuse a sub-chat whose task completed within
+    #     this window; 0 = no age limit.
+    #   - subagent_reuse_history_messages: max prior messages hydrated as context recap.
+    #   - subagent_reuse_history_chars: total char budget for the hydrated recap.
+    subagent_reuse_subchats: bool = True
+    subagent_reuse_max_age_hours: int = 72
+    subagent_reuse_history_messages: int = 12
+    subagent_reuse_history_chars: int = 8000
+
+    # Host-chat reuse for automated runs: schedules and external events reuse one
+    # persistent host chat (per schedule / per agent+project event stream) instead of
+    # minting a fresh chat per run. Combined with sub-chat reuse above, a recurring
+    # schedule stops accumulating 2 new chats per run.
+    schedule_reuse_host_chat: bool = True
+    event_reuse_host_chat: bool = True
+
+    # Auto-archive finished sub-chats and idle system host chats after this many hours
+    # of inactivity (0 = never). Archived chats leave the sidebar and the reuse pool;
+    # data is retained. Keep >= subagent_reuse_max_age_hours or archival will shrink
+    # the reuse window.
+    chat_archive_after_hours: int = 168
+    chat_archive_sweep_minutes: int = 60
 
     # Tool dependency isolation: a tool/skill shipping a requirements.txt runs in
     # its own per-pack venv (keyed by requirements hash → multi-version isolation).
@@ -327,14 +358,31 @@ class Settings(BaseSettings):
     # HTTP tool allowlist (SSRF guard) — comma-separated base URLs; empty = unrestricted
     http_tool_allowed_origins_str: str = Field(default="", alias="HTTP_TOOL_ALLOWED_ORIGINS")
 
-    @property
-    def http_tool_allowed_origins(self) -> list[str]:
+    # URL prefixes http_request always refuses, even when the allowlist is open.
+    # Default: raw git-provider APIs — dedicated github_*/gitlab_* tools and the
+    # git proxy handle those with credential injection; hand-rolled calls end up
+    # unauthenticated or leak pasted tokens. Comma-separated, empty disables.
+    http_tool_denied_origins_str: str = Field(
+        default="https://gitlab.com/api,https://api.github.com",
+        alias="HTTP_TOOL_DENIED_ORIGINS",
+    )
+
+    @staticmethod
+    def _split_origins(raw: str) -> list[str]:
         origins = []
-        for s in self.http_tool_allowed_origins_str.split(","):
+        for s in raw.split(","):
             s = s.strip().rstrip("/")
             if s:
                 origins.append(s)
         return origins
+
+    @property
+    def http_tool_allowed_origins(self) -> list[str]:
+        return self._split_origins(self.http_tool_allowed_origins_str)
+
+    @property
+    def http_tool_denied_origins(self) -> list[str]:
+        return self._split_origins(self.http_tool_denied_origins_str)
 
     # Integrations (optional)
     telegram_bot_token: str = ""

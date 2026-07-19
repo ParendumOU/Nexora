@@ -38,6 +38,17 @@ function _refresh(): Promise<string> {
 }
 
 /**
+ * Force a single (deduped) token refresh and return the new access token.
+ * Exposed so non-axios callers (e.g. the chat WebSocket's Unauthorized handler)
+ * refresh through the SAME in-flight singleton instead of firing their own raw
+ * fetch — two concurrent refreshes with refresh-token rotation invalidate each
+ * other and log the user out.
+ */
+export function refreshAccessToken(): Promise<string> {
+  return _refresh();
+}
+
+/**
  * Return a valid (non-expired) access token, refreshing proactively when it is
  * expired or within 30s of expiry. Prevents the 401-storm-then-refresh pattern.
  * Used by the axios request interceptor and the user WebSocket before connect.
@@ -456,6 +467,34 @@ export const orgsApi = {
   getInviteDetails: (token: string) => api.get(`/orgs/invite/${token}`),
   acceptInvite: (token: string) => api.post("/orgs/accept-invite", { token }),
   switchOrg: (org_id: string) => api.post("/orgs/switch", { org_id }),
+};
+
+// ─── Permission groups (admin-managed) ──────────────────────────
+export const permissionsApi = {
+  me: () => api.get("/permissions/me"),
+  catalog: () => api.get("/permissions/catalog"),
+  assignable: () => api.get("/permissions/assignable"),
+  listGroups: () => api.get("/permissions/groups"),
+  createGroup: (data: {
+    name: string;
+    description?: string | null;
+    permissions: string[];
+    limits?: Record<string, number>;
+    capabilities?: Record<string, string[] | string | null>;
+  }) => api.post("/permissions/groups", data),
+  updateGroup: (
+    id: string,
+    data: {
+      name?: string;
+      description?: string | null;
+      permissions?: string[];
+      limits?: Record<string, number>;
+      capabilities?: Record<string, string[] | string | null>;
+    },
+  ) => api.patch(`/permissions/groups/${id}`, data),
+  deleteGroup: (id: string) => api.delete(`/permissions/groups/${id}`),
+  setGroupMembers: (id: string, user_ids: string[]) =>
+    api.put(`/permissions/groups/${id}/members`, { user_ids }),
 };
 
 // ─── Personas ───────────────────────────────────────────────────

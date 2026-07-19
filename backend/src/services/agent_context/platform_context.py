@@ -316,6 +316,17 @@ async def get_platform_context(
     def _tool_ok(key: str) -> bool:
         return enabled_builtins is None or key in enabled_builtins or key in _always_allowed_keys
 
+    # Provider-API guardrails are only worth their tokens when the agent can
+    # actually touch git APIs. The http_request deny-list enforces the hard rule
+    # in code regardless (seeds/tools/builtin/http_request), so gating the prose
+    # on relevance is safe.
+    _git_prompt_relevant = any(
+        _tool_ok(k) for k in (
+            "git", "git_local", "github_api", "gitlab_api",
+            "github_read", "github_write", "gitlab_read", "gitlab_write",
+        )
+    )
+
     from src.seeds.loader import get_all_tools, get_all_skills, get_prompt, render_prompt
 
     tool_lines: list[str] = list(get_prompt("platform_core_tools").splitlines())
@@ -400,11 +411,7 @@ async def get_platform_context(
             if len(thread_memories) > 15:
                 lean.append(f"  … {len(thread_memories) - 15} more — use `memory_manage action='read' scope='thread'` to query.")
             lean.append("")
-        else:
-            lean.append("## Thread Memory")
-            lean.append("")
-            lean.append(f"No thread memories yet. Save findings with `memory_manage action='save' scope='thread'`.  root_chat_id: `{_root_chat_id_for_thread}`")
-            lean.append("")
+        # (No empty "no thread memories yet" filler — memory_manage is in the tool docs.)
 
         for _proj in current_projects:
             _cred = project_credentials.get(_proj.id)
@@ -422,10 +429,11 @@ async def get_platform_context(
                     lean.append(f"  {k} = {v}")
             lean.append("")
 
-        _provider_rules = get_prompt("platform_provider_apis")
-        if _provider_rules:
-            lean.extend(_provider_rules.splitlines())
-            lean.append("")
+        if _git_prompt_relevant:
+            _provider_rules = get_prompt("platform_provider_apis")
+            if _provider_rules:
+                lean.extend(_provider_rules.splitlines())
+                lean.append("")
 
         return "\n".join(lean)
     # ── END LEAN MODE ───────────────────────────────────────────────────────
@@ -522,19 +530,8 @@ async def get_platform_context(
             from src.services.project_state import format_project_state_for_prompt
             lines += format_project_state_for_prompt(project_states[_proj.id])
 
-    if structured_notes:
-        lines.append("## Chat Notes")
-        lines.append("")
-        for _n in structured_notes:
-            _ts = _n.created_at.strftime("%Y-%m-%d %H:%M UTC")
-            lines.append(f"### {_n.author or 'Unknown'} — {_ts}")
-            if _n.description:
-                lines.append(f"_{_n.description}_")
-            lines.append("")
-            lines.append(_n.content)
-            lines.append("")
-        lines.append("_(Use the `chat_notes` tool to add notes.)_")
-        lines.append("")
+    # (Chat notes render once, near the end — see "Shared chat notes". A second
+    # copy here used to double-inject up to ~2k tokens of identical content.)
 
     if project_memories:
         lines.extend(get_prompt("platform_project_memory_header").splitlines())
@@ -558,11 +555,7 @@ async def get_platform_context(
         if len(thread_memories) > 80:
             lines.append(f"  … {len(thread_memories) - 80} more — use `memory_manage action='read' scope='thread'` to query.")
         lines.append("")
-    else:
-        lines.append("## Thread Memory")
-        lines.append("")
-        lines.append(f"No thread memories yet. Save key findings with `memory_manage action='save' scope='thread'` so all agents in this thread can benefit.  root_chat_id: `{_root_chat_id_for_thread}`")
-        lines.append("")
+    # (No empty "no thread memories yet" filler — memory_manage is already in the tool docs.)
 
     if existing_tasks:
         lines.extend(get_prompt("platform_tasks_header").splitlines())
@@ -739,12 +732,13 @@ async def get_platform_context(
             lines.extend(_proposal_proto.splitlines())
             lines.append("")
 
-    # Always inject provider-API guardrails — applies to orchestrator and sub-agents.
-    # Overrides stale custom system prompts that reference http_request against GitLab/GitHub.
-    _provider_rules = get_prompt("platform_provider_apis")
-    if _provider_rules:
-        lines.extend(_provider_rules.splitlines())
-        lines.append("")
+    # Provider-API guardrails — only when the agent has git-capable tools (the
+    # http_request deny-list enforces the hard rule in code either way).
+    if _git_prompt_relevant:
+        _provider_rules = get_prompt("platform_provider_apis")
+        if _provider_rules:
+            lines.extend(_provider_rules.splitlines())
+            lines.append("")
 
     # Inject shared notes from root chat — structured rows serialised to markdown.
     if structured_notes:

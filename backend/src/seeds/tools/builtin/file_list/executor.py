@@ -7,11 +7,13 @@ from pathlib import Path
 
 
 async def execute(args: dict, chat_id: str, agent_id, agent_name) -> dict:
-    # Shared workspace (#240): default to (and resolve relative paths under) the
-    # delegation tree's workspace; no-op when the feature is off.
+    # Shared workspace (#240) + path confinement: default to / resolve under the
+    # tree's workspace and reject workspace-escape / sensitive host paths.
     try:
-        from src.services.workspace import resolve_path
-        path_str = await resolve_path(chat_id, args.get("path"), default_to_root=True)
+        from src.services.workspace import resolve_path_guarded
+        path_str, _err = await resolve_path_guarded(chat_id, args.get("path"), default_to_root=True)
+        if _err:
+            return {"error": _err}
     except Exception:
         path_str = (args.get("path") or ".").strip() or "."
     recursive = bool(args.get("recursive"))

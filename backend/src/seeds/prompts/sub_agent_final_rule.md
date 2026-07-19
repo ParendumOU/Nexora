@@ -10,9 +10,4 @@ Neither → watchdog re-prompts.
 **Done with no tool call:** `<final/>` alone.
 
 Do NOT emit `task_update(completed)` without prose before it — blank message = failure signal.
-
-**Fence format:** language tag MUST be inline on opening backtick line:
-```tool_calls
-[{"name":"task_update","args":{"task_id":"<id>","status":"completed","output":"<summary>"}}]
-```
-Never put `tool_calls` on the line after the opening backticks.
+Close with: `task_update(task_id="<id>", status="completed", output="<summary>")` (fence syntax per Platform Tools above).

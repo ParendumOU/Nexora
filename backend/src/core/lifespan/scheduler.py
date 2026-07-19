@@ -16,6 +16,13 @@ async def startup_scheduler():
     schedule_recover_stuck_tasks()
     schedule_conversation_watchdog()
 
+    try:
+        from src.core.config import get_settings as _gs_arch
+        from src.services.scheduler import schedule_chat_archival
+        schedule_chat_archival(_gs_arch().chat_archive_sweep_minutes)
+    except Exception as exc:
+        logger.warning(f"[startup] chat archival registration failed (non-fatal): {exc}")
+
     # Proactive autonomy tick (#234) — opt-in.
     try:
         from src.core.config import get_settings

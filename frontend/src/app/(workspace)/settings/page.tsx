@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useUIModeStore } from "@/store/ui-mode";
+import { useRouter } from "next/navigation";
+import { useEffectiveUIMode } from "@/store/ui-mode";
+import { usePermissionsStore, hasPermission } from "@/store/permissions";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { providersApi, seedsApi, integrationsApi } from "@/lib/api";
 import { useOnboardingStore } from "@/store/onboarding";
@@ -43,7 +45,15 @@ interface SeedCatalogItem {
 }
 
 export default function SettingsPage() {
-  const uiMode = useUIModeStore((s) => s.mode);
+  const router = useRouter();
+  const permissions = usePermissionsStore((s) => s.permissions);
+  // Viewers without settings.view are bounced back to chat; superuser/admin/member all hold it.
+  const settingsDenied = permissions !== null && !hasPermission(permissions, "settings.view");
+  useEffect(() => {
+    if (settingsDenied) router.replace("/chat");
+  }, [settingsDenied, router]);
+
+  const uiMode = useEffectiveUIMode();
   const isSuperuser = useAuthStore((s) => s.user?.is_superuser);
   const [activeTab, setActiveTab] = useState("usage");
   const { isActive: onboardingActive, currentStep } = useOnboardingStore();
@@ -207,6 +217,8 @@ export default function SettingsPage() {
     if (!grouped[p.provider_type]) grouped[p.provider_type] = [];
     grouped[p.provider_type].push(p);
   }
+
+  if (settingsDenied) return null;
 
   return (
     <div className="flex flex-col h-full">

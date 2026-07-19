@@ -8,6 +8,11 @@
   "requires_base_url": false,
   "default_model": "gpt-5.5",
   "models": ["gpt-4.5", "gpt-4o", "gpt-4o-mini", "o4-mini", "o3"],
+  "capabilities": {
+    "embeddings": {"model": "text-embedding-3-small", "dimensions": 1536},
+    "stt": {"model": "whisper-1"},
+    "vision": {"model": "gpt-4o-mini", "api": "openai_compat"}
+  },
   "website": "https://platform.openai.com",
   "setup_steps": [
     {"text": "Login at platform.openai.com", "url": "https://platform.openai.com"},

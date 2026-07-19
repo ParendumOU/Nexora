@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usersApi, userApiKeysApi, backupApi, totpApi, profileFactsApi } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { useUIModeStore, UIMode } from "@/store/ui-mode";
+import { usePermissionsStore, hasPermission } from "@/store/permissions";
 import { useOnboardingStore } from "@/store/onboarding";
 import { cn, copyToClipboard } from "@/lib/utils";
 import { Save, Eye, EyeOff, Pencil, Plus, Trash2, User, Loader2, GripVertical, Lock, Key, Copy, Check, ShieldAlert, ToggleLeft, ToggleRight, RefreshCw, Download, Upload, Database, Monitor, Layers } from "lucide-react";
@@ -375,7 +376,10 @@ function TotpSection() {
 
 export default function ProfilePage() {
   const { setUser, user: authUser } = useAuthStore();
-  const { mode: uiMode, setMode: setUIMode } = useUIModeStore();
+  const { mode: rawUiMode, setMode: setUIMode } = useUIModeStore();
+  const permissions = usePermissionsStore((s) => s.permissions);
+  const advancedAllowed = hasPermission(permissions, "ui.advanced_mode");
+  const uiMode = advancedAllowed ? rawUiMode : "simple";
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("profile");
   const { isActive: onboardingActive, currentStep } = useOnboardingStore();
@@ -707,15 +711,20 @@ export default function ProfilePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {(["simple", "advanced"] as UIMode[]).map((m) => {
                 const isSelected = uiMode === m;
+                const isLocked = m === "advanced" && !advancedAllowed;
                 return (
                   <button
                     key={m}
-                    onClick={() => setUIMode(m)}
+                    onClick={() => !isLocked && setUIMode(m)}
+                    disabled={isLocked}
+                    title={isLocked ? "Disabled by your organization admin" : undefined}
                     className={cn(
                       "text-left rounded-xl border-2 p-5 transition-all",
-                      isSelected
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/40 hover:bg-accent/30"
+                      isLocked
+                        ? "border-border opacity-50 cursor-not-allowed"
+                        : isSelected
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/40 hover:bg-accent/30"
                     )}
                   >
                     <div className="flex items-center gap-3 mb-3">

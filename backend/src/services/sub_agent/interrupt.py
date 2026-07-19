@@ -53,6 +53,9 @@ async def _handle_interrupt(
             step.completed_at = now
 
         task.status = new_status
+        # Preserve the thread for a same-agent resume; a reassigned task must not
+        # adopt the previous agent's sub-chat.
+        task.continue_chat_id = None if reassign_to_agent_id else (task.continue_chat_id or task.sub_chat_id)
         task.sub_chat_id = None  # clear so the task can be re-dispatched
         if reassign_to_agent_id:
             task.assigned_agent_id = reassign_to_agent_id

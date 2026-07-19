@@ -31,6 +31,43 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT_KEY = "provider:ratelimit:{provider_id}"
 
 
+def _humanize_seconds(seconds: float) -> str:
+    """Compact human duration: '45s', '12m', '2h 16m', '1d 3h'."""
+    s = int(max(0, seconds))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    if s < 86400:
+        h, m = s // 3600, (s % 3600) // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+    d, h = s // 86400, (s % 86400) // 3600
+    return f"{d}d {h}h" if h else f"{d}d"
+
+
+def _exhausted_message(next_avail: list[tuple[str, float]], chain_size: int) -> str:
+    """Human 'no session possible until …' message for an all-accounts-down turn.
+
+    ``next_avail`` is (account_label, seconds-from-now) for each rate-limited/cooling
+    account. Picks the soonest to reset and states when work is possible again, phrased
+    for a single account vs a fallback chain.
+    """
+    from datetime import datetime, timezone, timedelta
+    future = [(lbl, sec) for lbl, sec in next_avail if sec and sec > 0]
+    if not future:
+        return ("No model is available right now — every account is rate-limited or "
+                "unavailable. Check Settings, Accounts.")
+    label, secs = min(future, key=lambda t: t[1])
+    when = datetime.now(timezone.utc) + timedelta(seconds=secs)
+    clock = when.strftime("%H:%M UTC")
+    dur = _humanize_seconds(secs)
+    if chain_size > 1:
+        return (f"All {chain_size} accounts in the chain are rate-limited. The soonest to "
+                f"free up is {label}, in about {dur} (around {clock}). I'll be able to reply then.")
+    return (f"{label} is rate-limited. It resets in about {dur} (around {clock}) — "
+            f"no reply is possible until then. Add a fallback account to keep working.")
+
+
 def _fire_metering(org_id: int | None) -> None:
     """Non-blocking fire-and-forget: increments LLM call counter in billing worker."""
     if not org_id:
@@ -741,6 +778,10 @@ async def stream_response(
     _ignore_cooldown = kwargs.pop("_ignore_cooldown", False)
     last_error = None
     _min_rl_cd: float | None = None  # soonest rate-limit reset seen this pass (for wait-and-retry)
+    # (account_label, seconds-from-now) for every account that is rate-limited this pass
+    # or skipped because it's still cooling — used to tell the user WHEN a session is
+    # next possible instead of a raw 429 dump.
+    _next_avail: list[tuple[str, float]] = []
     _tried_any = False  # becomes True after the first attempt → later picks are "failovers"
     # Why-nothing-ran accounting, so a no-attempt outcome can explain itself instead of the
     # cryptic "No available providers".
@@ -780,6 +821,14 @@ async def stream_response(
         if not _ignore_cooldown and (await is_cooling(provider.id) or _is_durably_cooling(provider)):
             logger.info(f"Provider {provider.name} cooling, skipping")
             _skipped_cooling += 1
+            _cu = getattr(provider, "cooling_until", None)
+            if _cu is not None:
+                from datetime import datetime as _dt, timezone as _tz
+                if _cu.tzinfo is None:
+                    _cu = _cu.replace(tzinfo=_tz.utc)
+                _rem = (_cu - _dt.now(_tz.utc)).total_seconds()
+                if _rem > 0:
+                    _next_avail.append((f"{provider.name} · {step_model or provider.model_name or 'default'}", _rem))
             _s = _status(f"{provider.name} cooling down — skipping")
             if _s:
                 yield _s
@@ -930,6 +979,9 @@ async def stream_response(
                 _cd = float(cooldown or 0)
                 if _cd > 0:
                     _min_rl_cd = _cd if _min_rl_cd is None else min(_min_rl_cd, _cd)
+                    _next_avail.append(
+                        (f"{provider.name} · {effective.model_name or 'default'}", _cd)
+                    )
             except (TypeError, ValueError):
                 pass
         except ProviderError as e:
@@ -988,6 +1040,10 @@ async def stream_response(
         return
 
     if last_error:
+        # If the failure was rate/usage limits, tell the user WHEN a session is next
+        # possible (soonest reset) instead of dumping the raw provider 429 JSON.
+        if _next_avail:
+            raise AllProvidersExhausted(_exhausted_message(_next_avail, _provider_count))
         raise AllProvidersExhausted(str(last_error))
 
     # Nothing was attempted — say WHY so the user can fix it, not a blank "No available providers".
@@ -997,6 +1053,9 @@ async def stream_response(
         msg = "All configured providers are inactive. Enable or fix one in Settings, Accounts."
     elif _skipped_unknown and not _skipped_inactive and not _skipped_cooling:
         msg = "The configured provider type isn't supported by this build."
+    elif _next_avail:
+        # Every account was skipped for cooling — say when the soonest one returns.
+        msg = _exhausted_message(_next_avail, _provider_count)
     else:
         msg = "No available providers - every account is inactive or cooling down. Check Settings, Accounts."
     raise AllProvidersExhausted(msg)

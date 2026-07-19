@@ -94,6 +94,109 @@ def _meaningful_sub_output(final_response: str | None, messages: list[dict]) -> 
     return ""
 
 
+async def _find_reusable_subchat(db, parent_chat_id: str, agent_id: str) -> Chat | None:
+    """Structural sub-chat reuse: newest sub-chat under `parent_chat_id` whose task ran
+    the same agent to completion. Reusing it keeps one thread per (parent, agent) pair
+    and lets the next delegation hydrate prior context instead of re-sending it.
+
+    Skips: CLI-native chats (external lifecycle), archived chats, chats an active task
+    is still writing into, and chats outside the configured freshness window. The
+    candidate Chat row is locked (FOR UPDATE) inside the caller's claim transaction so
+    two concurrent claims cannot adopt the same sub-chat.
+    """
+    from src.core.config import get_settings
+    from src.models.task import Task
+
+    settings = get_settings()
+    if not settings.subagent_reuse_subchats:
+        return None
+
+    cutoff = None
+    if settings.subagent_reuse_max_age_hours > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.subagent_reuse_max_age_hours)
+
+    cand_r = await db.execute(
+        select(Task)
+        .where(
+            Task.chat_id == parent_chat_id,
+            Task.assigned_agent_id == agent_id,
+            Task.sub_chat_id.isnot(None),
+            Task.status == "completed",
+        )
+        .order_by(Task.completed_at.desc().nulls_last(), Task.updated_at.desc())
+        .limit(5)
+    )
+    for cand in cand_r.scalars().all():
+        if (cand.agent_overrides or {}).get("cli_native"):
+            continue
+        ts = cand.completed_at or cand.updated_at
+        if cutoff and ts:
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if ts < cutoff:
+                continue
+        chat = (await db.execute(
+            select(Chat).where(Chat.id == cand.sub_chat_id).with_for_update()
+        )).scalar_one_or_none()
+        if not chat or chat.is_archived or chat.agent_id != agent_id:
+            continue
+        busy = (await db.execute(
+            select(Task.id)
+            .where(
+                Task.sub_chat_id == chat.id,
+                Task.status.in_(["pending", "queued", "in_progress"]),
+            )
+            .limit(1)
+        )).scalar_one_or_none()
+        if busy:
+            continue
+        return chat
+    return None
+
+
+def _render_history_recap(prior_history: list[dict]) -> str:
+    """Render a reused sub-chat's recent history as a compact recap block
+    (seeds/prompts/sub_agent_context_recap.md). Budgeted by
+    subagent_reuse_history_chars: walks newest→oldest until the budget is spent,
+    then emits oldest-first. Each entry is clipped to a quarter of the budget so
+    one giant message cannot evict the rest."""
+    from src.core.config import get_settings
+    from src.seeds.loader import render_prompt
+
+    budget = get_settings().subagent_reuse_history_chars
+    if budget <= 0 or not prior_history:
+        return ""
+    per_msg_cap = max(1, budget // 4)
+    lines: list[str] = []
+    used = 0
+    for entry in reversed(prior_history):
+        if entry.get("kind") == "task_brief":
+            who = "PARENT"
+            text = (entry.get("content") or "").strip()
+        elif entry.get("role") == "assistant":
+            who = "YOU"
+            text = _clean_marker_text(entry.get("content"))
+        else:
+            who = "USER"
+            text = (entry.get("content") or "").strip()
+        if not text:
+            continue
+        if len(text) > per_msg_cap:
+            text = text[:per_msg_cap] + " …[truncated]"
+        line = f"[{who}] {text}"
+        if used + len(line) > budget and lines:
+            break
+        lines.append(line)
+        used += len(line)
+    if not lines:
+        return ""
+    lines.reverse()
+    try:
+        return render_prompt("sub_agent_context_recap", history="\n\n".join(lines))
+    except Exception:
+        return ""
+
+
 def _fire_agent_run_metering(org_id: str | None) -> None:
     """Fire-and-forget: increment agent_run counter in billing worker."""
     if not org_id:
@@ -123,8 +226,15 @@ def _max_delegation_depth() -> int:
     return get_settings().max_subdelegation_depth
 
 
+_HB_ACTIVE_STATUSES = ("pending", "queued", "in_progress", "paused")
+
+
 async def _heartbeat_loop(task_id: str, worker_id: str, interval: int = 30) -> None:
-    """Periodically refresh worker_heartbeat_at; self-terminates when task is no longer ours."""
+    """Periodically refresh worker_heartbeat_at; self-terminates when the task is no
+    longer ours OR has reached a terminal status. The status guard matters because the
+    normal completion path sets status=completed but does not change worker_id — without
+    it this loop would run forever, writing to a finished row every `interval` seconds
+    for the process lifetime."""
     from src.models.task import Task
     from sqlalchemy import update as sa_update
     while True:
@@ -133,12 +243,16 @@ async def _heartbeat_loop(task_id: str, worker_id: str, interval: int = 30) -> N
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
                     sa_update(Task)
-                    .where(Task.id == task_id, Task.worker_id == worker_id)
+                    .where(
+                        Task.id == task_id,
+                        Task.worker_id == worker_id,
+                        Task.status.in_(_HB_ACTIVE_STATUSES),
+                    )
                     .values(worker_heartbeat_at=datetime.now(timezone.utc))
                 )
                 await db.commit()
                 if result.rowcount == 0:
-                    return  # task completed, failed, or reclaimed — stop heartbeat
+                    return  # completed/failed/dead, reclaimed, or no longer ours — stop
         except Exception as exc:
             logger.warning(f"[heartbeat] task {task_id}: {exc}")
 
@@ -206,7 +320,57 @@ async def _execute_sub_agent_task(
         agent_name = agent.name
         task_overrides: dict = task_rec.agent_overrides or {}
 
+        # Per-ROOT spawn backstop at the dispatch choke point — authoritative
+        # accounting for EVERY task creator (task_create tool, schedules, git/webhook
+        # events, autopilot, autonomy), not just the tool handler's pre-check.
+        # Retries/recovery re-dispatches (retry_count > 0) were already counted at
+        # their first dispatch and are not double-billed.
+        if task_rec.retry_count == 0:
+            from src.services.agent_tools.tool_executor import _enforce_root_spawn_caps
+            _cap_msg = await _enforce_root_spawn_caps(parent_chat_id, db, count=True)
+            if _cap_msg:
+                task_rec.status = "failed"
+                task_rec.output = "Blocked by spawn cap"
+                task_rec.last_error = _cap_msg[:300]
+                await db.commit()
+                await db.refresh(task_rec)
+                logger.warning(
+                    f"[_execute_sub_agent_task] spawn cap blocked task {task_id} "
+                    f"in chat {parent_chat_id}"
+                )
+                await _broadcast(parent_chat_id, {
+                    "type": "task_updated",
+                    "task": _task_to_dict(task_rec, agent_name),
+                })
+                # Wake any parent event-driven wait so it never hangs on this child.
+                try:
+                    from src.core import pubsub as _psc
+                    await _psc.broadcast(
+                        f"subagent_done:{parent_chat_id}", {"task_id": task_id, "failed": True}
+                    )
+                except Exception:
+                    pass
+                return
+
         reuse_chat = task_rec.continue_chat_id or None
+        auto_reused = False
+        if reuse_chat:
+            # Explicit resume target — verify it still exists (it may have been deleted
+            # since the reset that set continue_chat_id); fall back to a fresh chat.
+            _cc = (await db.execute(select(Chat.id).where(Chat.id == reuse_chat))).scalar_one_or_none()
+            if _cc is None:
+                logger.warning(
+                    f"[_execute_sub_agent_task] continue_chat_id {reuse_chat} on task "
+                    f"{task_id} no longer exists — creating a fresh sub-chat"
+                )
+                reuse_chat = None
+        if not reuse_chat:
+            _reusable = await _find_reusable_subchat(db, parent_chat_id, agent_id)
+            if _reusable is not None:
+                reuse_chat = _reusable.id
+                auto_reused = True
+                # Bump so the reused thread resurfaces in sidebar ordering.
+                _reusable.updated_at = datetime.now(timezone.utc)
         sub_chat_id = reuse_chat if reuse_chat else str(uuid.uuid4())
 
         task_content = task_title
@@ -215,6 +379,36 @@ async def _execute_sub_agent_task(
 
         parent_result = await db.execute(select(Chat).where(Chat.id == parent_chat_id))
         parent_chat = parent_result.scalar_one_or_none()
+
+        # Hydrate recent history from the reused sub-chat BEFORE injecting this task's
+        # own messages, so the recap never duplicates the new brief. Consumed at prompt
+        # build time — the parent does not have to re-send context in the task body.
+        prior_history: list[dict] = []
+        if reuse_chat:
+            from src.core.config import get_settings as _gs_reuse
+            _hist_limit = _gs_reuse().subagent_reuse_history_messages
+            if _hist_limit > 0:
+                hist_r = await db.execute(
+                    select(Message)
+                    .where(
+                        Message.chat_id == reuse_chat,
+                        Message.excluded.is_(False),
+                        Message.role.in_(["user", "assistant"]),
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(_hist_limit)
+                )
+                _hist_rows = list(hist_r.scalars().all())
+                _hist_rows.reverse()
+                prior_history = [
+                    {
+                        "role": m.role,
+                        "content": m.content or "",
+                        "kind": (m.metadata_ or {}).get("kind"),
+                    }
+                    for m in _hist_rows
+                    if (m.content or "").strip()
+                ]
 
         if not reuse_chat:
             sub_chat = Chat(
@@ -231,6 +425,19 @@ async def _execute_sub_agent_task(
             await db.flush()
             # Task brief from parent agent — marked as kind=task_brief so the UI
             # can render it as a manager directive card rather than a regular bubble.
+            db.add(Message(
+                id=str(uuid.uuid4()), chat_id=sub_chat_id,
+                role="assistant", content=task_content,
+                agent_id=parent_chat.agent_id if parent_chat else None,
+                metadata_={"kind": "task_brief", "from_agent_id": parent_chat.agent_id if parent_chat else None},
+            ))
+        elif auto_reused:
+            # Structural reuse: the same (parent, agent) thread adopted for a NEW task.
+            # A fresh task_brief card renders the new directive inside the existing thread.
+            logger.info(
+                f"[_execute_sub_agent_task] Reusing sub-chat {reuse_chat} for task "
+                f"{task_id} (same parent+agent)"
+            )
             db.add(Message(
                 id=str(uuid.uuid4()), chat_id=sub_chat_id,
                 role="assistant", content=task_content,
@@ -397,9 +604,19 @@ async def _execute_sub_agent_task(
     task_instructions += get_prompt("sub_agent_final_rule")
     system_parts.append(task_instructions)
 
+    # Reused sub-chat: prepend a budgeted recap of its prior history to the task so the
+    # agent resumes with context it already produced, instead of the parent re-sending it.
+    # Kept inside the single task message so the sliding window below (messages[:2])
+    # always preserves it alongside the system prompt.
+    user_payload = task_content
+    if prior_history:
+        _recap = _render_history_recap(prior_history)
+        if _recap:
+            user_payload = _recap + "\n\n" + task_content
+
     messages: list[dict] = [
         {"role": "system", "content": "\n\n".join(system_parts)},
-        {"role": "user", "content": task_content},
+        {"role": "user", "content": user_payload},
     ]
 
     _MAX_ITERATIONS = 10
@@ -953,12 +1170,17 @@ async def _execute_sub_agent_task(
                 t.output = (_meaningful[:1500] if _meaningful
                             else (final_response[:500] if final_response else None))
                 t.completed_at = datetime.now(timezone.utc)
+                t.worker_id = None  # release the worker so the heartbeat loop stops
                 await db.commit()
                 await db.refresh(t)
                 await _broadcast(parent_chat_id, {
                     "type": "task_updated",
                     "task": _task_to_dict(t, agent_name),
                 })
+
+        # Stop the detached heartbeat immediately (the status guard is the backstop).
+        if heartbeat_task is not None and not heartbeat_task.done():
+            heartbeat_task.cancel()
 
         # Child-done signal (#218): wake a parent event-driven wait, regardless of
         # whether this child ran in-process or on a runner. The parent subscribes to
@@ -1106,6 +1328,9 @@ async def _execute_sub_agent_task(
                         _t.retry_after = datetime.now(timezone.utc) + timedelta(seconds=_delay)
                         _t.last_error = str(exc)[:300]
                         _t.status = "pending"
+                        # Keep the thread for the retry to resume — the retried run
+                        # rehydrates its history instead of orphaning the sub-chat.
+                        _t.continue_chat_id = _t.continue_chat_id or _t.sub_chat_id
                         _t.sub_chat_id = None
                         _t.worker_id = None
                         _t.worker_heartbeat_at = None
@@ -1124,6 +1349,9 @@ async def _execute_sub_agent_task(
                         _t.retry_after = None
                         _t.last_error = str(exc)[:300]
                         _t.status = "pending"
+                        # Task changes hands — the escalation agent must not adopt the
+                        # failed agent's thread.
+                        _t.continue_chat_id = None
                         _t.sub_chat_id = None
                         _t.worker_id = None
                         _t.worker_heartbeat_at = None

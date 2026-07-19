@@ -34,18 +34,42 @@ async def dispatch_event_to_agent(
             return None
         max_concurrency = agent.max_concurrency or 2
 
-        chat_id = str(uuid.uuid4())
         task_id = str(uuid.uuid4())
 
-        chat = Chat(
-            id=chat_id,
-            user_id=SYSTEM_USER_ID,
-            agent_id=agent_id,
-            project_id=project_id,
-            title=event_title,
-        )
-        db.add(chat)
-        await db.flush()
+        # Reuse one host chat per (agent, project) event stream — webhook storms
+        # previously minted a fresh top-level chat per event, unbounded. Each event
+        # is still its own Task (own sub-chat / kanban card) inside that stream.
+        from src.core.config import get_settings as _gs
+        host_title = f"[Events] {agent.name}"
+        chat_id: str | None = None
+        if _gs().event_reuse_host_chat:
+            prev_r = await db.execute(
+                select(Chat).where(
+                    Chat.user_id == SYSTEM_USER_ID,
+                    Chat.agent_id == agent_id,
+                    (Chat.project_id == project_id) if project_id else Chat.project_id.is_(None),
+                    Chat.title == host_title,
+                    Chat.is_archived.is_(False),
+                    Chat.parent_chat_id.is_(None),
+                ).order_by(Chat.updated_at.desc()).limit(1)
+            )
+            prev_chat = prev_r.scalars().first()
+            if prev_chat:
+                chat_id = prev_chat.id
+                from datetime import datetime, timezone
+                prev_chat.updated_at = datetime.now(timezone.utc)
+
+        if chat_id is None:
+            chat_id = str(uuid.uuid4())
+            chat = Chat(
+                id=chat_id,
+                user_id=SYSTEM_USER_ID,
+                agent_id=agent_id,
+                project_id=project_id,
+                title=host_title if _gs().event_reuse_host_chat else event_title,
+            )
+            db.add(chat)
+            await db.flush()
 
         task = Task(
             id=task_id,

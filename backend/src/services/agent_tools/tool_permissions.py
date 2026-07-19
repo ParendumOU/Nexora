@@ -103,7 +103,9 @@ async def _get_agent_enabled_tools(agent_id: str | None, chat_id: str) -> set[st
     # sub-agent) — regardless of its configured toolset. If the agent is otherwise
     # unrestricted (no tools configured) they're already allowed.
     from src.services.agent_tools import local_exec as _local_exec
-    local_active = _local_exec.get_bridge(chat_id) is not None
+    # Grant local tools only for a turn initiated by the user who opened the bridge
+    # (binds host access to that user, not to anyone posting in a shared chat).
+    local_active = _local_exec.local_tools_active(chat_id)
     if not combined:
         # Default: no explicit tool config → unrestricted (backward-compatible).
         # Opt-in least-privilege: tools_default_deny makes an unconfigured agent

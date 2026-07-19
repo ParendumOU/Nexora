@@ -248,6 +248,15 @@ async def _resume_with_tool_results(
 
     except Exception as exc:
         logger.error(f"[tool_resume] failed for {chat_id}: {exc}")
+        # Don't strand the chat on "running": a generic failure (DB hiccup, unexpected
+        # provider error) must still surface an error + close the stream + go idle, or
+        # every client shows "processing…" forever with no recovery signal.
+        try:
+            await _broadcast(chat_id, {"type": "error", "message": "The turn failed to complete. Please retry."})
+            await _broadcast(chat_id, {"type": "stream_end", "content": "", "message_id": None})
+            await _broadcast(chat_id, {"type": "activity_status", "status": "idle"})
+        except Exception:
+            pass
     finally:
         await redis.delete(lock_key)
 
@@ -505,5 +514,12 @@ async def _resume_orchestrator(
     except Exception as exc:
         logger.error(f"[orchestrator] resume failed for {parent_chat_id}: {exc}")
         import traceback; traceback.print_exc()
+        # Don't strand the chat on "running" (see _resume_with_tool_results).
+        try:
+            await _broadcast(parent_chat_id, {"type": "error", "message": "The turn failed to complete. Please retry."})
+            await _broadcast(parent_chat_id, {"type": "stream_end", "content": "", "message_id": None})
+            await _broadcast(parent_chat_id, {"type": "activity_status", "status": "idle"})
+        except Exception:
+            pass
     finally:
         await redis.delete(lock_key)

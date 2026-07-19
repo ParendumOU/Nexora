@@ -18,6 +18,24 @@ def test_opencode_go_5h_falls_back_to_default_when_no_time():
     assert cd == 18000  # seed default_seconds (5h)
 
 
+def test_opencode_go_weekly_limit_parses_day_reset():
+    # The weekly cap is ALSO a GoUsageLimitError but says "Resets in 1 day" (limitName
+    # weekly). The weekly rule must win over the 5-hour rule and parse the day form.
+    cd = rl.detect_cooldown(
+        "opencode-go", error_type="GoUsageLimitError",
+        message="Weekly usage limit reached. Resets in 1 day. To continue using this model now, enable usage from your available balance.",
+    )
+    assert cd == 86400 + 60
+
+
+def test_opencode_go_weekly_limit_default_when_no_time():
+    cd = rl.detect_cooldown(
+        "opencode-go", error_type="GoUsageLimitError",
+        message="Weekly usage limit reached.",
+    )
+    assert cd == 86400  # weekly rule default_seconds (1 day)
+
+
 def test_free_usage_limit_days():
     cd = rl.detect_cooldown(
         "opencode-go", error_type="FreeUsageLimitError",

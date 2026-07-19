@@ -10,8 +10,13 @@ from pydantic import BaseModel, Field
 from src.core.database import get_db
 from src.core.security import encrypt_env_map
 from src.api.deps import get_current_user, get_active_org_id
-from src.core.permissions import require_org_role
+from src.core.permissions import require_org_role, has_org_role
 from src.models.org import OrgRole
+
+# Placeholder shown instead of a stored env-var value for callers not authorised
+# to read it. Non-empty so it's clearly not a real value; never round-trips
+# (only member+ receive real values, and only they can PATCH).
+_ENV_MASK = "••••••"
 from src.models.user import User
 from src.models.agent import Agent
 from src.models.agent_memory import AgentMemory, MEMORY_TYPES
@@ -164,11 +169,21 @@ class AgentResponse(BaseModel):
         if self.env_vars is None: self.env_vars = {}
         if self.mcps is None: self.mcps = []
         if self.flow_config is None: self.flow_config = {}
-        # env_vars are encrypted at rest (#163) — decrypt for the owner's editor
-        # (legacy-plaintext safe). The agent is already org-scoped by the endpoint.
+        # env_vars are encrypted at rest (#163). Do NOT auto-decrypt into the
+        # response — a `viewer` must not read another member's stored secrets.
+        # The value is masked here; endpoints call `reveal_env_vars()` to decrypt
+        # only for callers authorised to edit (member+).
         if self.env_vars:
+            self.env_vars = {k: _ENV_MASK for k in self.env_vars}
+
+    def reveal_env_vars(self, encrypted: dict | None) -> None:
+        """Replace the masked env_vars with the real decrypted values. Call only
+        for a caller authorised to see them (agent editor, member+)."""
+        if encrypted:
             from src.core.security import decrypt_env_map
-            self.env_vars = decrypt_env_map(self.env_vars)
+            self.env_vars = decrypt_env_map(encrypted)
+        else:
+            self.env_vars = {}
 
 
 class MemoryCreate(BaseModel):
@@ -340,7 +355,10 @@ async def list_agents(
         .limit(limit)
         .offset(offset)
     )
-    return result.scalars().all()
+    from src.core.permissions import filter_by_capability
+    return await filter_by_capability(
+        current_user, org_id, db, list(result.scalars().all()), "agent_ids", lambda a: a.id,
+    )
 
 
 @router.post("", response_model=AgentResponse, status_code=201)
@@ -379,7 +397,9 @@ async def create_agent(
     from src.api.routers.auth import _fire_audit_event
     _fire_audit_event(org_id, "agent.created", "agent",
                       resource_id=agent.id, user_id=current_user.id)
-    return agent
+    resp = AgentResponse.model_validate(agent)
+    resp.reveal_env_vars(agent.env_vars)  # creator is member+ by the gate above
+    return resp
 
 
 # ── Item routes ───────────────────────────────────────────────────────────────
@@ -392,7 +412,13 @@ async def get_agent(
 ):
     org_id = await get_active_org_id(current_user, db)
     await require_org_role(current_user, org_id, OrgRole.viewer, db)
-    return await _get_agent(agent_id, org_id, db)
+    agent = await _get_agent(agent_id, org_id, db)
+    resp = AgentResponse.model_validate(agent)
+    # Reveal real env-var values only to callers who can edit the agent (member+);
+    # viewers get the masked placeholders from model_post_init.
+    if await has_org_role(current_user, org_id, OrgRole.member, db):
+        resp.reveal_env_vars(agent.env_vars)
+    return resp
 
 
 @router.patch("/{agent_id}", response_model=AgentResponse)
@@ -413,8 +439,16 @@ async def update_agent(
             _updates["model_profile_id"], org_id, db
         )
     if "env_vars" in _updates:
-        from src.core.security import encrypt_env_map
-        _updates["env_vars"] = encrypt_env_map(_updates["env_vars"])  # encrypt at rest (#163)
+        from src.core.security import encrypt_env_map, decrypt_env_map
+        # Drop any key whose submitted value is still the masked placeholder — the
+        # editor received masks it never resolved (or a viewer's stale copy); keep
+        # the existing stored value for those keys instead of overwriting with junk.
+        _incoming = _updates["env_vars"] or {}
+        _existing_plain = decrypt_env_map(agent.env_vars or {})
+        _merged = {}
+        for k, v in _incoming.items():
+            _merged[k] = _existing_plain.get(k, "") if v == _ENV_MASK else v
+        _updates["env_vars"] = encrypt_env_map(_merged)  # encrypt at rest (#163)
     for field, value in _updates.items():
         setattr(agent, field, value)
 
@@ -423,7 +457,9 @@ async def update_agent(
 
     await db.commit()
     await db.refresh(agent)
-    return agent
+    resp = AgentResponse.model_validate(agent)
+    resp.reveal_env_vars(agent.env_vars)  # editor is member+ by the gate above
+    return resp
 
 
 @router.delete("/{agent_id}", status_code=204)

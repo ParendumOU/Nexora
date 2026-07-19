@@ -128,6 +128,22 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
         agent_id = req.agent_id or (live_chat.agent_id if live_chat else None)
         chain_override = req.provider_chain_id or None
 
+        # ── Governance (per-user limits + capability allowlists) ─────────────────
+        # Hard-block over-budget users / disallowed agents before any tokens spend.
+        _gov_policy: dict = {}
+        if org_id:
+            from src.services import governance as _gov
+            async with AsyncSessionLocal() as _gdb:
+                try:
+                    _gov_policy = await _gov.evaluate_turn(
+                        user, org_id, agent_id if req.enable_agent else None, _gdb,
+                    )
+                except _gov.GovernanceError as _ge:
+                    yield _sse({"type": "error", "code": _ge.code, "message": _ge.message})
+                    return
+            if _gov_policy.get("restricted"):
+                chain_override = _gov.forced_chain_override(_gov_policy, chain_override)
+
         # An explicit per-message account/chain pick should stick as the chat
         # default so resumes + sub-agents inherit it (not just this turn).
         if chain_override and live_chat and live_chat.provider_chain_id != chain_override:
@@ -142,6 +158,16 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
             live_chat, org_id, chain_override=chain_override,
             agent_id=agent_id if req.enable_agent else None,
         )
+
+        # Restrict to the user's allowed provider accounts + cap count.
+        if _gov_policy.get("restricted") and providers:
+            _filtered = _gov.filter_providers(_gov_policy, providers)
+            try:
+                _gov.assert_providers_available(providers, _filtered)
+            except _gov.GovernanceError as _ge:
+                yield _sse({"type": "error", "code": _ge.code, "message": _ge.message})
+                return
+            providers = _filtered
 
         if not providers:
             yield _sse({"type": "error", "message": "No providers configured. Please add a provider in Settings."})
@@ -186,6 +212,19 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
         # SSE-driven turn is live everywhere — parity with the WS path (#225).
         await pubsub.broadcast(chat_id, {"type": "stream_start"})
 
+        # Per-user concurrency cap (governance) around the LLM stream.
+        _gov_max_conc = int((_gov_policy.get("limits") or {}).get("max_concurrent_agents", 0) or 0)
+        if org_id and _gov_max_conc > 0:
+            if not await _gov.acquire_user_slot(org_id, user.id, _gov_max_conc):
+                yield _sse({
+                    "type": "error", "code": "concurrency",
+                    "message": (
+                        "You have too many agents running at once. "
+                        "Wait for one to finish or contact your organization admin."
+                    ),
+                })
+                return
+
         _gen_params = await load_agent_gen_params(agent_id if req.enable_agent else None)
         try:
             async for chunk in stream_response(
@@ -211,6 +250,9 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
         except AllProvidersExhausted as e:
             yield _sse({"type": "error", "message": str(e)})
             return
+        finally:
+            if org_id and _gov_max_conc > 0:
+                await _gov.release_user_slot(org_id, user.id, _gov_max_conc)
 
         provider_used = msg_metadata.get("account_name") or provider_used
 
