@@ -536,9 +536,13 @@ async def list_chains(
 ):
     org_id = await get_active_org_id(current_user, db)
     result = await db.execute(select(ProviderChain).where(ProviderChain.org_id == org_id))
+    # "__solo__*" chains are internal single-account pins (created when a chat is
+    # tied to one specific account); they are never shown as fallback options in
+    # any client. Resolution still works by id, so hiding them here is safe.
+    rows = [c for c in result.unique().scalars().all() if not (c.name or "").startswith("__solo__")]
     from src.core.permissions import filter_by_capability
     chains = await filter_by_capability(
-        current_user, org_id, db, list(result.unique().scalars().all()), "chain_ids", lambda c: c.id,
+        current_user, org_id, db, rows, "chain_ids", lambda c: c.id,
     )
     counts = await _account_counts(org_id, db)
     return [_chain_resp(c, counts) for c in chains]

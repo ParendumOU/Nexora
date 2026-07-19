@@ -464,6 +464,10 @@ export const orgsApi = {
     api.patch(`/orgs/${orgId}/members/${userId}`, { role }),
   leave: (orgId: string) => api.post(`/orgs/${orgId}/leave`),
   createInvite: (orgId: string, role = "member") => api.post(`/orgs/${orgId}/invites`, { role }),
+  // Terminal (CLI) invite: bound to an email so the CLI-join flow auto-creates the
+  // account. Returns cli_install_sh / cli_install_ps one-liners in addition to the token.
+  createCliInvite: (orgId: string, data: { email: string; full_name?: string; role?: string }) =>
+    api.post(`/orgs/${orgId}/invites`, { role: "member", ...data }),
   getInviteDetails: (token: string) => api.get(`/orgs/invite/${token}`),
   acceptInvite: (token: string) => api.post("/orgs/accept-invite", { token }),
   switchOrg: (org_id: string) => api.post("/orgs/switch", { org_id }),

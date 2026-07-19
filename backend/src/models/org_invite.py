@@ -21,6 +21,12 @@ class OrgInvite(Base):
     org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False)
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True, default=lambda: secrets.token_urlsafe(32))
     role: Mapped[str] = mapped_column(String(50), default="member")
+    # Optional binding to a specific person. Set when the invite is meant to
+    # auto-create an account (e.g. the CLI zero-touch onboarding flow): the
+    # redeem endpoint creates a passwordless user with this email/name and joins
+    # them to the org. Left NULL for plain "join an existing account" web invites.
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     invited_by_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=default_expires)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

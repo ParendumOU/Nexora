@@ -23,6 +23,7 @@ from src.api.routers import env_vars as env_vars_router
 from src.api.routers import cli_hooks as cli_hooks_router
 from src.api.routers import oauth as oauth_router
 from src.api.routers import device as device_router
+from src.api.routers import cli_onboarding as cli_onboarding_router
 from src.api.routers import platform_backup as platform_backup_router
 from src.api.routers import goals as goals_router
 from src.api.routers import approvals as approvals_router
@@ -141,6 +142,7 @@ def create_app() -> FastAPI:
     app.include_router(cli_hooks_router.router, prefix=prefix)
     app.include_router(oauth_router.router, prefix=prefix)
     app.include_router(device_router.router, prefix=prefix)
+    app.include_router(cli_onboarding_router.router, prefix=prefix)
     app.include_router(platform_backup_router.router, prefix=prefix)
     app.include_router(goals_router.router, prefix=prefix)
     app.include_router(approvals_router.router, prefix=prefix, dependencies=guarded)

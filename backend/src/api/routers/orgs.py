@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel, Field
@@ -29,6 +29,10 @@ class OrgUpdate(BaseModel):
 
 class InviteCreate(BaseModel):
     role: str = "member"
+    # Bind the invite to a specific person. Required for a terminal (CLI) invite:
+    # the CLI-join flow auto-creates a passwordless account with this email/name.
+    email: str | None = None
+    full_name: str | None = None
 
 
 class SwitchOrgRequest(BaseModel):
@@ -471,29 +475,43 @@ async def leave_org(
 async def create_invite(
     org_id: str,
     body: InviteCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     await _require_admin(current_user.id, org_id, db)
 
+    email = (body.email or "").strip().lower() or None
+    full_name = (body.full_name or "").strip() or None
     invite = OrgInvite(
         id=str(uuid.uuid4()),
         org_id=org_id,
         role=body.role,
         invited_by_id=current_user.id,
+        email=email,
+        full_name=full_name,
     )
     db.add(invite)
     await record_audit(db, action="org.invite.create", user=current_user, org_id=org_id,
                        resource_type="org_invite", resource_id=invite.id,
-                       detail={"role": body.role})
+                       detail={"role": body.role, "email": email})
     await db.commit()
     await db.refresh(invite)
 
-    return {
+    resp = {
         "token": invite.token,
         "expires_at": invite.expires_at.isoformat(),
         "invite_path": f"/join?token={invite.token}",
     }
+    # A terminal (CLI) invite is bound to an email — return the ready-to-share
+    # one-liners so the admin can hand the employee a single copy-paste command.
+    if email:
+        from src.api.routers.cli_onboarding import (
+            build_cli_install_commands,
+            resolve_instance_base_url,
+        )
+        resp.update(build_cli_install_commands(resolve_instance_base_url(request), invite.token))
+    return resp
 
 
 @router.get("/invite/{token}")

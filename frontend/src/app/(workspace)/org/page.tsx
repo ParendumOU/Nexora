@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { orgsApi, authApi } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
-import { Copy, Check, Trash2, UserPlus, RefreshCw, AlertTriangle, LogOut, ChevronDown } from "lucide-react";
+import { Copy, Check, Trash2, UserPlus, RefreshCw, AlertTriangle, LogOut, ChevronDown, Terminal } from "lucide-react";
 import { cn, copyToClipboard } from "@/lib/utils";
 import toast from "react-hot-toast";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -246,6 +246,32 @@ export default function OrgSettingsPage() {
       setCombinedInviteUrl(`${base}/register?invite=${signupToken}&join=${orgToken}`);
     },
   });
+
+  // Terminal (CLI) invite — one copy-paste command that installs the CLI, creates the
+  // employee's account into this org, and pairs the terminal. No manual login/pair.
+  const [cliEmail, setCliEmail] = useState("");
+  const [cliName, setCliName] = useState("");
+  const [cliInstall, setCliInstall] = useState<{ sh: string; ps: string } | null>(null);
+  const [copiedCli, setCopiedCli] = useState<"sh" | "ps" | null>(null);
+
+  const cliInviteMutation = useMutation({
+    mutationFn: () =>
+      orgsApi
+        .createCliInvite(currentOrgId!, { email: cliEmail.trim(), full_name: cliName.trim() || undefined })
+        .then((r) => r.data),
+    onSuccess: (data) => setCliInstall({ sh: data.cli_install_sh, ps: data.cli_install_ps }),
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg || "Failed to create terminal invite");
+    },
+  });
+
+  const copyCli = (which: "sh" | "ps") => {
+    if (!cliInstall) return;
+    copyToClipboard(which === "sh" ? cliInstall.sh : cliInstall.ps);
+    setCopiedCli(which);
+    setTimeout(() => setCopiedCli(null), 2000);
+  };
 
   const inviteUrl = inviteToken
     ? `${typeof window !== "undefined" ? window.location.origin : ""}/join?token=${inviteToken}`
@@ -615,6 +641,75 @@ export default function OrgSettingsPage() {
                     Expires {new Date(inviteExpires).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                   </p>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* Terminal (CLI) invite — one copy-paste command: install + account + pair */}
+          <div className="space-y-3 p-4 rounded-xl border border-border bg-card/50">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-1.5">
+                <Terminal className="w-3.5 h-3.5 text-primary" />
+                Invite to the terminal (CLI)
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                One command sets up a teammate on the command line: it installs the CLI, creates their
+                account in this org, and pairs their terminal automatically. No manual login.
+              </p>
+            </div>
+            {isAdmin ? (
+              <>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    value={cliEmail}
+                    onChange={(e) => setCliEmail(e.target.value)}
+                    type="email"
+                    placeholder="teammate@company.com"
+                    className="flex-1 text-sm bg-background border border-border rounded-lg px-3 py-2 focus:outline-none focus:border-primary/40"
+                  />
+                  <input
+                    value={cliName}
+                    onChange={(e) => setCliName(e.target.value)}
+                    placeholder="Full name (optional)"
+                    className="flex-1 text-sm bg-background border border-border rounded-lg px-3 py-2 focus:outline-none focus:border-primary/40"
+                  />
+                </div>
+                <button
+                  onClick={() => cliInviteMutation.mutate()}
+                  disabled={cliInviteMutation.isPending || !cliEmail.trim()}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+                >
+                  {cliInviteMutation.isPending
+                    ? <><RefreshCw className="w-4 h-4 animate-spin" />Generating…</>
+                    : <><Terminal className="w-4 h-4" />Generate command</>}
+                </button>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">Only admins can create terminal invites.</p>
+            )}
+            {cliInstall && (
+              <div className="space-y-3 pt-1">
+                {([
+                  { key: "sh" as const, label: "macOS / Linux", value: cliInstall.sh },
+                  { key: "ps" as const, label: "Windows (PowerShell)", value: cliInstall.ps },
+                ]).map(({ key, label, value }) => (
+                  <div key={key} className="space-y-1.5">
+                    <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+                    <div className="flex items-start gap-2">
+                      <code className="flex-1 text-xs font-mono bg-background border border-border rounded-lg px-3 py-2 break-all">{value}</code>
+                      <button
+                        onClick={() => copyCli(key)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent text-xs font-medium hover:bg-accent/80 transition-colors shrink-0"
+                      >
+                        {copiedCli === key ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copiedCli === key ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-[10px] text-muted-foreground">
+                  Send this to {cliEmail || "your teammate"}. Single use · expires in 7 days.
+                </p>
               </div>
             )}
           </div>

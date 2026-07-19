@@ -10,6 +10,14 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.23.0
+
+- Zero-touch CLI onboarding: an org admin can invite a teammate straight to the terminal. From Organization to Invites, the new "Invite to the terminal (CLI)" card takes an email and name and generates a single copy-paste command for macOS, Linux or Windows.
+- New endpoint POST /auth/cli/redeem exchanges an email-bound org invite for a ready-to-use account in one step: it resolves or auto-creates a passwordless account, joins the inviting organization (respecting the per-license user limit), and mints a user API key plus a paired device token. The invite is single use.
+- Org invites can now be bound to a specific person: the org invite endpoint accepts an email and full name and, when set, returns the ready-to-share install one-liners.
+- Added GET /auth/cli/invite/{token} to preview an invite before redeeming it.
+- Migration 076 adds email and full_name to org_invites. Both columns are optional, so existing web invites are unchanged.
+
 ## 1.22.0
 
 - Org admins and owners can now cap and scope each user through permission groups. A group can set a token budget (total or per rolling window), a max number of agents a user may run at once, and a max number of provider accounts, plus allowlists of the exact agents, skills, tools, personas, provider accounts and fallback chains a member may see and use.
