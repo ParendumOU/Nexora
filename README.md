@@ -188,10 +188,4 @@ built? Open an issue or join us at **[nexora.parendum.com](https://nexora.parend
 
 ## Star history
 
-<a href="https://www.star-history.com/?repos=ParendumOU%2FNexora&type=date&legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ParendumOU/Nexora&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ParendumOU/Nexora&type=date&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ParendumOU/Nexora&type=date&legend=top-left" />
-  </picture>
-</a>
+[![Star History Chart](https://api.star-history.com/chart?repos=ParendumOU/Nexora&type=date&legend=top-left&sealed_token=B_IDNRqHPlJDQIegNEQ6spzHl2UXw_yHXIEVAE8BqCF_zD1jwIr4a8k81bQCc5o2SriTdEnJGepVwbmkMZHAI9mhkfqIPeFPdXMMKNVElWVyj-a3IlbHfeZC6-kCEeKf8Hv06tGopP9kRxMMqQ38oaLGJHlW1MbxazgSykvMLmcrpGA9bezCW3A5T5DD)](https://www.star-history.com/?repos=ParendumOU%2FNexora&type=date&legend=top-left)
