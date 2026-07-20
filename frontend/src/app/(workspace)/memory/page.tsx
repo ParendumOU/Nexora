@@ -12,6 +12,9 @@ import {
   BrainCircuit, Network, FolderOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  PageShell, PageHeader, PageLoading, PageEmpty,
+} from "@/components/layout/page-shell";
 import toast from "react-hot-toast";
 import * as Dialog from "@radix-ui/react-dialog";
 
@@ -229,12 +232,12 @@ function ManageView({ onOpen }: { onOpen: (id: string) => void }) {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 animate-spin" /></div>
+          <PageLoading />
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
-            <BrainCircuit className="w-8 h-8 opacity-40" />
-            No memory notes yet. Agents write these as they work — or create one.
-          </div>
+          <PageEmpty
+            icon={BrainCircuit}
+            message="No memory notes yet. Agents write these as they work — or create one."
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 overflow-y-auto pb-4">
             {filtered.map((n) => (
@@ -344,29 +347,30 @@ export default function MemoryPage() {
   const [openId, setOpenId] = useState<string | null>(null);
 
   return (
-    <div className="flex flex-col h-full p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2"><BrainCircuit className="w-5 h-5" /> Memory</h1>
-          <p className="text-sm text-muted-foreground">Agent knowledge vault — markdown notes cross-linked into a graph.</p>
-        </div>
-        <div className="flex rounded-lg border border-border p-0.5">
-          <button onClick={() => setTab("manage")}
-            className={cn("px-3 py-1.5 text-sm rounded-md flex items-center gap-1.5", tab === "manage" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
-            <FolderOpen className="w-4 h-4" /> Manage
-          </button>
-          <button onClick={() => setTab("graph")}
-            className={cn("px-3 py-1.5 text-sm rounded-md flex items-center gap-1.5", tab === "graph" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
-            <Network className="w-4 h-4" /> Graph
-          </button>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={BrainCircuit}
+        title="Memory"
+        subtitle="Agent knowledge vault — markdown notes cross-linked into a graph."
+        actions={
+          <div className="flex rounded-lg border border-border p-0.5">
+            <button onClick={() => setTab("manage")}
+              className={cn("px-3 py-1.5 text-sm rounded-md flex items-center gap-1.5", tab === "manage" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
+              <FolderOpen className="w-4 h-4" /> Manage
+            </button>
+            <button onClick={() => setTab("graph")}
+              className={cn("px-3 py-1.5 text-sm rounded-md flex items-center gap-1.5", tab === "graph" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
+              <Network className="w-4 h-4" /> Graph
+            </button>
+          </div>
+        }
+      />
 
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 p-6">
         {tab === "manage" ? <ManageView onOpen={setOpenId} /> : <GraphView onOpen={setOpenId} />}
       </div>
 
       {openId && <NoteModal noteId={openId} onClose={() => setOpenId(null)} />}
-    </div>
+    </PageShell>
   );
 }

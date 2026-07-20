@@ -12,6 +12,9 @@ import {
   MessageSquare, ExternalLink, ChevronDown, Filter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  PageShell, PageHeader, PageBody, PageLoading, PageEmpty,
+} from "@/components/layout/page-shell";
 import toast from "react-hot-toast";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Select from "@radix-ui/react-select";
@@ -208,7 +211,7 @@ function CreateIssueDialog({
 
 // ─── Filter Bar ───────────────────────────────────────────────────────────────
 
-function FilterBar({
+function IssueFilters({
   statusFilter, setStatusFilter,
   priorityFilter, setPriorityFilter,
   projectFilter, setProjectFilter,
@@ -335,26 +338,26 @@ export default function IssuesPage() {
   const inProgressCount = issues.filter(i => i.status === "in_progress").length;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-border space-y-3 shrink-0">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold flex items-center gap-2">
-              <CircleDot className="w-5 h-5" />Issues
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {total} total
-              {openCount > 0 && <> · <span className="text-green-400">{openCount} open</span></>}
-              {inProgressCount > 0 && <> · <span className="text-blue-400">{inProgressCount} in progress</span></>}
-            </p>
-          </div>
+    <PageShell>
+      <PageHeader
+        icon={CircleDot}
+        title="Issues"
+        subtitle={
+          <>
+            {total} total
+            {openCount > 0 && <> · <span className="text-green-400">{openCount} open</span></>}
+            {inProgressCount > 0 && <> · <span className="text-blue-400">{inProgressCount} in progress</span></>}
+          </>
+        }
+        actions={
           <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
             <Plus className="w-3.5 h-3.5" />New Issue
           </Button>
-        </div>
+        }
+      />
 
-        <FilterBar
+      <div className="px-6 py-2.5 border-b border-border shrink-0">
+        <IssueFilters
           statusFilter={statusFilter} setStatusFilter={setStatusFilter}
           priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter}
           projectFilter={projectFilter} setProjectFilter={setProjectFilter}
@@ -363,27 +366,22 @@ export default function IssuesPage() {
         />
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-auto">
+      <PageBody>
         {isLoading ? (
-          <div className="flex items-center justify-center h-40 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />Loading…
-          </div>
+          <PageLoading />
         ) : issues.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-60 gap-4 text-muted-foreground">
-            <CircleDot className="w-10 h-10 opacity-20" />
-            <div className="text-center">
-              <p className="text-sm font-medium">No issues found</p>
-              <p className="text-xs mt-0.5">
-                {search || statusFilter || priorityFilter || projectFilter
-                  ? "Try adjusting your filters"
-                  : "Create your first issue to start tracking work"}
-              </p>
-            </div>
+          <PageEmpty
+            icon={CircleDot}
+            message={
+              search || statusFilter || priorityFilter || projectFilter
+                ? "No issues found — try adjusting your filters"
+                : "No issues yet — create your first issue to start tracking work"
+            }
+          >
             {!search && !statusFilter && !priorityFilter && (
               <Button size="sm" onClick={() => setCreateOpen(true)}>Create first issue</Button>
             )}
-          </div>
+          </PageEmpty>
         ) : (
           <div className="divide-y divide-border">
             {issues.map(issue => {
@@ -463,7 +461,7 @@ export default function IssuesPage() {
             })}
           </div>
         )}
-      </div>
+      </PageBody>
 
       <CreateIssueDialog
         open={createOpen}
@@ -471,6 +469,6 @@ export default function IssuesPage() {
         projects={projects}
         agents={agents}
       />
-    </div>
+    </PageShell>
   );
 }

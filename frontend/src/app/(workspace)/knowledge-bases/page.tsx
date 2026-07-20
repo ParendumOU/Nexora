@@ -6,9 +6,12 @@ import { knowledgeBasesApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Loader2, Plus, Trash2, BookOpen, X, Search, ChevronRight, FileText, Settings2,
+  Loader2, Plus, Trash2, BookOpen, X, ChevronRight, FileText, Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  PageShell, PageHeader, PageBody, PageSearch, PageLoading, PageEmpty, SectionLabel,
+} from "@/components/layout/page-shell";
 import toast from "react-hot-toast";
 import * as Dialog from "@radix-ui/react-dialog";
 
@@ -212,68 +215,45 @@ export default function KnowledgeBasesPage() {
   const totalFiles = kbs.reduce((acc, kb) => acc + kb.file_count, 0);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-xl font-bold">Knowledge Bases</h1>
-          <p className="text-sm text-muted-foreground">
-            {kbs.length} base{kbs.length !== 1 ? "s" : ""} · {totalFiles} document{totalFiles !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
-          <Plus className="w-3.5 h-3.5" />
-          New Knowledge Base
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={BookOpen}
+        title="Knowledge Bases"
+        subtitle={`${kbs.length} base${kbs.length !== 1 ? "s" : ""} · ${totalFiles} document${totalFiles !== 1 ? "s" : ""}`}
+        actions={
+          <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
+            <Plus className="w-3.5 h-3.5" />
+            New Knowledge Base
+          </Button>
+        }
+      />
 
-      {/* Search */}
-      <div className="px-6 py-2.5 border-b border-border shrink-0">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search knowledge bases…"
-            className="pl-8 h-8 text-sm"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
+      <PageSearch
+        value={search}
+        onChange={setSearch}
+        placeholder="Search knowledge bases…"
+      />
 
-      {/* Content */}
-      <div className="flex-1 overflow-auto">
+      <PageBody>
         {isLoading ? (
-          <div className="flex items-center justify-center h-40 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />Loading…
-          </div>
+          <PageLoading />
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-60 text-muted-foreground gap-3">
-            <BookOpen className="w-10 h-10 opacity-20" />
-            <p className="text-sm">
-              {search ? "No knowledge bases match your search" : "No knowledge bases yet"}
-            </p>
+          <PageEmpty
+            icon={BookOpen}
+            message={search ? "No knowledge bases match your search" : "No knowledge bases yet"}
+          >
             {!search && (
               <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
                 <Plus className="w-3.5 h-3.5 mr-1.5" />Create your first knowledge base
               </Button>
             )}
-          </div>
+          </PageEmpty>
         ) : (
           <div>
-            <div className="px-5 py-2 bg-accent/20 border-b border-border/60 flex items-center gap-2">
-              <BookOpen className="w-3.5 h-3.5 text-muted-foreground" />
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                {search ? `${filtered.length} of ${kbs.length} bases` : `${kbs.length} knowledge base${kbs.length !== 1 ? "s" : ""}`}
-              </span>
-            </div>
+            <SectionLabel
+              icon={BookOpen}
+              label={search ? `${filtered.length} of ${kbs.length} bases` : `${kbs.length} knowledge base${kbs.length !== 1 ? "s" : ""}`}
+            />
             {filtered.map((kb) => (
               <div
                 key={kb.id}
@@ -316,9 +296,9 @@ export default function KnowledgeBasesPage() {
             ))}
           </div>
         )}
-      </div>
+      </PageBody>
 
       <CreateKBDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-    </div>
+    </PageShell>
   );
 }

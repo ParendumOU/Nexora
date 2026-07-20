@@ -9,6 +9,9 @@ import {
   Plus, Trash2, Loader2, Radio, MessageSquare, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  PageShell, PageHeader, PageBody, PageLoading, PageEmpty,
+} from "@/components/layout/page-shell";
 import toast from "react-hot-toast";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Select from "@radix-ui/react-select";
@@ -177,31 +180,25 @@ export default function ChannelsPage() {
   });
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-xl font-bold">Channels</h1>
-          <p className="text-sm text-muted-foreground">Connect agents to Telegram and other platforms</p>
-        </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
-          <Plus className="w-3.5 h-3.5" />New Channel
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={Radio}
+        title="Channels"
+        subtitle="Connect agents to Telegram and other platforms"
+        actions={
+          <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
+            <Plus className="w-3.5 h-3.5" />New Channel
+          </Button>
+        }
+      />
 
-      <div className="flex-1 overflow-auto">
+      <PageBody>
         {isLoading ? (
-          <div className="flex items-center justify-center h-40 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />Loading…
-          </div>
+          <PageLoading />
         ) : channels.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-60 gap-4 text-muted-foreground">
-            <Radio className="w-10 h-10 opacity-20" />
-            <div className="text-center">
-              <p className="text-sm font-medium">No channels yet</p>
-              <p className="text-xs mt-0.5">Create one to connect an agent to Telegram</p>
-            </div>
+          <PageEmpty icon={Radio} message="No channels yet — create one to connect an agent to Telegram">
             <Button size="sm" onClick={() => setCreateOpen(true)}>Create first channel</Button>
-          </div>
+          </PageEmpty>
         ) : (
           <div className="divide-y divide-border">
             {channels.map(ch => {
@@ -248,9 +245,9 @@ export default function ChannelsPage() {
             })}
           </div>
         )}
-      </div>
+      </PageBody>
 
       <CreateChannelDialog open={createOpen} onClose={() => setCreateOpen(false)} agents={agents} />
-    </div>
+    </PageShell>
   );
 }

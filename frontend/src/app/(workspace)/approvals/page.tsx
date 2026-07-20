@@ -2,8 +2,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { approvalsApi } from "@/lib/api";
-import { Loader2, ShieldCheck, CheckCircle, XCircle, Clock } from "lucide-react";
+import { ShieldCheck, CheckCircle, XCircle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  PageShell, PageHeader, PageBody, FilterBar, PageLoading, PageEmpty,
+} from "@/components/layout/page-shell";
 
 type Approval = {
   id: string;
@@ -52,44 +55,30 @@ export default function ApprovalsPage() {
   });
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-6 py-4 border-b border-border flex items-center gap-3 shrink-0">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-          <ShieldCheck className="w-4 h-4 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-sm font-semibold">Approvals</h1>
-          <p className="text-xs text-muted-foreground">Review tool actions held for human approval</p>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={ShieldCheck}
+        title="Approvals"
+        subtitle="Review tool actions held for human approval"
+      />
 
-      <div className="px-6 pt-4 flex gap-1 shrink-0">
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={cn(
-              "px-3 py-1.5 text-xs rounded-md font-medium transition-colors",
-              filter === f ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent"
-            )}
-          >
-            {f === "all" ? "All" : STATUS[f]?.label ?? f}
-          </button>
-        ))}
-      </div>
+      <FilterBar
+        options={FILTERS.map((f) => ({
+          id: f,
+          label: f === "all" ? "All" : STATUS[f]?.label ?? f,
+        }))}
+        value={filter}
+        onChange={setFilter}
+      />
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-        {isLoading && (
-          <div className="flex items-center gap-2 text-muted-foreground text-sm">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
-          </div>
-        )}
+      <PageBody className="px-6 py-4 space-y-3">
+        {isLoading && <PageLoading />}
 
         {!isLoading && (!approvals || approvals.length === 0) && (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
-            <ShieldCheck className="w-10 h-10 opacity-20" />
-            <p className="text-sm">No approvals {filter !== "all" ? `with status "${filter}"` : "yet"}</p>
-          </div>
+          <PageEmpty
+            icon={ShieldCheck}
+            message={`No approvals ${filter !== "all" ? `with status "${filter}"` : "yet"}`}
+          />
         )}
 
         {approvals?.map((a) => {
@@ -137,7 +126,7 @@ export default function ApprovalsPage() {
             </div>
           );
         })}
-      </div>
-    </div>
+      </PageBody>
+    </PageShell>
   );
 }

@@ -2,10 +2,13 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { tasksApi } from "@/lib/api";
-import { Loader2, ListTodo, FolderKanban, Bot, ChevronDown, ChevronRight, ExternalLink, ChevronLeft } from "lucide-react";
+import { ListTodo, FolderKanban, Bot, ChevronDown, ChevronRight, ExternalLink, ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import {
+  PageShell, PageHeader, PageBody, FilterBar, PageLoading, PageEmpty,
+} from "@/components/layout/page-shell";
 
 const PAGE_SIZE = 10;
 const UNPAGINATED_STATUSES = new Set(["in_progress", "running"]);
@@ -110,48 +113,27 @@ export default function GlobalTasksPage() {
   const totalActive = tasks.filter((t) => ["in_progress", "running", "paused", "queued"].includes(t.status)).length;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-        <div>
-          <h1 className="text-lg font-semibold flex items-center gap-2">
-            <ListTodo className="w-5 h-5" />
-            All Tasks
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {tasks.length} total · {totalActive} active
-          </p>
-        </div>
-        <div className="flex items-center gap-1 p-0.5 bg-accent/30 rounded-lg border border-border">
-          {(["all", "mine"] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setFilter(v)}
-              className={cn(
-                "px-3 py-1 text-xs rounded-md transition-colors capitalize",
-                filter === v ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={ListTodo}
+        title="Tasks"
+        subtitle={`${tasks.length} total · ${totalActive} active`}
+      />
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
+      <FilterBar
+        options={[
+          { id: "all", label: "All" },
+          { id: "mine", label: "Mine" },
+        ]}
+        value={filter}
+        onChange={setFilter}
+      />
+
+      <PageBody>
         {isLoading ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
+          <PageLoading />
         ) : tasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 text-center space-y-3">
-            <ListTodo className="w-10 h-10 text-muted-foreground/40" />
-            <div>
-              <p className="font-medium">No tasks yet</p>
-              <p className="text-sm text-muted-foreground">Tasks appear here when agents start working</p>
-            </div>
-          </div>
+          <PageEmpty icon={ListTodo} message="No tasks yet — they appear here when agents start working" />
         ) : (
           <div className="divide-y divide-border">
             {sortedStatuses.map((status) => (
@@ -250,7 +232,7 @@ export default function GlobalTasksPage() {
             ))}
           </div>
         )}
-      </div>
-    </div>
+      </PageBody>
+    </PageShell>
   );
 }

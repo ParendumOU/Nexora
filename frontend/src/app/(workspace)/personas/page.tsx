@@ -7,9 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Fingerprint, Plus, Loader2, Trash2, Zap, Network, Wrench,
-  Search, X, ChevronRight, Sparkles, Upload,
+  ChevronRight, Sparkles, Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  PageShell, PageHeader, PageBody, FilterBar, PageSearch, PageLoading, PageEmpty, SectionLabel,
+} from "@/components/layout/page-shell";
 import toast from "react-hot-toast";
 import * as Dialog from "@radix-ui/react-dialog";
 import { PersonaDetailPanel, type Persona } from "@/components/personas/PersonaDetailPanel";
@@ -220,90 +223,59 @@ export default function PersonasPage() {
   const filteredBuiltin = filtered.filter((p) => p.is_builtin);
   const filteredCustom = filtered.filter((p) => !p.is_builtin);
 
-  const FILTERS: { id: FilterType; label: string }[] = [
-    { id: "all", label: `All (${allPersonas.length})` },
-    { id: "builtin", label: `Built-in (${builtinPersonas.length})` },
-    { id: "custom", label: `Custom (${deduplicatedCustom.length})` },
+  const FILTERS: { id: FilterType; label: string; count: number }[] = [
+    { id: "all", label: "All", count: allPersonas.length },
+    { id: "builtin", label: "Built-in", count: builtinPersonas.length },
+    { id: "custom", label: "Custom", count: deduplicatedCustom.length },
   ];
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-xl font-bold">Personas</h1>
-          <p className="text-sm text-muted-foreground">
-            {builtinPersonas.length} built-in · {deduplicatedCustom.length} custom
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <input ref={importRef} type="file" accept=".zip" className="hidden" onChange={handleImport} />
-          <Button size="sm" variant="outline" onClick={() => importRef.current?.click()} disabled={importing} className="gap-1.5">
-            {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-            Import ZIP
-          </Button>
-          <Button onClick={() => setShowCreate(true)} size="sm" className="gap-1.5">
-            <Plus className="w-3.5 h-3.5" />New Persona
-          </Button>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={Fingerprint}
+        title="Personas"
+        subtitle={`${builtinPersonas.length} built-in · ${deduplicatedCustom.length} custom`}
+        actions={
+          <>
+            <input ref={importRef} type="file" accept=".zip" className="hidden" onChange={handleImport} />
+            <Button size="sm" variant="outline" onClick={() => importRef.current?.click()} disabled={importing} className="gap-1.5">
+              {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              Import ZIP
+            </Button>
+            <Button onClick={() => setShowCreate(true)} size="sm" className="gap-1.5">
+              <Plus className="w-3.5 h-3.5" />New Persona
+            </Button>
+          </>
+        }
+      />
 
-      {/* Filter pills */}
-      <div className="px-6 py-2 border-b border-border flex items-center gap-2 shrink-0">
-        {FILTERS.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => setFilter(id)}
-            className={cn(
-              "text-xs px-2.5 py-1 rounded-full border transition-colors",
-              filter === id ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <FilterBar options={FILTERS} value={filter} onChange={setFilter} />
 
-      {/* Search */}
-      <div className="px-6 py-2.5 border-b border-border shrink-0">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, key, or description…" className="pl-8 h-8 text-sm" />
-          {search && (
-            <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
+      <PageSearch
+        value={search}
+        onChange={setSearch}
+        placeholder="Search by name, key, or description…"
+      />
 
-      {/* List */}
-      <div className="flex-1 overflow-auto">
+      <PageBody>
         {isLoading ? (
-          <div className="flex items-center justify-center h-40 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />Loading…
-          </div>
+          <PageLoading />
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-60 gap-3 text-muted-foreground">
-            <Fingerprint className="w-10 h-10 opacity-20" />
-            <p className="text-sm">{search ? "No personas match your search" : "No personas yet"}</p>
+          <PageEmpty
+            icon={Fingerprint}
+            message={search ? "No personas match your search" : "No personas yet"}
+          >
             {!search && (
               <Button size="sm" variant="outline" onClick={() => setShowCreate(true)}>
                 <Plus className="w-3.5 h-3.5 mr-1.5" />Create your first persona
               </Button>
             )}
-          </div>
+          </PageEmpty>
         ) : (
           <>
             {filteredBuiltin.length > 0 && (
               <div>
-                <div className="px-5 py-2 bg-accent/20 border-b border-border/60 flex items-center gap-2">
-                  <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                    Built-in ({filteredBuiltin.length})
-                  </span>
-                </div>
+                <SectionLabel icon={Sparkles} label="Built-in" count={filteredBuiltin.length} />
                 {filteredBuiltin.map((p) => (
                   <PersonaRow key={p.id} persona={p} onClick={() => setSelected(p)} />
                 ))}
@@ -311,12 +283,7 @@ export default function PersonasPage() {
             )}
             {filteredCustom.length > 0 && (
               <div>
-                <div className="px-5 py-2 bg-accent/20 border-b border-border/60 flex items-center gap-2">
-                  <Fingerprint className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                    Custom ({filteredCustom.length})
-                  </span>
-                </div>
+                <SectionLabel icon={Fingerprint} label="Custom" count={filteredCustom.length} />
                 {filteredCustom.map((p) => (
                   <PersonaRow key={p.id} persona={p} onClick={() => setSelected(p)} onDelete={() => deletePersona.mutate(p.id)} />
                 ))}
@@ -324,10 +291,10 @@ export default function PersonasPage() {
             )}
           </>
         )}
-      </div>
+      </PageBody>
 
       <CreatePersonaDialog open={showCreate} onClose={() => setShowCreate(false)} />
       {selected && <PersonaDetailPanel persona={selected} onClose={() => setSelected(null)} />}
-    </div>
+    </PageShell>
   );
 }

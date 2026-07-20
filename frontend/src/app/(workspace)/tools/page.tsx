@@ -12,10 +12,13 @@ import { Badge } from "@/components/ui/badge";
 import {
   Loader2, Plus, Trash2, Wrench, X, ChevronRight,
   Globe, Monitor, FolderArchive, GitBranch, Github,
-  Triangle, Code2, Container, Search, Sparkles, Upload, Link,
+  Triangle, Code2, Container, Sparkles, Upload, Link,
   Radio, Layers, Brain, CircleDot, Server, Workflow, FolderKanban,
 } from "lucide-react";
 import { cn, copyToClipboard } from "@/lib/utils";
+import {
+  PageShell, PageHeader, PageBody, FilterBar, PageSearch, PageLoading, PageEmpty, SectionLabel,
+} from "@/components/layout/page-shell";
 import toast from "react-hot-toast";
 import * as Dialog from "@radix-ui/react-dialog";
 import { ToolDetailPanel } from "@/components/tools/ToolDetailPanel";
@@ -347,118 +350,81 @@ export default function ToolsPage() {
   const showCustom = filteredCustom.length > 0;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <input ref={importRef} type="file" accept=".zip" className="hidden" onChange={handleImport} />
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-xl font-bold">Tools</h1>
-          <p className="text-sm text-muted-foreground">
-            {builtins.length} built-in · {deduplicatedCustom.length} custom
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {showUrlInput && (
-            <div className="flex items-center gap-1">
-              <Input
-                autoFocus
-                placeholder="Paste import link…"
-                value={importUrl}
-                onChange={(e) => setImportUrl(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleImportUrl(); if (e.key === "Escape") { setShowUrlInput(false); setImportUrl(""); } }}
-                className="h-8 text-sm w-64"
-              />
-              <Button size="sm" onClick={handleImportUrl} disabled={importingUrl || !importUrl.trim()}>
-                {importingUrl ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Import"}
-              </Button>
-              <button onClick={() => { setShowUrlInput(false); setImportUrl(""); }} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-            </div>
-          )}
-          <Button size="sm" variant="outline" onClick={() => { setShowUrlInput((v) => !v); setImportUrl(""); }} className="gap-1.5">
-            <Link className="w-3.5 h-3.5" />
-            Import URL
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => importRef.current?.click()} disabled={importing} className="gap-1.5">
-            {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-            Import ZIP
-          </Button>
-          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5">
-            <Plus className="w-3.5 h-3.5" />Custom Tool
-          </Button>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={Wrench}
+        title="Tools"
+        subtitle={`${builtins.length} built-in · ${deduplicatedCustom.length} custom`}
+        actions={
+          <>
+            {showUrlInput && (
+              <div className="flex items-center gap-1">
+                <Input
+                  autoFocus
+                  placeholder="Paste import link…"
+                  value={importUrl}
+                  onChange={(e) => setImportUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleImportUrl(); if (e.key === "Escape") { setShowUrlInput(false); setImportUrl(""); } }}
+                  className="h-8 text-sm w-64"
+                />
+                <Button size="sm" onClick={handleImportUrl} disabled={importingUrl || !importUrl.trim()}>
+                  {importingUrl ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Import"}
+                </Button>
+                <button onClick={() => { setShowUrlInput(false); setImportUrl(""); }} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+              </div>
+            )}
+            <input ref={importRef} type="file" accept=".zip" className="hidden" onChange={handleImport} />
+            <Button size="sm" variant="outline" onClick={() => { setShowUrlInput((v) => !v); setImportUrl(""); }} className="gap-1.5">
+              <Link className="w-3.5 h-3.5" />
+              Import URL
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => importRef.current?.click()} disabled={importing} className="gap-1.5">
+              {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              Import ZIP
+            </Button>
+            <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5">
+              <Plus className="w-3.5 h-3.5" />Custom Tool
+            </Button>
+          </>
+        }
+      />
 
-      {/* Category filter pills */}
       {!isLoading && presentCats.length > 0 && (
-        <div className="px-6 py-2 border-b border-border flex items-center gap-2 flex-wrap shrink-0">
-          <button
-            onClick={() => setFilterCat("all")}
-            className={cn("text-xs px-2.5 py-1 rounded-full border transition-colors", filterCat === "all" ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent")}
-          >
-            All ({allTools.length})
-          </button>
-          {presentCats.map((cat) => {
-            const cfg = getCategoryConfig(cat);
-            return (
-              <button
-                key={cat}
-                onClick={() => setFilterCat(filterCat === cat ? "all" : cat)}
-                className={cn("text-xs px-2.5 py-1 rounded-full border transition-colors", filterCat === cat ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent")}
-              >
-                {cfg.label} ({catCounts[cat] ?? 0})
-              </button>
-            );
-          })}
-        </div>
+        <FilterBar
+          options={[
+            { id: "all", label: "All", count: allTools.length },
+            ...presentCats.map((cat) => ({ id: cat, label: getCategoryConfig(cat).label, count: catCounts[cat] ?? 0 })),
+          ]}
+          value={filterCat}
+          onChange={(id) => setFilterCat(id === filterCat ? "all" : id)}
+        />
       )}
 
-      {/* Search bar */}
-      <div className="px-6 py-2.5 border-b border-border shrink-0">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, key, or description…"
-            className="pl-8 h-8 text-sm"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
+      <PageSearch
+        value={search}
+        onChange={setSearch}
+        placeholder="Search by name, key, or description…"
+      />
 
-      {/* Tool list */}
-      <div className="flex-1 overflow-auto">
+      <PageBody>
         {isLoading ? (
-          <div className="flex items-center justify-center h-40 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />Loading…
-          </div>
+          <PageLoading />
         ) : !showBuiltins && !showCustom ? (
-          <div className="flex flex-col items-center justify-center h-60 gap-3 text-muted-foreground">
-            <Wrench className="w-10 h-10 opacity-20" />
-            <p className="text-sm">{search ? "No tools match your search" : "No tools yet"}</p>
+          <PageEmpty
+            icon={Wrench}
+            message={search ? "No tools match your search" : "No tools yet"}
+          >
             {!search && (
               <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
                 <Plus className="w-3.5 h-3.5 mr-1.5" />Add your first tool
               </Button>
             )}
-          </div>
+          </PageEmpty>
         ) : (
           <>
             {showBuiltins && (
               <div>
-                <div className="px-5 py-2 bg-accent/20 border-b border-border/60 flex items-center gap-2">
-                  <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                    Developer Suite — Built-in ({filteredBuiltins.length})
-                  </span>
-                </div>
+                <SectionLabel icon={Sparkles} label="Developer Suite — Built-in" count={filteredBuiltins.length} />
                 {filteredBuiltins.map((tool) => (
                   <ToolRow key={tool.id} tool={tool} onSelect={() => setDetail(tool)} />
                 ))}
@@ -467,12 +433,7 @@ export default function ToolsPage() {
 
             {showCustom && (
               <div>
-                <div className="px-5 py-2 bg-accent/20 border-b border-border/60 flex items-center gap-2">
-                  <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                    Custom Tools ({filteredCustom.length})
-                  </span>
-                </div>
+                <SectionLabel icon={Wrench} label="Custom Tools" count={filteredCustom.length} />
                 {filteredCustom.map((tool) => (
                   <ToolRow
                     key={tool.id}
@@ -485,7 +446,7 @@ export default function ToolsPage() {
             )}
           </>
         )}
-      </div>
+      </PageBody>
 
       <AddToolDialog open={addOpen} onClose={(tool) => { setAddOpen(false); if (tool) setDetail(tool); }} />
       {detail && <ToolDetailPanel tool={detail} onClose={() => setDetail(null)} />}
@@ -513,6 +474,6 @@ export default function ToolsPage() {
         onConfirm={confirmRisk}
         onCancel={cancelRisk}
       />
-    </div>
+    </PageShell>
   );
 }
