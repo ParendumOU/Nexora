@@ -10,6 +10,13 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.24.2
+
+- Fixed a bug where opening a chat could fail with a 403 and the client would show as disconnected. The per-IP WebSocket connection limit was counting every client behind the reverse proxy as one shared bucket, so normal traffic could trip it and lock everyone out.
+- The WebSocket connection limit now counts each real client IP separately, read from the proxy forwarded headers, instead of the proxy address.
+- Rate limit windows now reset correctly. A counter no longer has its expiry refreshed on every request, which previously let a steady stream of requests keep a window alive forever and never reset, permanently tripping the limit once crossed.
+- nginx now forwards the real client address on WebSocket connections.
+
 ## 1.24.1
 
 - The recommended invite link on the Organization page now works for non-superuser org admins, not just the instance superuser.

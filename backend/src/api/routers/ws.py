@@ -234,6 +234,24 @@ async def _inject_file_context(
     return messages
 
 
+def _ws_client_ip(websocket: WebSocket) -> str:
+    """Real client IP for per-IP rate limiting.
+
+    Behind the reverse proxy ``websocket.client.host`` is always the nginx
+    container IP, which would make the per-IP WS connection cap a single global
+    bucket shared by every client. Prefer the proxy-set forwarding headers
+    (nginx sets X-Real-IP = the true remote addr on the /ws/ location) and fall
+    back to the socket peer only for a direct (no-proxy) connection.
+    """
+    xff = websocket.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    xr = websocket.headers.get("x-real-ip", "")
+    if xr:
+        return xr.strip()
+    return websocket.client.host if websocket.client else "unknown"
+
+
 @router.websocket("/ws/chat/{chat_id}")
 async def chat_websocket(websocket: WebSocket, chat_id: str):
     # Validate Origin header to prevent cross-site WebSocket hijacking
@@ -245,7 +263,7 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
 
     # #168: cap new connections per client IP to blunt a connection-flood DoS.
     from src.core.rate_limit import ws_rate_limit_ok
-    _ip = websocket.client.host if websocket.client else "unknown"
+    _ip = _ws_client_ip(websocket)
     if not await ws_rate_limit_ok(_ip, "ws-connect", max_requests=60, window_seconds=60):
         await websocket.close(code=4029)
         return
@@ -1160,7 +1178,7 @@ async def user_socket(websocket: WebSocket) -> None:
     """
     # #168: cap new connections per client IP.
     from src.core.rate_limit import ws_rate_limit_ok
-    _ip = websocket.client.host if websocket.client else "unknown"
+    _ip = _ws_client_ip(websocket)
     if not await ws_rate_limit_ok(_ip, "ws-connect", max_requests=60, window_seconds=60):
         await websocket.close(code=4029)
         return

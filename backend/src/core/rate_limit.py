@@ -11,11 +11,16 @@ async def _incr_and_check(key: str, ident: str, max_requests: int, window_second
     try:
         redis = get_redis()
         redis_key = f"ratelimit:{key}:{ident}"
-        async with redis.pipeline(transaction=True) as pipe:
-            await pipe.incr(redis_key)
-            await pipe.expire(redis_key, window_seconds)
-            results = await pipe.execute()
-        return results[0] > max_requests
+        count = await redis.incr(redis_key)
+        # Fixed window: set the TTL only when the key is first created (count == 1),
+        # so the window actually rolls over and the counter resets. The old behavior
+        # refreshed expire on EVERY hit, so a steady stream of requests (e.g. a client
+        # reconnecting every second) kept the key alive indefinitely and the counter
+        # climbed without bound — once the cap was crossed the limit stayed tripped
+        # forever. The ttl < 0 guard self-heals keys that lost their expiry.
+        if count == 1 or await redis.ttl(redis_key) < 0:
+            await redis.expire(redis_key, window_seconds)
+        return count > max_requests
     except Exception:
         return False
 
