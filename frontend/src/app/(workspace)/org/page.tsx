@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { orgsApi, authApi } from "@/lib/api";
+import { orgsApi } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { Copy, Check, Trash2, UserPlus, RefreshCw, AlertTriangle, LogOut, ChevronDown, Terminal } from "lucide-react";
 import { cn, copyToClipboard } from "@/lib/utils";
@@ -234,16 +234,18 @@ export default function OrgSettingsPage() {
   const [copiedCombined, setCopiedCombined] = useState(false);
 
   const combinedInviteMutation = useMutation({
-    mutationFn: async () => {
-      const [signupData, orgData] = await Promise.all([
-        authApi.createInvite({}).then((r) => r.data),
-        orgsApi.createInvite(currentOrgId!).then((r) => r.data),
-      ]);
-      return { signupToken: signupData.token, orgToken: orgData.token };
-    },
-    onSuccess: ({ signupToken, orgToken }) => {
+    // One link that lets a new teammate register AND land in this org. The org invite
+    // alone drives invite-first registration (managed account inside this org) and
+    // bypasses the platform signup-invite / REQUIRE_INVITE gate, so no superuser
+    // signup invite is needed here.
+    mutationFn: () => orgsApi.createInvite(currentOrgId!).then((r) => r.data),
+    onSuccess: (data) => {
       const base = typeof window !== "undefined" ? window.location.origin : "";
-      setCombinedInviteUrl(`${base}/register?invite=${signupToken}&join=${orgToken}`);
+      setCombinedInviteUrl(`${base}/register?org_invite=${data.token}`);
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg || "Failed to create invite link");
     },
   });
 

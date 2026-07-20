@@ -44,12 +44,35 @@ _MAX_DEVICES = 10
 _MAX_KEYS = 20
 
 
+_DEFAULT_APP_URL = "http://localhost:3000"
+
+
 def resolve_instance_base_url(request: Request) -> str:
     """The externally reachable base URL of THIS instance — what the employee's CLI
-    will connect to. Prefer the configured app_url (accurate behind a reverse proxy),
-    fall back to the request's own base URL."""
-    base = (get_settings().app_url or "").strip() or str(request.base_url)
-    return base.rstrip("/")
+    will connect to over REST + WS (the nginx/public origin, not frontend:3000).
+
+    Auto-derived from the incoming request so it tracks whatever host + scheme the
+    admin is actually reaching the instance at — LAN IP, domain, http or https —
+    honoring the reverse proxy in front of us (X-Forwarded-Proto / X-Forwarded-Host).
+    An explicitly configured APP_URL (anything other than the localhost default)
+    always wins, for deployments whose public API origin differs from the web UI."""
+    # 1. Explicit override wins — admin set APP_URL to the real public origin.
+    configured = (get_settings().app_url or "").strip().rstrip("/")
+    if configured and configured != _DEFAULT_APP_URL:
+        return configured
+
+    # 2. Derive from the request, honoring the reverse proxy (nginx forwards Host +
+    #    X-Forwarded-Proto; an outer TLS terminator sets X-Forwarded-Host/Proto).
+    h = request.headers
+    proto = (h.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
+    host = (
+        h.get("x-forwarded-host") or h.get("host") or request.url.netloc
+    ).split(",")[0].strip()
+    if host:
+        return f"{proto}://{host}"
+
+    # 3. Last resort (e.g. non-HTTP context with no headers).
+    return configured or _DEFAULT_APP_URL
 
 
 def build_cli_install_commands(base_url: str, token: str) -> dict[str, str]:

@@ -88,13 +88,26 @@ function _clearSession() {
   window.location.replace("/login");
 }
 
+// Pre-auth endpoints where a 401 means "bad credentials / invalid token" — a normal
+// response the calling component handles with its own toast, NOT an expired session.
+// Never run the refresh-then-redirect flow for these (it would wipe the page and swallow
+// the error toast on a failed login).
+function _isPreAuthUrl(url?: string): boolean {
+  if (!url) return false;
+  return /\/auth\/(login|totp-login|refresh|register|forgot-password|reset-password)/.test(url);
+}
+
 api.interceptors.response.use(
   (r) => r,
   async (error) => {
     const originalRequest = error.config;
 
-    // Only attempt refresh once per request
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Only attempt refresh once per request; never for pre-auth endpoints.
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !_isPreAuthUrl(originalRequest?.url)
+    ) {
       originalRequest._retry = true;
       const refresh = localStorage.getItem("refresh_token");
 

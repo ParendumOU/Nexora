@@ -10,6 +10,13 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.24.1
+
+- The recommended invite link on the Organization page now works for non-superuser org admins, not just the instance superuser.
+- The Organization settings page scrolls when it overflows, and the permission-groups form is wider with a two-column layout so it is usable on smaller screens.
+- CLI invite one-liners auto-derive this instance public URL from the incoming request (honoring the reverse proxy), so the command an admin shares points at the right host even when APP_URL is left at its default.
+- A 401 from a pre-auth endpoint (login, TOTP, register, refresh, forgot-password, reset-password) no longer triggers the session refresh and redirect, so a failed login shows its own error instead of reloading the page.
+
 ## 1.24.0
 
 - Invited employees now get a managed account: when someone registers from an organization invite, the account is created directly inside that organization with no personal workspace of its own, so it exists only to work in the org it was invited to.
