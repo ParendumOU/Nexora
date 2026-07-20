@@ -26,6 +26,10 @@ class User(Base):
     # A managed account is born from an org invite: no personal org, tied to exactly
     # one org, cannot switch/create/join/leave orgs. Normal self-signup stays False.
     is_managed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # Whether the account has a real, user-set password. Passwordless (CLI-onboarded)
+    # accounts are False until the user sets one via /users/me/password, after which
+    # they can also sign in on the web.
+    has_password: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     # #212: opt-in delivery of notifications via email / Telegram DM for events
     # missed while no real-time client was connected.
     notify_email: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)

@@ -73,6 +73,9 @@ class MemberResponse(BaseModel):
     joined_at: str
     provider_mode: str = "all"
     assigned_provider_count: int = 0
+    # False for terminal-onboarded accounts until an admin enables web sign-in.
+    has_password: bool = True
+    is_managed: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -365,6 +368,8 @@ async def list_members(
             "joined_at": m.created_at.isoformat(),
             "provider_mode": getattr(m, "provider_mode", None) or "all",
             "assigned_provider_count": assigned_counts.get(u.id, 0),
+            "has_password": bool(getattr(u, "has_password", True)),
+            "is_managed": bool(getattr(u, "is_managed", False)),
         })
 
     return result
@@ -401,6 +406,67 @@ async def set_member_provider_policy(
                        detail={"provider_mode": body.mode})
     await db.commit()
     return {"user_id": user_id, "provider_mode": body.mode}
+
+
+def _generate_password(length: int = 16) -> str:
+    """A strong random password that satisfies the account password policy."""
+    import secrets
+    import string
+
+    alphabet = string.ascii_letters + string.digits
+    while True:
+        pw = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (any(c.isupper() for c in pw) and any(c.islower() for c in pw)
+                and any(c.isdigit() for c in pw)):
+            return pw
+
+
+@router.post("/{org_id}/members/{user_id}/enable-password", status_code=200)
+async def enable_member_password(
+    org_id: str,
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable web sign-in for a member by generating a password. Owner/admin only.
+
+    Terminal-onboarded accounts are provisioned without a password, so they cannot sign
+    in on the web and cannot grant themselves one. An admin enables it here; the
+    generated password is returned ONCE, to be handed to the member, who then changes it
+    themselves via the web or `nexora set-password`. Re-running this resets the password.
+    """
+    from src.core.security import hash_password
+
+    await _require_admin(current_user.id, org_id, db)
+
+    target_r = await db.execute(
+        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+    )
+    if target_r.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    ur = await db.execute(select(User).where(User.id == user_id))
+    target_user = ur.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    was_enabled = bool(getattr(target_user, "has_password", True))
+    password = _generate_password()
+    target_user.hashed_password = hash_password(password)
+    target_user.has_password = True
+    # Deliberately NOT bumping token_version: the member's live CLI session (device
+    # token / API key) must keep working while they gain web access.
+    db.add(target_user)
+    await record_audit(db, action="org.member.enable_password", user=current_user, org_id=org_id,
+                       resource_type="user", resource_id=user_id,
+                       detail={"reset": was_enabled})
+    await db.commit()
+    return {
+        "user_id": user_id,
+        "email": target_user.email,
+        "password": password,
+        "reset": was_enabled,
+    }
 
 
 @router.delete("/{org_id}/members/{user_id}", status_code=204)

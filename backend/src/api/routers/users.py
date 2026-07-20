@@ -25,6 +25,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_superuser: bool
     is_managed: bool = False
+    has_password: bool = True
     notify_email: bool = False
     notify_telegram: bool = False
     # Per-member LLM-provider governance in the caller's active org (read-only here;
@@ -49,7 +50,9 @@ class UpdateUserRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
+    # Optional: a passwordless (CLI-onboarded) account sets its first password without
+    # one. An account that already has a password must supply the correct current one.
+    current_password: str | None = None
     new_password: str
 
     @field_validator("new_password")
@@ -276,7 +279,21 @@ async def change_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not verify_password(req.current_password, current_user.hashed_password):
+    """Change your own password. The current password is always required.
+
+    A user can never grant themselves password sign-in: an account provisioned without
+    one (CLI onboarding) must have it enabled by an org owner/admin, who hands over the
+    generated password. From then on the user changes it here.
+    """
+    if not getattr(current_user, "has_password", True):
+        raise HTTPException(
+            status_code=400,
+            detail="Password sign-in is not enabled for this account. "
+                   "Ask your organization admin to enable it.",
+        )
+    if not req.current_password or not verify_password(
+        req.current_password, current_user.hashed_password
+    ):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     current_user.hashed_password = hash_password(req.new_password)
     current_user.token_version = (current_user.token_version or 0) + 1

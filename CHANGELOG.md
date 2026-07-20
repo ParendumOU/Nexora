@@ -10,6 +10,14 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.26.0
+
+- Web sign-in for terminal-onboarded members is now enabled by an owner or admin, never by the member. The Organization members list shows who is terminal only and offers Enable web sign-in, which generates a password and shows it once to hand over. Re-running it resets the password.
+- Members can never grant themselves password sign-in. Changing your own password still requires your current one, and an account without password sign-in gets a clear message to ask its admin.
+- New endpoint POST /orgs/{org_id}/members/{user_id}/enable-password (owner/admin only) and a new has_password field on GET /users/me and the members listing.
+- New endpoint GET /agents/assignable returns the agents a member may use in chat. It is not gated by the agents permission, so a locked-down member can still auto-select and switch between the agents assigned to them, while managing agents stays gated.
+- Migration 079 adds has_password, backfilled so existing accounts keep password sign-in and terminal-onboarded ones do not.
+
 ## 1.25.0
 
 - Admins can now govern which LLM provider accounts each member may use, set individually per member. Each member has a provider access mode: all (their assigned accounts plus the shared unassigned pool), own (their assigned accounts plus ones they added), or assigned (only accounts an admin reserved to them).

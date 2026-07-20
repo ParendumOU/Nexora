@@ -301,6 +301,7 @@ def capability_allows(caps: dict | None, dim: str, value: str | None) -> bool:
 # so longer/more specific prefixes must come before shorter ones.
 ROUTE_AREA_MAP: list[tuple[str, str]] = [
     ("/api/public/agents", ""),  # public agent endpoints are never gated
+    ("/api/agents/assignable", ""),  # agents a member may USE in chat — never gated by agents.view
     ("/api/agents", "agents"),
     ("/api/teams", "agents"),
     ("/api/personas", "personas"),

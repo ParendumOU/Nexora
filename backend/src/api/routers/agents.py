@@ -361,6 +361,30 @@ async def list_agents(
     )
 
 
+@router.get("/assignable", response_model=list[AgentResponse])
+async def list_assignable_agents(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Agents the caller may USE in chat, for agent pickers and auto-selection.
+
+    Unlike the management list this is not gated by agents.view: chatting with your
+    assigned agents is core usage, separate from managing the Agents section. Any org
+    member gets their capability-allowed set (all active agents when unrestricted).
+    """
+    org_id = await get_active_org_id(current_user, db)
+    await require_org_role(current_user, org_id, OrgRole.viewer, db)
+    result = await db.execute(
+        select(Agent)
+        .where(Agent.org_id == org_id, Agent.is_active == True)  # noqa: E712
+        .order_by(Agent.name)
+    )
+    from src.core.permissions import filter_by_capability
+    return await filter_by_capability(
+        current_user, org_id, db, list(result.scalars().all()), "agent_ids", lambda a: a.id,
+    )
+
+
 @router.post("", response_model=AgentResponse, status_code=201)
 async def create_agent(
     req: AgentCreate,

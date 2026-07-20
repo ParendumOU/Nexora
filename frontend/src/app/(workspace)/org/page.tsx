@@ -31,6 +31,8 @@ interface Member {
   role: string; joined_at: string;
   provider_mode?: "all" | "own" | "assigned";
   assigned_provider_count?: number;
+  has_password?: boolean;
+  is_managed?: boolean;
 }
 interface DeletionSummary {
   categories: Record<string, { label: string; count: number }>;
@@ -194,6 +196,21 @@ export default function OrgSettingsPage() {
     onError: (err: unknown) => {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       toast.error(msg || "Failed to remove member");
+    },
+  });
+
+  // Enable web sign-in for a terminal-onboarded member. The generated password is shown
+  // once, here, for the admin to hand over; the member changes it themselves after.
+  const [issuedPassword, setIssuedPassword] = useState<{ email: string; password: string } | null>(null);
+  const enablePasswordMutation = useMutation({
+    mutationFn: (userId: string) => orgsApi.enableMemberPassword(currentOrgId!, userId),
+    onSuccess: (res) => {
+      setIssuedPassword({ email: res.data.email, password: res.data.password });
+      qc.invalidateQueries({ queryKey: ["org-members", currentOrgId] });
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg || "Failed to enable web sign-in");
     },
   });
 
@@ -523,6 +540,35 @@ export default function OrgSettingsPage() {
       {/* Members tab */}
       {tab === "members" && (
         <div className="space-y-2">
+          {issuedPassword && (
+            <div className="p-3 rounded-xl border border-amber-500/40 bg-amber-500/5 space-y-2">
+              <div className="text-sm font-medium">Web sign-in enabled for {issuedPassword.email}</div>
+              <p className="text-[11px] text-muted-foreground">
+                Give this password to the member. It is shown only once. They can change it
+                from the web or by running <code>nexora set-password</code>.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-2 py-1.5 rounded-lg bg-muted font-mono text-sm break-all">
+                  {issuedPassword.password}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(issuedPassword.password);
+                    toast.success("Password copied");
+                  }}
+                  className="px-2 py-1.5 text-[11px] rounded-lg border border-border hover:bg-accent transition-colors"
+                >
+                  Copy
+                </button>
+                <button
+                  onClick={() => setIssuedPassword(null)}
+                  className="px-2 py-1.5 text-[11px] rounded-lg border border-border hover:bg-accent transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
           {members.map((m) => {
             const isMe = m.user_id === currentUserId;
             // Admins can manage non-owners; owners can manage everyone including admins
@@ -537,8 +583,24 @@ export default function OrgSettingsPage() {
                     {m.full_name}
                     {isMe && <span className="text-[10px] text-muted-foreground">(you)</span>}
                   </div>
-                  <div className="text-[11px] text-muted-foreground truncate">{m.email}</div>
+                  <div className="text-[11px] text-muted-foreground truncate">
+                    {m.email}
+                    {m.has_password === false && (
+                      <span className="ml-1.5 text-amber-500">· terminal only</span>
+                    )}
+                  </div>
                 </div>
+
+                {canManage && m.has_password === false && (
+                  <button
+                    onClick={() => enablePasswordMutation.mutate(m.user_id)}
+                    disabled={enablePasswordMutation.isPending}
+                    className="px-2 py-1 text-[11px] rounded-lg border border-border hover:bg-accent transition-colors whitespace-nowrap"
+                    title="Generate a password so this member can also sign in on the web"
+                  >
+                    Enable web sign-in
+                  </button>
+                )}
 
                 {canManage ? (
                   <RoleDropdown

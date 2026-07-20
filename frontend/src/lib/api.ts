@@ -480,6 +480,12 @@ export const orgsApi = {
   // "assigned" = only accounts an admin reserved to them.
   setMemberProviderMode: (orgId: string, userId: string, mode: "all" | "own" | "assigned") =>
     api.patch(`/orgs/${orgId}/members/${userId}/provider-policy`, { mode }),
+  // Enable web sign-in for a member (owner/admin only). Generates a password and returns
+  // it ONCE, to hand to the member; they then change it themselves. Re-running resets it.
+  enableMemberPassword: (orgId: string, userId: string) =>
+    api.post<{ user_id: string; email: string; password: string; reset: boolean }>(
+      `/orgs/${orgId}/members/${userId}/enable-password`,
+    ),
   leave: (orgId: string) => api.post(`/orgs/${orgId}/leave`),
   createInvite: (orgId: string, role = "member") => api.post(`/orgs/${orgId}/invites`, { role }),
   // Terminal (CLI) invite: bound to an email so the CLI-join flow auto-creates the

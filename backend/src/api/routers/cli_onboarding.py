@@ -184,6 +184,9 @@ async def cli_redeem(
             is_verified=True,
             # Born from an org invite → managed: no personal org, tied to this one org.
             is_managed=True,
+            # Passwordless: the random hash above is unguessable. The employee can set a
+            # real password later (POST /users/me/password) to also sign in on the web.
+            has_password=False,
         )
         db.add(user)
         await db.flush()
