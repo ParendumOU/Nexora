@@ -34,6 +34,13 @@ class Provider(Base):
     state: Mapped[str] = mapped_column(String(20), default="healthy", server_default="healthy", nullable=False)
     cooling_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # Per-member governance: an account reserved to one member (exclusive ownership).
+    # NULL = unassigned pool account, usable by members in 'all' mode. created_by_user_id
+    # records who added the account, used by the 'own' provider mode.
+    assigned_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     org: Mapped["Organization"] = relationship("Organization", back_populates="providers")  # noqa: F821

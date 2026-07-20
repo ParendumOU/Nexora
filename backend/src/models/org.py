@@ -43,6 +43,10 @@ class OrgMember(Base):
     org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     role: Mapped[OrgRole] = mapped_column(SAEnum(OrgRole), default=OrgRole.member)
+    # Which LLM provider accounts this member may use for a turn: all|own|assigned.
+    # 'all' (default) = assigned accounts plus every unassigned pool account, so with
+    # no assignments the member sees the full org pool (backward compatible).
+    provider_mode: Mapped[str] = mapped_column(String(20), default="all", server_default="all", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     org: Mapped["Organization"] = relationship("Organization", back_populates="members")

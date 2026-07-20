@@ -157,6 +157,7 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
         providers, effective_chain_id = await resolve_providers(
             live_chat, org_id, chain_override=chain_override,
             agent_id=agent_id if req.enable_agent else None,
+            user_id=user.id,
         )
 
         # Restrict to the user's allowed provider accounts + cap count.
@@ -170,7 +171,10 @@ async def _generate(chat: Chat, req: StreamRequest, user: User, user_content: st
             providers = _filtered
 
         if not providers:
-            yield _sse({"type": "error", "message": "No providers configured. Please add a provider in Settings."})
+            from src.services.provider_policy import no_usable_provider_message
+            async with AsyncSessionLocal() as _npdb:
+                _no_prov_msg = await no_usable_provider_message(user, org_id, _npdb)
+            yield _sse({"type": "error", "message": _no_prov_msg})
             return
 
         # ── System prompt ──────────────────────────────────────────────────────

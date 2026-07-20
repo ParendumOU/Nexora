@@ -9,6 +9,7 @@ from src.api.deps import get_current_user
 from src.core.security import create_access_token, create_refresh_token
 from src.models.user import User
 from src.models.org import Organization, OrgMember, OrgRole
+from src.models.provider import Provider
 from src.models.org_invite import OrgInvite
 from src.services.audit import record_audit
 
@@ -70,8 +71,14 @@ class MemberResponse(BaseModel):
     telegram_user_id: str | None = None
     role: str
     joined_at: str
+    provider_mode: str = "all"
+    assigned_provider_count: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class ProviderPolicyRequest(BaseModel):
+    mode: str
 
 
 async def _require_membership(user_id: str, org_id: str, db: AsyncSession) -> OrgMember:
@@ -333,6 +340,14 @@ async def list_members(
     r = await db.execute(select(OrgMember).where(OrgMember.org_id == org_id))
     memberships = r.scalars().all()
 
+    # Assigned-account count per member (for the governance UI).
+    counts_r = await db.execute(
+        select(Provider.assigned_user_id, func.count())
+        .where(Provider.org_id == org_id, Provider.assigned_user_id.isnot(None))
+        .group_by(Provider.assigned_user_id)
+    )
+    assigned_counts = {row[0]: row[1] for row in counts_r.all()}
+
     result = []
     for m in memberships:
         u_r = await db.execute(select(User).where(User.id == m.user_id))
@@ -348,9 +363,44 @@ async def list_members(
             "telegram_user_id": u.telegram_user_id,
             "role": m.role.value if hasattr(m.role, "value") else m.role,
             "joined_at": m.created_at.isoformat(),
+            "provider_mode": getattr(m, "provider_mode", None) or "all",
+            "assigned_provider_count": assigned_counts.get(u.id, 0),
         })
 
     return result
+
+
+@router.patch("/{org_id}/members/{user_id}/provider-policy", status_code=200)
+async def set_member_provider_policy(
+    org_id: str,
+    user_id: str,
+    body: ProviderPolicyRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a member's provider mode (all|own|assigned). Owner/admin only."""
+    from src.services.provider_policy import VALID_PROVIDER_MODES
+
+    await _require_admin(current_user.id, org_id, db)
+    if body.mode not in VALID_PROVIDER_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider mode. Must be one of: {', '.join(VALID_PROVIDER_MODES)}",
+        )
+
+    target_r = await db.execute(
+        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+    )
+    target = target_r.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    target.provider_mode = body.mode
+    await record_audit(db, action="org.member.provider_policy", user=current_user, org_id=org_id,
+                       resource_type="org_member", resource_id=user_id,
+                       detail={"provider_mode": body.mode})
+    await db.commit()
+    return {"user_id": user_id, "provider_mode": body.mode}
 
 
 @router.delete("/{org_id}/members/{user_id}", status_code=204)

@@ -72,7 +72,14 @@ async def _agent_model_profile_id(agent_id: str) -> str | None:
 
 
 # ── Provider resolution ──────────────────────────────────────────────────────
-async def resolve_providers(chat, org_id, *, chain_override: str | None = None, agent_id: str | None = None):
+async def resolve_providers(
+    chat,
+    org_id,
+    *,
+    chain_override: str | None = None,
+    agent_id: str | None = None,
+    user_id: str | None = None,
+):
     """Resolve the ordered (provider, model_override) list for a chat turn.
 
     Precedence (highest first):
@@ -84,8 +91,19 @@ async def resolve_providers(chat, org_id, *, chain_override: str | None = None, 
          fallback without overriding an explicit user pick
       5. the org default chain / profiles / all active providers
 
+    ``user_id`` is the member initiating the turn: when set, the resolved list is
+    filtered to the provider accounts that member may use (per-member governance —
+    exclusive ownership + provider mode). ``None`` (background / system turns) means
+    unrestricted, so nothing is filtered.
+
     Returns ``(providers, effective_chain_id)``.
     """
+    from src.services.provider_policy import (
+        filter_provider_pairs,
+        usable_provider_ids_by_user_id,
+    )
+    allowed = await usable_provider_ids_by_user_id(user_id, org_id) if user_id else None
+
     direct = await get_direct_provider(chat) if not chain_override else []
     effective_chain_id = chain_override or await get_effective_chain_id(chat)
 
@@ -101,7 +119,10 @@ async def resolve_providers(chat, org_id, *, chain_override: str | None = None, 
                 fallback = await get_chain_providers(None, org_id)
                 seen = {p.id for p, _ in prof_providers}
                 return (
-                    prof_providers + [(p, m) for p, m in fallback if p.id not in seen],
+                    filter_provider_pairs(
+                        prof_providers + [(p, m) for p, m in fallback if p.id not in seen],
+                        allowed,
+                    ),
                     effective_chain_id,
                 )
 
@@ -111,7 +132,7 @@ async def resolve_providers(chat, org_id, *, chain_override: str | None = None, 
         providers = direct + [(p, m) for p, m in chain if p.id not in direct_ids]
     else:
         providers = chain
-    return providers, effective_chain_id
+    return filter_provider_pairs(providers, allowed), effective_chain_id
 
 
 # ── Stream consumption ───────────────────────────────────────────────────────

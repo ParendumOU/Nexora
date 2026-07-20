@@ -9,10 +9,11 @@ import { cn, copyToClipboard } from "@/lib/utils";
 import toast from "react-hot-toast";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { GroupsTab } from "@/components/org/GroupsTab";
+import { ProvidersTab } from "@/components/org/ProvidersTab";
 
 const PRESET_COLORS = ["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6"];
 
-type Tab = "general" | "members" | "groups" | "invites";
+type Tab = "general" | "members" | "groups" | "providers" | "invites";
 
 const ROLES = [
   { value: "viewer", label: "Viewer", description: "Read-only access to agents and knowledge bases" },
@@ -28,6 +29,8 @@ interface OrgItem {
 interface Member {
   user_id: string; full_name: string; email: string; avatar_url?: string | null;
   role: string; joined_at: string;
+  provider_mode?: "all" | "own" | "assigned";
+  assigned_provider_count?: number;
 }
 interface DeletionSummary {
   categories: Record<string, { label: string; count: number }>;
@@ -296,7 +299,7 @@ export default function OrgSettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-    <div className={cn("mx-auto px-6 py-8", tab === "groups" ? "max-w-4xl" : "max-w-2xl")}>
+    <div className={cn("mx-auto px-6 py-8", tab === "groups" || tab === "providers" ? "max-w-4xl" : "max-w-2xl")}>
       <div className="flex items-center gap-3 mb-6">
         <div
           className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold text-white"
@@ -312,7 +315,7 @@ export default function OrgSettingsPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-border">
-        {((isAdmin ? ["general", "members", "groups", "invites"] : ["general", "members", "invites"]) as Tab[]).map((t) => (
+        {((isAdmin ? ["general", "members", "groups", "providers", "invites"] : ["general", "members", "invites"]) as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -570,6 +573,9 @@ export default function OrgSettingsPage() {
 
       {/* Groups tab — admin-managed permission groups */}
       {tab === "groups" && isAdmin && <GroupsTab members={members} />}
+
+      {/* Providers tab — per-member provider governance */}
+      {tab === "providers" && isAdmin && <ProvidersTab members={members} orgId={currentOrgId!} />}
 
       {/* Invites tab */}
       {tab === "invites" && (

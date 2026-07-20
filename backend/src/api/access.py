@@ -12,9 +12,37 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.chat import Chat, ChatParticipant
-from src.models.org import OrgMember
+from src.models.org import OrgMember, OrgRole
 from src.models.project import Project
 from src.models.user import User
+
+
+async def _access_via_admin(chat: Chat, user_id: str, db: AsyncSession) -> bool:
+    """Grant read access when user_id is an owner/admin of an org the chat's owner
+    belongs to. Covers a member's personal (project-less) chats too, so an org admin
+    can open any conversation of one of their members."""
+    if not chat.user_id or chat.user_id == user_id:
+        return False
+    admin_org_ids = {
+        row[0]
+        for row in (
+            await db.execute(
+                select(OrgMember.org_id).where(
+                    OrgMember.user_id == user_id,
+                    OrgMember.role.in_([OrgRole.owner, OrgRole.admin]),
+                )
+            )
+        ).all()
+    }
+    if not admin_org_ids:
+        return False
+    r = await db.execute(
+        select(OrgMember.id).where(
+            OrgMember.user_id == chat.user_id,
+            OrgMember.org_id.in_(admin_org_ids),
+        ).limit(1)
+    )
+    return r.scalar_one_or_none() is not None
 
 
 async def _access_via_single_chat(chat: Chat, user_id: str, db: AsyncSession) -> bool:
@@ -55,6 +83,10 @@ async def _access_via_single_chat(chat: Chat, user_id: str, db: AsyncSession) ->
         )
         if r.scalar_one_or_none():
             return True
+
+    # Org owners/admins may open any conversation of one of their members.
+    if await _access_via_admin(chat, user_id, db):
+        return True
 
     return False
 

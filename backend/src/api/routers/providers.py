@@ -144,6 +144,8 @@ def _to_response(p: Provider, available_models: list[str]) -> "ProviderResponse"
         cooling_until=p.cooling_until.isoformat() if p.cooling_until else None,
         cooling_remaining_seconds=_cooling_remaining(p),
         consecutive_failures=p.consecutive_failures,
+        assigned_user_id=p.assigned_user_id,
+        created_by_user_id=p.created_by_user_id,
     )
 
 
@@ -181,6 +183,8 @@ class ProviderResponse(BaseModel):
     cooling_until: str | None = None
     cooling_remaining_seconds: int = 0
     consecutive_failures: int = 0
+    assigned_user_id: str | None = None
+    created_by_user_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -265,6 +269,12 @@ async def list_providers(
     providers = await filter_by_capability(
         current_user, org_id, db, list(result.scalars().all()), "provider_ids", lambda p: p.id,
     )
+    # Per-member governance: a restricted member only sees the accounts they may use
+    # (their assigned accounts + pool, per provider mode). Owners/admins see all.
+    from src.services.provider_policy import usable_provider_ids
+    allowed = await usable_provider_ids(current_user, org_id, db)
+    if allowed is not None:
+        providers = [p for p in providers if p.id in allowed]
     models_list = await asyncio.gather(*[_get_provider_models(p) for p in providers])
     return [_to_response(p, m) for p, m in zip(providers, models_list)]
 
@@ -307,6 +317,7 @@ async def create_provider(
         base_url=req.base_url,
         model_name=req.model_name,
         cooldown_seconds=req.cooldown_seconds,
+        created_by_user_id=current_user.id,
     )
     db.add(provider)
     await db.commit()
@@ -503,6 +514,94 @@ async def restore_provider(
     provider.is_active = True
     await db.commit()
     return {"id": provider.id, "is_active": True}
+
+
+# ── Per-member assignment (owner/admin) ──────────────────────────────────────
+
+class ProviderAssignRequest(BaseModel):
+    # null unassigns the account back into the shared pool.
+    user_id: str | None = None
+
+
+class ProviderAssignmentResponse(BaseModel):
+    id: str
+    name: str
+    provider_type: str
+    is_active: bool
+    assigned_user_id: str | None = None
+    assignee_email: str | None = None
+    assignee_name: str | None = None
+    created_by_user_id: str | None = None
+
+
+@router.get("/assignments", response_model=list[ProviderAssignmentResponse])
+async def list_provider_assignments(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner/admin view of every account in the active org and who it's reserved to."""
+    from src.core.permissions import require_org_role
+    from src.models.org import OrgRole
+
+    org_id = await get_active_org_id(current_user, db)
+    await require_org_role(current_user, org_id, OrgRole.admin, db)
+
+    rows = list(
+        (await db.execute(select(Provider).where(Provider.org_id == org_id))).scalars().all()
+    )
+    assignee_ids = {p.assigned_user_id for p in rows if p.assigned_user_id}
+    users: dict[str, User] = {}
+    if assignee_ids:
+        ur = await db.execute(select(User).where(User.id.in_(assignee_ids)))
+        users = {u.id: u for u in ur.scalars().all()}
+
+    out = []
+    for p in rows:
+        u = users.get(p.assigned_user_id) if p.assigned_user_id else None
+        out.append(ProviderAssignmentResponse(
+            id=p.id, name=p.name, provider_type=p.provider_type, is_active=p.is_active,
+            assigned_user_id=p.assigned_user_id,
+            assignee_email=u.email if u else None,
+            assignee_name=u.full_name if u else None,
+            created_by_user_id=p.created_by_user_id,
+        ))
+    return out
+
+
+@router.post("/{provider_id}/assign", response_model=ProviderResponse)
+async def assign_provider(
+    provider_id: str,
+    req: ProviderAssignRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reserve an account to one member (exclusive), or release it (user_id=null)."""
+    from src.core.permissions import require_org_role
+    from src.models.org import OrgMember, OrgRole
+
+    org_id = await get_active_org_id(current_user, db)
+    await require_org_role(current_user, org_id, OrgRole.admin, db)
+
+    result = await db.execute(
+        select(Provider).where(Provider.id == provider_id, Provider.org_id == org_id)
+    )
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    target_id = req.user_id or None
+    if target_id:
+        m = await db.execute(
+            select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == target_id)
+        )
+        if not m.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Target user is not a member of this organization")
+
+    provider.assigned_user_id = target_id
+    await db.commit()
+    await db.refresh(provider)
+    models = await _get_provider_models(provider)
+    return _to_response(provider, models)
 
 
 # ── Chain CRUD ────────────────────────────────────────────────────────────────
@@ -712,6 +811,7 @@ async def complete_oauth_login(
         auth_path=auth_path,
         model_name=req.model_name,
         cooldown_seconds=60,
+        created_by_user_id=current_user.id,
     )
     db.add(db_provider)
     await db.commit()

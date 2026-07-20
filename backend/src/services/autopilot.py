@@ -255,7 +255,7 @@ def fallback_plan(objective: str) -> dict:
 
 
 # ── the ONE structured planning call (only model-dependent step) ─────────────
-async def decompose(objective: str, chat, org_id: str, agent_id: str | None) -> dict:
+async def decompose(objective: str, chat, org_id: str, agent_id: str | None, user_id: str | None = None) -> dict:
     """Run a single forced-JSON planning turn and parse it. Always returns a usable
     plan (falls back to a 1-task plan if the model misbehaves) so execution can start."""
     from src.seeds.loader import render_prompt
@@ -267,7 +267,7 @@ async def decompose(objective: str, chat, org_id: str, agent_id: str | None) -> 
         max_milestones=str(_MAX_MILESTONES), max_tasks=str(_MAX_TASKS_PER_MS),
     )
     try:
-        providers, _ = await resolve_providers(chat, org_id, agent_id=agent_id)
+        providers, _ = await resolve_providers(chat, org_id, agent_id=agent_id, user_id=user_id)
         text_parts: list[str] = []
 
         async def _sink(chunk: str):
@@ -312,7 +312,7 @@ async def start_autopilot(chat, org_id: str, user_id: str | None, objective: str
     from src.models.goal import Goal, Milestone
     from src.core.pubsub import broadcast
 
-    plan = await decompose(objective, chat, org_id, agent_id)
+    plan = await decompose(objective, chat, org_id, agent_id, user_id=user_id)
     chat_id = getattr(chat, "id", None)
 
     async with AsyncSessionLocal() as db:

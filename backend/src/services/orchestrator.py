@@ -142,8 +142,11 @@ async def _resume_with_tool_results(
         messages = [{"role": m.role, "content": m.content} for m in history if m.content]
         messages.append({"role": "user", "content": injection})
 
+        # Background resume runs headless: apply the chat owner's provider policy so a
+        # governed member's conversation keeps enforcing their assigned accounts.
         providers, _ = await resolve_providers(
-            chat, org_id, chain_override=provider_chain_id, agent_id=agent_id
+            chat, org_id, chain_override=provider_chain_id, agent_id=agent_id,
+            user_id=chat.user_id,
         )
         if not providers:
             return
@@ -339,9 +342,12 @@ async def _resume_orchestrator(
         if not done_tasks and not force_continue:
             return
 
-        # Resolve providers before aggregation
+        # Resolve providers before aggregation. Enforce the initiating member's
+        # provider policy (falls back to the chat owner when the propagated id is a
+        # system/placeholder user).
         providers, _ = await resolve_providers(
-            parent_chat, org_id, agent_id=parent_chat.agent_id
+            parent_chat, org_id, agent_id=parent_chat.agent_id,
+            user_id=user_id or parent_chat.user_id,
         )
         if not providers:
             logger.warning(f"[orchestrator] no providers for resume of {parent_chat_id}")

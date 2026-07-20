@@ -27,6 +27,11 @@ class UserResponse(BaseModel):
     is_managed: bool = False
     notify_email: bool = False
     notify_telegram: bool = False
+    # Per-member LLM-provider governance in the caller's active org (read-only here;
+    # admins set it). provider_mode is all|own|assigned; assigned_provider_count is how
+    # many accounts are reserved to this user. None mode = not a governed member row.
+    provider_mode: str | None = None
+    assigned_provider_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -65,8 +70,34 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+async def get_me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    resp = UserResponse.model_validate(current_user)
+    # Surface the caller's own provider governance for the active org, so clients (CLI)
+    # can reflect it read-only without listing the whole org membership.
+    org_id = getattr(current_user, "active_org_id", None)
+    if org_id:
+        from sqlalchemy import func
+        from src.models.org import OrgMember
+        from src.models.provider import Provider
+
+        mr = await db.execute(
+            select(OrgMember.provider_mode).where(
+                OrgMember.org_id == org_id, OrgMember.user_id == current_user.id
+            )
+        )
+        mode = mr.scalar_one_or_none()
+        if mode:
+            resp.provider_mode = mode
+        cr = await db.execute(
+            select(func.count()).select_from(Provider).where(
+                Provider.org_id == org_id, Provider.assigned_user_id == current_user.id
+            )
+        )
+        resp.assigned_provider_count = int(cr.scalar_one() or 0)
+    return resp
 
 
 @router.patch("/me", response_model=UserResponse)

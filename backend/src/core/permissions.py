@@ -168,6 +168,10 @@ PERMISSION_AREAS: dict[str, str] = {
 
 # Special (non-area) permission keys.
 PERM_UI_ADVANCED = "ui.advanced_mode"
+# Governs whether a member sees OTHER members' conversations in the shared org
+# chat list (and not just their own). Owners/admins hold every permission and so
+# always see shared chats. A restricted member without this grant is own-only.
+PERM_CHATS_VIEW_SHARED = "chats.view_shared"
 
 PERMISSION_CATALOG: dict[str, dict] = {
     **{
@@ -179,6 +183,7 @@ PERMISSION_CATALOG: dict[str, dict] = {
         for area, label in PERMISSION_AREAS.items()
     },
     PERM_UI_ADVANCED: {"label": "Advanced UI mode", "area": "ui", "action": "advanced_mode"},
+    PERM_CHATS_VIEW_SHARED: {"label": "View shared conversations", "area": "chats", "action": "view_shared"},
 }
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(PERMISSION_CATALOG.keys())

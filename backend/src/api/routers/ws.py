@@ -752,6 +752,7 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 providers, effective_chain_id = await resolve_providers(
                     live_chat, org_id, chain_override=chain_override,
                     agent_id=agent_id if enable_agent else None,
+                    user_id=user.id,
                 )
 
                 # Restrict to the user's allowed provider accounts + cap count. If the
@@ -824,9 +825,10 @@ async def chat_websocket(websocket: WebSocket, chat_id: str):
                 msg_metadata: dict = {}
 
                 if not providers:
-                    await _emit_stream_failure(
-                        "No providers configured. Please add a provider in Settings."
-                    )
+                    from src.services.provider_policy import no_usable_provider_message
+                    async with AsyncSessionLocal() as _npdb:
+                        _no_prov_msg = await no_usable_provider_message(user, org_id, _npdb)
+                    await _emit_stream_failure(_no_prov_msg)
                     continue
 
                 provider_used = providers[0][0].name if providers else None

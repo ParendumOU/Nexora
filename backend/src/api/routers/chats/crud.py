@@ -9,6 +9,7 @@ from sqlalchemy import select, desc, or_, text, func
 from src.core.database import get_db
 from src.api.deps import get_current_user
 from src.models.user import User
+from src.models.org import OrgMember
 from src.models.chat import Chat, ChatNote, Message
 from src.models.project import Project
 from src.models.agent import Agent
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 async def list_chats(
     agent_id: str | None = None,
     parent_id: str | None = None,
+    member_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -39,13 +41,56 @@ async def list_chats(
 
     org_project_ids = await _get_active_org_project_ids(current_user, db)
 
+    # Resolve the active org once (for both the admin member-view check and the
+    # shared-conversation permission gate).
+    active_org_id = current_user.active_org_id
+    if not active_org_id:
+        _m = (await db.execute(
+            select(OrgMember).where(OrgMember.user_id == current_user.id).limit(1)
+        )).scalar_one_or_none()
+        active_org_id = _m.org_id if _m else None
+
+    # Whose chats are we listing? An owner/admin may inspect one member's chats via
+    # ?member_id=... — member privacy is bypassed for org admins. In that mode we show
+    # only that member's OWN chats (no third-party shared chats).
+    target_user = current_user
+    viewing_other_member = False
+    if member_id and member_id != current_user.id and active_org_id:
+        from src.core.permissions import has_org_role
+        from src.models.org import OrgRole
+        if await has_org_role(current_user, active_org_id, OrgRole.admin, db):
+            _tm = (await db.execute(
+                select(OrgMember).where(
+                    OrgMember.org_id == active_org_id, OrgMember.user_id == member_id
+                )
+            )).scalar_one_or_none()
+            if _tm:
+                _tu = (await db.execute(
+                    select(User).where(User.id == member_id)
+                )).scalar_one_or_none()
+                if _tu:
+                    target_user = _tu
+                    viewing_other_member = True
+
+    # Shared conversations (other members' chats) are only listed when the caller holds
+    # `chats.view_shared` (owners/admins always do). Otherwise the list is own-only.
+    # Admin member-view is always own-only for the inspected member.
+    if viewing_other_member:
+        can_view_shared = False
+    else:
+        can_view_shared = True
+        if active_org_id:
+            from src.core.permissions import get_effective_policy, PERM_CHATS_VIEW_SHARED
+            _policy = await get_effective_policy(current_user, active_org_id, db)
+            can_view_shared = PERM_CHATS_VIEW_SHARED in _policy["permissions"]
+
     def _scope(q):
         if _children_of is not None:
             return q.where(Chat.parent_chat_id == _children_of)
         return q.where(Chat.parent_chat_id.is_(None))
 
     # Own chats: project-less personal chats OR chats in active org's projects
-    own_q = select(Chat).where(Chat.user_id == current_user.id, Chat.is_archived == False)  # noqa: E712
+    own_q = select(Chat).where(Chat.user_id == target_user.id, Chat.is_archived == False)  # noqa: E712
     if org_project_ids:
         own_q = own_q.where(or_(Chat.project_id.is_(None), Chat.project_id.in_(org_project_ids)))
     else:
@@ -56,11 +101,11 @@ async def list_chats(
 
     # Shared chats: other users' chats inside active org's projects
     shared_chats: list[Chat] = []
-    if org_project_ids:
+    if org_project_ids and can_view_shared:
         shared_result = await db.execute(
             _scope(select(Chat).where(
                 Chat.project_id.in_(org_project_ids),
-                Chat.user_id != current_user.id,
+                Chat.user_id != target_user.id,
                 Chat.is_archived == False,  # noqa: E712
             ))
             .order_by(desc(Chat.updated_at))

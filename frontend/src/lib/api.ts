@@ -475,6 +475,11 @@ export const orgsApi = {
   removeMember: (orgId: string, userId: string) => api.delete(`/orgs/${orgId}/members/${userId}`),
   updateMemberRole: (orgId: string, userId: string, role: string) =>
     api.patch(`/orgs/${orgId}/members/${userId}`, { role }),
+  // Provider visibility mode for a member (owner/admin only): "all" = every unassigned
+  // account + accounts reserved to them; "own" = only accounts they added + reserved;
+  // "assigned" = only accounts an admin reserved to them.
+  setMemberProviderMode: (orgId: string, userId: string, mode: "all" | "own" | "assigned") =>
+    api.patch(`/orgs/${orgId}/members/${userId}/provider-policy`, { mode }),
   leave: (orgId: string) => api.post(`/orgs/${orgId}/leave`),
   createInvite: (orgId: string, role = "member") => api.post(`/orgs/${orgId}/invites`, { role }),
   // Terminal (CLI) invite: bound to an email so the CLI-join flow auto-creates the
@@ -841,11 +846,28 @@ export const integrationsApi = {
 };
 
 // ─── Providers ──────────────────────────────────────────────────
+export interface ProviderAssignment {
+  id: string;
+  name: string;
+  provider_type: string;
+  is_active: boolean;
+  assigned_user_id: string | null;
+  assignee_email: string | null;
+  assignee_name: string | null;
+  created_by_user_id: string | null;
+}
+
 export const providersApi = {
   list: () => api.get("/providers"),
   create: (data: object) => api.post("/providers", data),
   update: (id: string, data: object) => api.patch(`/providers/${id}`, data),
   delete: (id: string) => api.delete(`/providers/${id}`),
+  // Per-member provider governance (owner/admin only). Every account in the active org
+  // plus who it is reserved to; assign reserves an account exclusively to one member
+  // (user_id = null returns it to the shared pool).
+  getProviderAssignments: () => api.get<ProviderAssignment[]>("/providers/assignments"),
+  assignProvider: (providerId: string, userId: string | null) =>
+    api.post(`/providers/${providerId}/assign`, { user_id: userId }),
   restore: (id: string) => api.patch(`/providers/${id}/restore`),
   purge: (id: string) => api.delete(`/providers/${id}/purge`),
   chains: () => api.get("/providers/chains"),

@@ -10,6 +10,17 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.25.0
+
+- Admins can now govern which LLM provider accounts each member may use, set individually per member. Each member has a provider access mode: all (their assigned accounts plus the shared unassigned pool), own (their assigned accounts plus ones they added), or assigned (only accounts an admin reserved to them).
+- Provider accounts can be reserved to a single member exclusively. An account assigned to one member is removed from everyone else's pool, so one member can never consume accounts reserved to a colleague.
+- Enforcement applies to every turn, not just the accounts list. A member whose usable accounts are exhausted or unset is blocked with a clear message telling them to contact their admin, instead of falling back to other members' accounts.
+- New admin endpoints: POST /providers/{id}/assign to reserve or release an account, GET /providers/assignments to see every account and who holds it, and PATCH /orgs/{org_id}/members/{user_id}/provider-policy to set a member's access mode. The org members listing now includes each member's provider mode and assigned account count.
+- The Organization settings page gains a Providers tab (owner and admin only) to set each member's mode and reserve accounts to them at scale.
+- GET /users/me now returns the caller's own provider_mode and assigned_provider_count so clients can reflect it.
+- Conversations are private by default. A member sees only their own conversations unless they are an owner or admin, or are granted the new chats.view_shared permission through a group. Owners and admins can view any member's conversations, including personal ones, and list a specific member's chats via the new member_id filter on GET /chats.
+- Migration 078 adds provider assignment and per-member provider mode. It is backward compatible: with the default mode and no assignments, every member can use every account exactly as before.
+
 ## 1.24.2
 
 - Fixed a bug where opening a chat could fail with a 403 and the client would show as disconnected. The per-IP WebSocket connection limit was counting every client behind the reverse proxy as one shared bucket, so normal traffic could trip it and lock everyone out.
