@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { orgsApi } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
-import { Copy, Check, Trash2, UserPlus, RefreshCw, AlertTriangle, LogOut, ChevronDown, Terminal } from "lucide-react";
+import { Copy, Check, Trash2, UserPlus, RefreshCw, AlertTriangle, LogOut, ChevronDown, Terminal, ShieldCheck } from "lucide-react";
 import { cn, copyToClipboard } from "@/lib/utils";
 import toast from "react-hot-toast";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -54,20 +54,136 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
+// Second validation: confirm a role change in a modal before it is applied.
+// Third validation (ownership transfer only): a GitLab-style typed-confirmation — the
+// admin must type the target member's exact name or email before submit is enabled.
+function RoleChangeModal({
+  memberName,
+  memberEmail,
+  currentRole,
+  newRole,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  memberName: string;
+  memberEmail: string;
+  currentRole: string;
+  newRole: string;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const isTransfer = newRole === "owner";
+  const [typed, setTyped] = useState("");
+  const roleLabel = ROLES.find((r) => r.value === newRole)?.label ?? newRole;
+
+  const norm = (s: string) => s.trim().toLowerCase();
+  const matches = norm(typed) === norm(memberName) || norm(typed) === norm(memberEmail);
+  const canSubmit = !pending && (!isTransfer || matches);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={() => !pending && onCancel()}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl p-5 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className={cn(
+              "w-9 h-9 rounded-xl flex items-center justify-center shrink-0",
+              isTransfer ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary"
+            )}
+          >
+            {isTransfer ? <AlertTriangle className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">{isTransfer ? "Transfer ownership" : "Change role"}</h3>
+            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+              {isTransfer ? (
+                <>
+                  You are about to make{" "}
+                  <span className="font-medium text-foreground">{memberName}</span> the owner of this
+                  organization. You will be demoted to <span className="font-medium text-foreground">Admin</span>{" "}
+                  and lose owner-only controls. This cannot be undone by you afterwards.
+                </>
+              ) : (
+                <>
+                  Change <span className="font-medium text-foreground">{memberName}</span>&rsquo;s role from{" "}
+                  <span className="font-medium text-foreground capitalize">{currentRole}</span> to{" "}
+                  <span className="font-medium text-foreground">{roleLabel}</span>?
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+
+        {isTransfer && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              To confirm, type this member&rsquo;s email (or full name) exactly:
+            </p>
+            <div className="px-3 py-2 rounded-lg bg-muted/60 border border-border">
+              <code className="text-xs font-mono select-all break-all">{memberEmail}</code>
+            </div>
+            <input
+              autoFocus
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={memberEmail}
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-destructive"
+            />
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            onClick={onCancel}
+            disabled={pending}
+            className="px-3 py-1.5 rounded-lg border border-border text-sm hover:bg-accent transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!canSubmit}
+            className={cn(
+              "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+              isTransfer
+                ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
+            )}
+          >
+            {pending ? "Applying…" : isTransfer ? "Transfer ownership" : "Apply role"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RoleDropdown({
   currentRole,
   targetUserId,
+  memberName,
+  memberEmail,
   isOwner,
   orgId,
   onSuccess,
 }: {
   currentRole: string;
   targetUserId: string;
+  memberName: string;
+  memberEmail: string;
   isOwner: boolean;
   orgId: string;
   onSuccess: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [pendingRole, setPendingRole] = useState<string | null>(null);
   const qc = useQueryClient();
   const { activeOrg, setActiveOrg } = useAuthStore();
 
@@ -79,10 +195,12 @@ function RoleDropdown({
       if (data.role === "owner" && activeOrg?.id === orgId) {
         setActiveOrg({ ...activeOrg, role: "admin" });
       }
-      toast.success("Role updated");
+      toast.success(data.role === "owner" ? "Ownership transferred" : "Role updated");
+      setPendingRole(null);
       onSuccess();
     },
     onError: (err: unknown) => {
+      // Keep the modal open so the admin can retry or cancel after seeing the error.
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       toast.error(msg || "Failed to update role");
     },
@@ -94,38 +212,55 @@ function RoleDropdown({
   });
 
   return (
-    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
-      <DropdownMenu.Trigger asChild>
-        <button className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium bg-accent text-muted-foreground hover:bg-accent/80 transition-colors">
-          <RoleBadge role={currentRole} />
-          <ChevronDown className="w-2.5 h-2.5 -ml-1" />
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          side="bottom"
-          align="end"
-          sideOffset={4}
-          className="z-50 min-w-[200px] rounded-xl border border-border bg-card shadow-xl overflow-hidden p-1"
-        >
-          {availableRoles.map((r) => (
-            <DropdownMenu.Item
-              key={r.value}
-              className={cn(
-                "flex flex-col px-3 py-2 rounded-lg cursor-pointer outline-none transition-colors",
-                r.value === currentRole ? "bg-accent/60" : "hover:bg-accent"
-              )}
-              onClick={() => {
-                if (r.value !== currentRole) roleMutation.mutate(r.value);
-              }}
-            >
-              <span className="text-xs font-medium">{r.label}</span>
-              <span className="text-[10px] text-muted-foreground">{r.description}</span>
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+    <>
+      <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+        <DropdownMenu.Trigger asChild>
+          <button className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium bg-accent text-muted-foreground hover:bg-accent/80 transition-colors">
+            <RoleBadge role={currentRole} />
+            <ChevronDown className="w-2.5 h-2.5 -ml-1" />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            side="bottom"
+            align="end"
+            sideOffset={4}
+            className="z-50 min-w-[200px] rounded-xl border border-border bg-card shadow-xl overflow-hidden p-1"
+          >
+            {availableRoles.map((r) => (
+              <DropdownMenu.Item
+                key={r.value}
+                className={cn(
+                  "flex flex-col px-3 py-2 rounded-lg cursor-pointer outline-none transition-colors",
+                  r.value === currentRole ? "bg-accent/60" : "hover:bg-accent"
+                )}
+                onClick={() => {
+                  if (r.value !== currentRole) {
+                    setPendingRole(r.value);
+                    setOpen(false);
+                  }
+                }}
+              >
+                <span className="text-xs font-medium">{r.label}</span>
+                <span className="text-[10px] text-muted-foreground">{r.description}</span>
+              </DropdownMenu.Item>
+            ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+
+      {pendingRole && (
+        <RoleChangeModal
+          memberName={memberName}
+          memberEmail={memberEmail}
+          currentRole={currentRole}
+          newRole={pendingRole}
+          pending={roleMutation.isPending}
+          onCancel={() => { if (!roleMutation.isPending) setPendingRole(null); }}
+          onConfirm={() => roleMutation.mutate(pendingRole)}
+        />
+      )}
+    </>
   );
 }
 
@@ -606,6 +741,8 @@ export default function OrgSettingsPage() {
                   <RoleDropdown
                     currentRole={m.role}
                     targetUserId={m.user_id}
+                    memberName={m.full_name}
+                    memberEmail={m.email}
                     isOwner={org.is_owner}
                     orgId={currentOrgId!}
                     onSuccess={() => {}}
