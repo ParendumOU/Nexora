@@ -1,13 +1,68 @@
 from sqlalchemy import text
+import asyncio
 import logging
+from pathlib import Path
 
 from src.core.database import engine, Base
 from src.models import *  # noqa: F401, F403
 
 logger = logging.getLogger(__name__)
 
+# Fixed application-wide Postgres advisory lock key used to serialize schema
+# bring-up across multiple uvicorn workers. This lock is BLOCKING: every worker
+# waits on it so create_all / stamp / migrations run one worker at a time.
+# The value is arbitrary but must stay stable across deploys and must differ
+# from the seeding lock key in seeds.py so the two startup phases never contend.
+SCHEMA_ADVISORY_LOCK_KEY = 4927301001
 
-async def startup_database():
+
+def _alembic_config():
+    # This module is .../backend/src/core/lifespan/database.py, so the backend
+    # root (which holds alembic.ini and the alembic/ package) is four parents up.
+    from alembic.config import Config
+
+    backend_root = Path(__file__).resolve().parents[3]
+    # Build the Config WITHOUT pointing it at alembic.ini on purpose: when a
+    # config_file_name is set, alembic/env.py runs fileConfig() on it, which
+    # (disable_existing_loggers defaults True) would tear down the running app's
+    # loggers, including uvicorn's. We only need script_location; the database URL
+    # is read by alembic/env.py from get_settings().database_url, the same source
+    # core uses, so this behaves identically to a CLI `alembic upgrade head`.
+    cfg = Config()
+    cfg.set_main_option("script_location", str(backend_root / "alembic"))
+    cfg.set_main_option("version_path_separator", "os")
+    return cfg
+
+
+def _run_alembic_stamp_head():
+    from alembic import command
+
+    command.stamp(_alembic_config(), "head")
+
+
+def _run_alembic_upgrade_head():
+    from alembic import command
+
+    command.upgrade(_alembic_config(), "head")
+
+
+async def _is_alembic_managed(conn) -> bool:
+    reg = (await conn.execute(text("SELECT to_regclass('public.alembic_version')"))).scalar()
+    if reg is None:
+        return False
+    count = (await conn.execute(text("SELECT count(*) FROM alembic_version"))).scalar()
+    return (count or 0) > 0
+
+
+async def _has_existing_schema(conn) -> bool:
+    # A legacy pre-alembic deployment has core tables but no alembic_version row.
+    # `users` is the canonical always-present table, so its existence before
+    # create_all distinguishes a legacy schema from a truly fresh database.
+    reg = (await conn.execute(text("SELECT to_regclass('public.users')"))).scalar()
+    return reg is not None
+
+
+async def _create_all_and_patch():
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -158,3 +213,34 @@ async def startup_database():
                 await conn.execute(text(stmt))
         except Exception:
             pass
+
+
+async def startup_database():
+    # Serialize schema bring-up across workers with a blocking session advisory
+    # lock held on a dedicated connection for the whole operation.
+    async with engine.connect() as lock_conn:
+        await lock_conn.execute(
+            text("SELECT pg_advisory_lock(:k)"), {"k": SCHEMA_ADVISORY_LOCK_KEY}
+        )
+        try:
+            if await _is_alembic_managed(lock_conn):
+                # Managed schema: never touch create_all; just apply pending migrations.
+                logger.info("Database is Alembic-managed; applying pending migrations (upgrade head)")
+                await asyncio.to_thread(_run_alembic_upgrade_head)
+            else:
+                had_schema = await _has_existing_schema(lock_conn)
+                await _create_all_and_patch()
+                await asyncio.to_thread(_run_alembic_stamp_head)
+                if had_schema:
+                    logger.warning(
+                        "Stamped a pre-existing (legacy, non-Alembic) schema to the current "
+                        "Alembic head. Columns introduced by migrations added after this schema "
+                        "was first created may be missing; an operator may need to reconcile the "
+                        "schema manually. Fresh installs are unaffected."
+                    )
+                else:
+                    logger.info("Fresh database initialized (create_all) and stamped to Alembic head")
+        finally:
+            await lock_conn.execute(
+                text("SELECT pg_advisory_unlock(:k)"), {"k": SCHEMA_ADVISORY_LOCK_KEY}
+            )
