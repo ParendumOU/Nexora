@@ -9,15 +9,20 @@ RUN corepack enable && corepack prepare pnpm@9 --activate
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# ─── Development ───────────────────────────────────────────────
-FROM deps AS dev
+# ─── Source (deps + app source, not built) ────────────────────
+# Published as nexora-frontend-src so downstream products (NexoraCloud)
+# can layer their own pages on top and run their own build, without needing
+# the core source tree checked out.
+FROM deps AS source
 COPY . .
+
+# ─── Development ───────────────────────────────────────────────
+FROM source AS dev
 EXPOSE 3000
 CMD ["pnpm", "run", "dev"]
 
 # ─── Builder ───────────────────────────────────────────────────
-FROM deps AS builder
-COPY . .
+FROM source AS builder
 RUN pnpm run build
 
 # ─── Production runner ─────────────────────────────────────────

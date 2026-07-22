@@ -1,0 +1,108 @@
+name: Publish images
+
+# Builds and publishes the public core images to GHCR on every GitHub Release
+# (and on demand via workflow_dispatch). These images are what downstream
+# products consume instead of building the core source tree:
+#   - nexora-backend        (runtime)  -> used directly by OSS self-host and NexoraCloud
+#   - nexora-frontend       (runner)   -> used by OSS self-host
+#   - nexora-frontend-src   (source)   -> base image NexoraCloud CI builds its frontend on top of
+#
+# Public repos get free Actions minutes and free GHCR storage. The built-in
+# GITHUB_TOKEN can push packages when `packages: write` is granted below.
+#
+# One-time manual step after the first successful run: in the ParendumOU org
+# package settings, set nexora-backend / nexora-frontend / nexora-frontend-src
+# visibility to Public (GHCR packages are created Private by default).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (without leading v, e.g. 1.2.0)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: parendumou
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            V="${{ github.event.release.tag_name }}"
+          else
+            V="${{ github.event.inputs.version }}"
+          fi
+          V="${V#v}"
+          if [ -z "$V" ]; then echo "empty version"; exit 1; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Publishing core images for version $V"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Backend (runtime)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          target: runtime
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/nexora-backend:${{ steps.ver.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/nexora-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Frontend (runner, OSS self-host)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          target: runner
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/nexora-frontend:${{ steps.ver.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/nexora-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Frontend source (NexoraCloud build base)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          target: source
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/nexora-frontend-src:${{ steps.ver.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/nexora-frontend-src:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Core images published to GHCR"
+            echo ""
+            echo "- \`ghcr.io/${OWNER}/nexora-backend:${{ steps.ver.outputs.version }}\`"
+            echo "- \`ghcr.io/${OWNER}/nexora-frontend:${{ steps.ver.outputs.version }}\`"
+            echo "- \`ghcr.io/${OWNER}/nexora-frontend-src:${{ steps.ver.outputs.version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
