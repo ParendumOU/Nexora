@@ -10,6 +10,11 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.26.1
+
+- First-boot database setup is now deterministic and Alembic-consistent. A fresh instance creates the schema and is stamped to the current migration head; an existing instance applies only the pending migrations. Running the migration step after boot is a clean no-op instead of failing with an already-exists error.
+- Startup seeding is single-flight across workers, so multi-worker deployments no longer log duplicate-key warnings while the built-in agents, schedules and marketplace items are seeded.
+
 ## 1.26.0
 
 - Web sign-in for terminal-onboarded members is now enabled by an owner or admin, never by the member. The Organization members list shows who is terminal only and offers Enable web sign-in, which generates a password and shows it once to hand over. Re-running it resets the password.
