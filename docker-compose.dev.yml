@@ -4,7 +4,6 @@ services:
       target: dev
     volumes:
       - ./backend:/app
-      - /var/run/docker.sock:/var/run/docker.sock
       - workspace_data:/workspaces
     environment:
       ENVIRONMENT: development

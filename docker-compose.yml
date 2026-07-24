@@ -38,6 +38,62 @@ services:
     networks:
       - internal
 
+  # ─── Docker socket proxy (security hardening) ──────────────────
+  # The ONLY service that touches the host Docker socket. Agents spawn sandbox
+  # containers (shell_run `docker ...`, docker_run/build/ps/logs, `docker compose
+  # up`), and the docker CLI honors DOCKER_HOST, so backend/runner point at this
+  # proxy over TCP on the internal network instead of mounting the raw socket. An
+  # escaped agent then gets a locked-down subset of the Docker API, not host root.
+  # Socket is mounted read-only (prevents tampering with the socket file; does NOT
+  # make the API read-only; that is what the allowlist below does). No host port,
+  # not behind nginx: reachable only from the internal compose network.
+  # Full allow/deny policy + residual: SETUP.md "Docker socket hardening".
+  docker-proxy:
+    image: wollomatic/socket-proxy:1.12.3
+    restart: unless-stopped
+    # Run as root so it can open the host socket portably across hosts (Docker
+    # Desktop and Linux map the socket's owning group differently). It stays
+    # contained: cap_drop ALL + no-new-privileges + read-only rootfs, and it only
+    # holds a TCP listener + the socket. On a fixed Linux host you MAY instead pin
+    # user: "65534:<docker-gid>" to run unprivileged in the docker group.
+    user: "0:0"
+    read_only: true
+    mem_limit: 64m
+    pids_limit: 64
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - -loglevel=info
+      - -listenip=0.0.0.0
+      - -allowfrom=0.0.0.0/0
+      # Bind-mount source allowlist (parses the container-create body): a bind mount
+      # may only source from the agent workspace. Blocks `-v /:/host`, mounting the
+      # docker socket back in, `/etc`, host secrets, etc. Named/anonymous volumes are
+      # unaffected (only host-path binds are checked), so compose volumes still work.
+      # Override AGENT_BIND_ROOT when the workspace is a named volume: set it to the
+      # volume's host path (docker volume inspect ... -> Mountpoint, e.g.
+      # /var/lib/docker/volumes/<project>_workspace_data/_data) so agent sandboxes can
+      # bind the real workspace. Default /workspaces fits host-bind workspace deploys;
+      # the builtin docker_run tool adds no bind mount, so it works either way.
+      - -allowbindmountfrom=${AGENT_BIND_ROOT:-/workspaces}
+      # Read/inspect (GET): version negotiation + containers/images/networks/volumes +
+      # exec status. Denies /secrets, /configs, /swarm, /nodes, /services, /tasks,
+      # /system/df, /distribution by omission (default-deny).
+      - -allowGET=(/v1\.[0-9]+)?/(_ping|version|info|events.*|containers.*|images.*|networks.*|volumes.*|exec.*)
+      - -allowHEAD=(/v1\.[0-9]+)?/_ping
+      # Create/run/build (POST): container lifecycle + exec + image pull/build +
+      # compose network/volume create. Denies POST to /swarm, /secrets, /configs,
+      # /plugins, /services, /nodes, /commit, /session, /grpc by omission.
+      - -allowPOST=(/v1\.[0-9]+)?/(containers/.*|exec/.*|images/.*|build.*|networks/.*|volumes/.*)
+      # Cleanup (DELETE): `--rm` containers, image/network/volume prune.
+      - -allowDELETE=(/v1\.[0-9]+)?/(containers/.*|images/.*|networks/.*|volumes/.*)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - internal
+
   # ─── Backend ───────────────────────────────────────────────────
   backend:
     build:
@@ -54,7 +110,14 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUN_QUEUE_ENABLED: ${RUN_QUEUE_ENABLED:-false}
-      DOCKER_HOST: unix:///var/run/docker.sock
+      # Agents drive Docker through the filtering docker-proxy (see the docker-proxy
+      # service + SETUP.md "Docker socket hardening"), never the raw host socket. The
+      # docker CLI honors DOCKER_HOST, so repointing it here is the whole lever.
+      DOCKER_HOST: tcp://docker-proxy:2375
+      # Force the legacy builder: BuildKit needs the /session + /grpc endpoints (a
+      # hijacked bidirectional stream) which the proxy does not expose. The classic
+      # builder uses POST /build, which the proxy allows.
+      DOCKER_BUILDKIT: "0"
       AUTH_PROVIDERS_DIR: /auth_providers
       BRAINDUMP_URL: ${BRAINDUMP_URL:-}
       BRAINDUMP_USERNAME: ${BRAINDUMP_USERNAME:-}
@@ -68,7 +131,6 @@ services:
     volumes:
       - ./backend:/app
       - ../:/workspace-root
-      - /var/run/docker.sock:/var/run/docker.sock
       - workspace_data:/workspaces
       - auth_providers_data:/auth_providers
       - uploads_data:/app/uploads
@@ -77,6 +139,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      docker-proxy:
+        condition: service_started
     networks:
       - internal
     healthcheck:
@@ -105,7 +169,14 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RUN_QUEUE_ENABLED: ${RUN_QUEUE_ENABLED:-false}
-      DOCKER_HOST: unix:///var/run/docker.sock
+      # Agents drive Docker through the filtering docker-proxy (see the docker-proxy
+      # service + SETUP.md "Docker socket hardening"), never the raw host socket. The
+      # docker CLI honors DOCKER_HOST, so repointing it here is the whole lever.
+      DOCKER_HOST: tcp://docker-proxy:2375
+      # Force the legacy builder: BuildKit needs the /session + /grpc endpoints (a
+      # hijacked bidirectional stream) which the proxy does not expose. The classic
+      # builder uses POST /build, which the proxy allows.
+      DOCKER_BUILDKIT: "0"
       AUTH_PROVIDERS_DIR: /auth_providers
       BRAINDUMP_URL: ${BRAINDUMP_URL:-}
       BRAINDUMP_USERNAME: ${BRAINDUMP_USERNAME:-}
@@ -119,7 +190,6 @@ services:
     volumes:
       - ./backend:/app
       - ../:/workspace-root
-      - /var/run/docker.sock:/var/run/docker.sock
       - workspace_data:/workspaces
       - auth_providers_data:/auth_providers
       - uploads_data:/app/uploads
@@ -128,6 +198,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      docker-proxy:
+        condition: service_started
     networks:
       - internal
 

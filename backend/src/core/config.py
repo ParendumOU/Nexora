@@ -77,7 +77,13 @@ class Settings(BaseSettings):
     upload_dir: str = "/app/uploads"
     max_upload_size_mb: int = 100
 
-    # Docker
+    # Docker. Agents spawn sandbox containers via the docker CLI, which reads the
+    # DOCKER_HOST env var directly (this field mirrors it, env wins). In the Docker
+    # Compose deployment DOCKER_HOST points at the filtering docker-proxy
+    # (tcp://docker-proxy:2375) and the raw host socket is NOT mounted into
+    # backend/runner (see SETUP.md "Docker socket hardening"). This unix-socket default only
+    # applies when running the app directly on a host (docker-compose.data.yml mode),
+    # where the CLI talks to the local daemon.
     docker_host: str = "unix:///var/run/docker.sock"
     workspace_base: str = "/workspaces"
     sandbox_image: str = "python:3.12-slim"
