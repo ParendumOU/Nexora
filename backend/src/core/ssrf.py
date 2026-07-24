@@ -21,9 +21,26 @@ def _ip_is_blocked(ip: str) -> bool:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return True  # unparseable -> block
+    # Unwrap IPv6 forms that embed an IPv4 address so a mapped/tunnelled loopback
+    # or private target can't slip past the classification below
+    # (e.g. ::ffff:127.0.0.1, 6to4 2002::/16, Teredo 2001::/32).
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
+    else:
+        sixtofour = getattr(addr, "sixtofour", None)
+        if sixtofour is not None:
+            addr = sixtofour
+        else:
+            teredo = getattr(addr, "teredo", None)
+            if teredo is not None:
+                addr = teredo[1]  # (server, client) -> the client endpoint
     return (
         addr.is_private or addr.is_loopback or addr.is_link_local
         or addr.is_reserved or addr.is_multicast or addr.is_unspecified
+        # Catch-all: anything IANA does not consider globally reachable
+        # (CGNAT 100.64/10, benchmarking 198.18/15, 192.0.0/24, IPv6 ULA, ...).
+        or not addr.is_global
     )
 
 
