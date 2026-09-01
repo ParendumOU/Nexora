@@ -188,4 +188,10 @@ built? Open an issue or join us at **[nexora.parendum.com](https://nexora.parend
 
 ## Star history
 
-[![Star History Chart](https://api.star-history.com/chart?repos=ParendumOU/Nexora&type=date&legend=top-left&sealed_token=B_IDNRqHPlJDQIegNEQ6spzHl2UXw_yHXIEVAE8BqCF_zD1jwIr4a8k81bQCc5o2SriTdEnJGepVwbmkMZHAI9mhkfqIPeFPdXMMKNVElWVyj-a3IlbHfeZC6-kCEeKf8Hv06tGopP9kRxMMqQ38oaLGJHlW1MbxazgSykvMLmcrpGA9bezCW3A5T5DD)](https://www.star-history.com/?repos=ParendumOU%2FNexora&type=date&legend=top-left)
+<a href="https://www.star-history.com/?repos=ParendumOU%2FNexora&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ParendumOU/Nexora&type=date&theme=dark&legend=top-left&sealed_token=6P-EGNJypxyjAu5k_8adBY0mITbuf8SHRnrutyrYUiRNnfdsFYgH9W62k8o3MC5xv8h6ykQD36H-vC9JwoUNE8fovq27h62dxyJxWLTJhn14byvxQqxnS4o1jhoiYi1XgEaFfTP6JNZgfEsa9Q7XhT_76k5zPsQwBCiCe8tNgalktHErQiypWONeKxOY" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ParendumOU/Nexora&type=date&legend=top-left&sealed_token=6P-EGNJypxyjAu5k_8adBY0mITbuf8SHRnrutyrYUiRNnfdsFYgH9W62k8o3MC5xv8h6ykQD36H-vC9JwoUNE8fovq27h62dxyJxWLTJhn14byvxQqxnS4o1jhoiYi1XgEaFfTP6JNZgfEsa9Q7XhT_76k5zPsQwBCiCe8tNgalktHErQiypWONeKxOY" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ParendumOU/Nexora&type=date&legend=top-left&sealed_token=6P-EGNJypxyjAu5k_8adBY0mITbuf8SHRnrutyrYUiRNnfdsFYgH9W62k8o3MC5xv8h6ykQD36H-vC9JwoUNE8fovq27h62dxyJxWLTJhn14byvxQqxnS4o1jhoiYi1XgEaFfTP6JNZgfEsa9Q7XhT_76k5zPsQwBCiCe8tNgalktHErQiypWONeKxOY" />
+ </picture>
+</a>
