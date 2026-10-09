@@ -10,6 +10,13 @@ The release CI extracts the section matching the pushed tag as the GitHub Releas
 > (`white-space: pre-line`), so anything fancy shows up as literal junk; plain `-` bullets
 > are the only thing that looks right. Keep each line short and direct.
 
+## 1.27.0
+
+- Claude accounts now show their plan usage in Settings, Accounts: a 5 hour bar and a weekly bar with the percentage used and when each window resets.
+- An account whose 5 hour or weekly quota is exhausted is skipped until that window resets, so a turn no longer fails first and then fails over.
+- A usage or session limit reported by the Claude CLI is now treated as a rate limit with the cooldown taken from the reset time it prints. Before, it surfaced as a generic error or as the answer itself.
+- New endpoint GET /api/providers/{id}/usage returns the 5 hour and weekly usage of an account.
+
 ## 1.26.1
 
 - First-boot database setup is now deterministic and Alembic-consistent. A fresh instance creates the schema and is stamped to the current migration head; an existing instance applies only the pending migrations. Running the migration step after boot is a clean no-op instead of failing with an already-exists error.

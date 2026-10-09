@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils";
 import {
   Plus, Loader2, Zap, CheckCircle2, AlertCircle, Key, Pencil, Trash2, RotateCcw, Clock,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { providersApi, type ProviderUsageWindow } from "@/lib/api";
 import { ProviderItem, providerDef } from "./provider-definitions";
 
 function fmtRemaining(seconds: number): string {
@@ -37,6 +39,48 @@ function CoolingBadge({ p }: { p: ProviderItem }) {
       <Clock className="w-2.5 h-2.5" />
       Resets in {fmtRemaining(remaining)}
     </span>
+  );
+}
+
+function fmtReset(iso: string | null): string {
+  if (!iso) return "";
+  const secs = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  if (secs <= 0) return "";
+  if (secs >= 86400) return `resets in ${Math.floor(secs / 86400)}d ${Math.floor((secs % 86400) / 3600)}h`;
+  return `resets in ${fmtRemaining(secs)}`;
+}
+
+function UsageBar({ label, w }: { label: string; w: ProviderUsageWindow }) {
+  const pct = Math.min(100, Math.max(0, w.percent));
+  const tone = pct >= 90 ? "bg-red-400" : pct >= 70 ? "bg-amber-400" : "bg-emerald-400";
+  return (
+    <div className="flex items-center gap-2 text-[10px] text-muted-foreground" title={`${label}: ${pct}% used ${fmtReset(w.resets_at)}`}>
+      <span className="w-12 shrink-0">{label}</span>
+      <div className="flex-1 h-1 rounded-full bg-border overflow-hidden">
+        <div className={cn("h-full rounded-full", tone)} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="w-8 text-right tabular-nums">{pct}%</span>
+      <span className="w-24 shrink-0 truncate">{fmtReset(w.resets_at)}</span>
+    </div>
+  );
+}
+
+// 5-hour session + weekly plan usage of a Claude OAuth account. Hidden when unavailable.
+function UsageBars({ p }: { p: ProviderItem }) {
+  const { data } = useQuery({
+    queryKey: ["provider-usage", p.id],
+    queryFn: () => providersApi.usage(p.id).then((r) => r.data),
+    enabled: p.provider_type === "claude" && p.is_active,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: false,
+  });
+  if (!data?.supported) return null;
+  return (
+    <div className="mt-1.5 space-y-1">
+      {data.session && <UsageBar label="5 h" w={data.session} />}
+      {data.weekly && <UsageBar label="Weekly" w={data.weekly} />}
+    </div>
   );
 }
 
@@ -154,6 +198,7 @@ function AccountsTab({
                             <span className="text-muted-foreground/60 font-mono truncate max-w-[120px]">· {p.model_name}</span>
                           )}
                         </p>
+                        <UsageBars p={p} />
                       </div>
                       {p.is_active ? (
                         <>

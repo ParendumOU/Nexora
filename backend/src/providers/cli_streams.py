@@ -174,6 +174,7 @@ async def _stream_claude_cli(provider: Provider, messages: list[dict], **kw) -> 
     import tempfile
 
     from src.core.config import get_settings
+    from src.providers import claude_usage
     from src.providers.cli_observability import claude_hooks, registry
 
     home_dir = provider.auth_path
@@ -291,6 +292,14 @@ async def _stream_claude_cli(provider: Provider, messages: list[dict], **kw) -> 
                         }
                     if not yielded:
                         text = data.get("result", "")
+                        # The CLI reports an exhausted plan as an error result whose text is the
+                        # limit message: raise it as a rate limit instead of yielding it as an answer.
+                        if data.get("is_error") and text and claude_usage.is_limit_error(text):
+                            claude_usage.invalidate(home_dir)
+                            raise RateLimitError(
+                                f"Claude CLI: {str(text)[:200]}",
+                                cooldown_seconds=claude_usage.cooldown_from_text(text),
+                            )
                         if text and text != "undefined":
                             yield text
 
@@ -302,6 +311,12 @@ async def _stream_claude_cli(provider: Provider, messages: list[dict], **kw) -> 
             stderr_text = (await proc.stderr.read()).decode("utf-8", errors="replace").strip()
             logger.error(f"Claude CLI exit {proc.returncode}: {stderr_text[:500]}")
             if not yielded:
+                if claude_usage.is_limit_error(stderr_text):
+                    claude_usage.invalidate(home_dir)
+                    raise RateLimitError(
+                        f"Claude CLI: {stderr_text[:200]}",
+                        cooldown_seconds=claude_usage.cooldown_from_text(stderr_text),
+                    )
                 raise ProviderError(f"Claude CLI error (exit {proc.returncode}): {stderr_text[:300]}")
 
     except ProviderError:

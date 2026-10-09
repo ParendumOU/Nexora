@@ -419,6 +419,44 @@ class ProviderHealthResponse(BaseModel):
     error: str | None
 
 
+class ProviderUsageWindow(BaseModel):
+    percent: int
+    resets_at: str | None = None
+
+
+class ProviderUsageResponse(BaseModel):
+    supported: bool
+    session: ProviderUsageWindow | None = None
+    weekly: ProviderUsageWindow | None = None
+
+
+@router.get("/{provider_id}/usage", response_model=ProviderUsageResponse)
+async def provider_usage(
+    provider_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Plan usage of an OAuth account: the 5-hour session and the weekly window (Claude only for now).
+    ``supported`` is False when the account has no readable usage (other providers, usage endpoint down)."""
+    org_id = await get_active_org_id(current_user, db)
+    provider = (await db.execute(
+        select(Provider).where(Provider.id == provider_id, Provider.org_id == org_id)
+    )).scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    from src.services.provider_policy import usable_provider_ids
+    allowed = await usable_provider_ids(current_user, org_id, db)
+    if allowed is not None and provider.id not in allowed:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    if provider.provider_type != "claude" or not provider.auth_path:
+        return ProviderUsageResponse(supported=False)
+    from src.providers import claude_usage
+    usage = await claude_usage.get_usage(provider.auth_path)
+    if not usage or not (usage.get("session") or usage.get("weekly")):
+        return ProviderUsageResponse(supported=False)
+    return ProviderUsageResponse(supported=True, session=usage.get("session"), weekly=usage.get("weekly"))
+
+
 @router.post("/{provider_id}/health", response_model=ProviderHealthResponse)
 async def provider_health(
     provider_id: str,

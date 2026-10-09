@@ -834,6 +834,24 @@ async def stream_response(
                 yield _s
             continue
 
+        # Claude OAuth accounts: the plan's 5-hour / weekly window at 100% means the turn would
+        # fail, so cool the account until that window resets and move on (best-effort; an
+        # unreachable usage endpoint just returns None and the account is tried as usual).
+        if not _ignore_cooldown and provider.provider_type == "claude" and provider.auth_path:
+            from src.providers import claude_usage
+            _ex = claude_usage.exhausted_seconds(await claude_usage.get_usage(provider.auth_path))
+            if _ex:
+                logger.info(f"Provider {provider.name} plan quota exhausted, cooling {_ex}s")
+                await set_cooling(provider.id, _ex)
+                record_provider_failure(provider.id, "plan usage limit reached (5h/weekly)",
+                                        rate_limited=True, cooldown_seconds=_ex)
+                _skipped_cooling += 1
+                _next_avail.append((f"{provider.name} · {step_model or provider.model_name or 'default'}", float(_ex)))
+                _s = _status(f"{provider.name} plan limit reached — skipping")
+                if _s:
+                    yield _s
+                continue
+
         stream_fn = PROVIDER_STREAMS.get(provider.provider_type)
         if not stream_fn:
             logger.warning(f"Unknown provider type: {provider.provider_type}")

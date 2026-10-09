@@ -863,6 +863,17 @@ export interface ProviderAssignment {
   created_by_user_id: string | null;
 }
 
+export interface ProviderUsageWindow {
+  percent: number;
+  resets_at: string | null;
+}
+
+export interface ProviderUsage {
+  supported: boolean;
+  session: ProviderUsageWindow | null;
+  weekly: ProviderUsageWindow | null;
+}
+
 export const providersApi = {
   list: () => api.get("/providers"),
   create: (data: object) => api.post("/providers", data),
@@ -876,6 +887,8 @@ export const providersApi = {
     api.post(`/providers/${providerId}/assign`, { user_id: userId }),
   restore: (id: string) => api.patch(`/providers/${id}/restore`),
   purge: (id: string) => api.delete(`/providers/${id}/purge`),
+  // Plan usage of an OAuth account: 5-hour session + weekly window (Claude only; supported=false otherwise).
+  usage: (id: string) => api.get<ProviderUsage>(`/providers/${id}/usage`),
   chains: () => api.get("/providers/chains"),
   createChain: (data: { name: string; steps: Array<{ provider_type: string; model_name?: string | null }>; is_default?: boolean }) =>
     api.post("/providers/chains", data),
